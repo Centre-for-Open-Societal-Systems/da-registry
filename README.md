@@ -20,8 +20,13 @@ follows the same build model as the farmer registry.
 | `docker/local-dev/` | Config for the local stack (Keycloak, IAM, AWE, ID generator, Postgres, geo seed) |
 | `import-templates/` | Blank CSV and Excel templates for bulk import |
 | `docker-compose.yml` | Self-contained local stack |
-| `helm/openg2p-da-registry/` | Helm overlay on the `openg2p-registry` chart (not deployable yet, see TODOs) |
-| `Jenkinsfile` | CI: build and push images only; no deploy stage yet |
+| `helm/openg2p-da-registry/` | Helm overlay on the `openg2p-registry` chart; `values-dev.yaml` holds the dev cluster's hosts and commons endpoints |
+| `ci/` | `deploy-da-dev.sh` (the deploy the Jenkinsfile runs) and `k8s/` (namespace, CI service account, DevOps one-time setup) |
+| `Jenkinsfile` | CI: build and push the five images; on `develop`, deploy to the dev cluster (namespace `da`) |
+
+How the dev deployment works, the five images, the DevOps prerequisites and
+the checks: [docs/deployment-guide-pavan.md](docs/deployment-guide-pavan.md)
+and [ci/k8s/README.md](ci/k8s/README.md).
 
 ## The DA register
 
@@ -143,10 +148,11 @@ Platform images come from Docker Hub (`openg2p/openg2p-registry-*`), pinned to
 - Master Data access: on 1.2 the registry services read geo and code lists over the
   Master Data API with a client-credentials token (`*_MASTER_DATA_API_URL`, `_TOKEN_URL`,
   `_CLIENT_ID`, `_CLIENT_SECRET`; locally the `da-registry-backend` Keycloak client). Without
-  it the staff form saves DAs with empty Region / Zone / Woreda / Kebele names. In Helm the
-  subchart sets these from `global.masterDataApiUrl` and `global.pmSeedClientId`; the DA
-  import enricher also reads the Master Data database, so the celery worker gets its
-  `*_MASTER_DATA_DB_*` settings in `values.yaml`.
+  it the staff form saves DAs with empty Region / Zone / Woreda / Kebele names. The 1.2
+  subchart does not set these for the pods, so `values.yaml` sets them for the staff API,
+  partner API and celery worker (URL from `global.masterDataApiUrl`, token as the
+  release's own `da-registry-staff-portal` client); the DA import enricher also reads the
+  Master Data database, so the celery worker gets its `*_MASTER_DATA_DB_*` settings there too.
 
 When the version moves, re-check:
 

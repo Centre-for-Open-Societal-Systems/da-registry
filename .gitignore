@@ -186,8 +186,11 @@ Desktop.ini
 /docker/adapters.requirements.txt
 /docker/scripts/_service_env.sh
 /docker/scripts/.env
-# da-registry-dashboard-api, cloned by the Jenkinsfile
+# Stale: there is no dashboard-api clone in this repo; kept harmless.
 /.build/
+# The ECR pull token the Jenkinsfile mints for the deploy node.
+/.ecr-token
+/.ecr-registry
 
 # ---------------------------------------------------------------------------
 # Helm artifacts

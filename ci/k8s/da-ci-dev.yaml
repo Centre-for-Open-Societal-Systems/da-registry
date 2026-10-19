@@ -1,0 +1,74 @@
+# The da namespace on the dev cluster (RKE2 at https://10.0.1.58:6443) and the
+# da-ci service account the Jenkinsfile's Deploy stage deploys it with.
+#
+# Apply ONCE, as a cluster admin (e.g. the kubectl shell in Rancher):
+#
+#   kubectl apply -f ci/k8s/da-ci-dev.yaml
+#
+# then build the da-dev-kubeconfig Jenkins credential from it with
+# ci/k8s/make-da-ci-kubeconfig.sh. The rest of the one-time setup is in
+# ci/k8s/README.md.
+#
+# da-ci gets the built-in `admin` role in da and nothing wider, plus the Istio
+# routing the chart creates, which `admin` does not cover. It cannot create
+# namespaces, which is why da is declared here. Shaped after the crop
+# registry's ci/k8s/crop-ci-dev.yaml.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: da
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: da-ci
+  namespace: da
+---
+# A long-lived token for the kubeconfig (Kubernetes no longer creates one).
+apiVersion: v1
+kind: Secret
+metadata:
+  name: da-ci-token
+  namespace: da
+  annotations:
+    kubernetes.io/service-account.name: da-ci
+type: kubernetes.io/service-account-token
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: da-ci-admin
+  namespace: da
+subjects:
+  - kind: ServiceAccount
+    name: da-ci
+    namespace: da
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ci-deploy-istio
+  namespace: da
+rules:
+  - apiGroups: ["networking.istio.io", "security.istio.io"]
+    resources: ["*"]
+    verbs: ["*"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: da-ci-istio
+  namespace: da
+subjects:
+  - kind: ServiceAccount
+    name: da-ci
+    namespace: da
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: ci-deploy-istio
