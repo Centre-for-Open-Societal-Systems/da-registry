@@ -1,0 +1,364 @@
+"""Turn one row of a DA import file (CSV / XLSX) into DA register fields.
+
+The platform's import worker hands every row over as {header: string}. This
+enricher, named in incoming_model_semantic_patterns.raw_payload_enricher_class,
+runs before the Jinja template (import_file_to_openg2p_da.json.j2) and:
+
+- maps the file's column headers to DA field names, tolerating case, extra
+  spaces, a trailing "*" and a few common spellings;
+- turns labels into codes ("Diploma" -> DIPLOMA, "Mr." -> MR);
+- cleans what spreadsheets do to numbers (a lost leading 0 on a phone number,
+  "4.0" for a month, "2024-01-05 00:00:00" for a date);
+- resolves Region / Zone / Woreda / Kebele names to the Master Data kebele and
+  builds the same geo hierarchy the intake form's geo widget saves.
+
+A row that cannot be used raises ValueError with a readable message; the
+platform records it against that row and carries on with the rest of the file.
+Format rules (Fayda ID, phone, email, age) are checked afterwards by the DA
+domain service, the same as for the web intake form.
+
+The platform calls enrich() synchronously from the transformation worker, so it
+must stay a plain def.
+"""
+
+import logging
+import os
+import re
+from datetime import datetime
+from typing import Dict
+
+import psycopg2
+from openg2p_registry_core.interfaces import G2PPayloadEnricherInterface
+from sqlalchemy.orm import Session
+
+from ...geo_codes import geo_codes
+
+_logger = logging.getLogger("g2p-payload-enricher-service")
+
+SOURCE_CSV_IMPORT = "CSV_IMPORT"
+
+# Accepted header spellings, after normalising (lower case, single spaces, no "*").
+COLUMN_ALIASES = {
+    "prefix": ("salutation", "title"),
+    "first_name": ("name", "first name", "given name"),
+    "middle_name": ("father name", "father's name", "fathers name"),
+    "last_name": ("grandfather name", "grandfather's name", "grandfathers name", "grand father name"),
+    "foundational_id": ("fayda id", "fayda id (fin)", "fayda fin", "fin", "fayda"),
+    "gender": ("gender", "sex"),
+    "marital_status": ("marital status",),
+    "birth_month_ec": ("month of birth (ec)", "birth month (ec)", "month of birth", "birth month"),
+    "birth_year_ec": ("year of birth (ec)", "birth year (ec)", "year of birth", "birth year"),
+    "mobile_number": ("phone number", "phone", "mobile number", "mobile"),
+    "telegram_number": ("telegram number", "telegram"),
+    "alternate_number": ("alternate number", "alternate phone", "alternative number"),
+    "email": ("email", "email address", "e-mail"),
+    "education_level": ("education level", "education"),
+    "specialisation": ("specialisation", "specialization"),
+    "position": ("position", "designation"),
+    "joined_date": ("joining date", "joined date", "date of joining"),
+    "region": ("region",),
+    "zone": ("zone",),
+    "woreda": ("woreda",),
+    "kebele": ("kebele",),
+}
+_HEADER_TO_FIELD = {alias: field for field, aliases in COLUMN_ALIASES.items() for alias in aliases}
+
+# Code lists: code -> accepted spellings (the code itself is always accepted).
+CODE_LISTS = {
+    "prefix": {"MR": ("mr", "mr."), "MRS": ("mrs", "mrs."), "DR": ("dr", "dr.")},
+    "gender": {"MALE": ("male", "m"), "FEMALE": ("female", "f")},
+    "marital_status": {
+        "SINGLE": ("single",), "MARRIED": ("married",),
+        "DIVORCED": ("divorced",), "WIDOWED": ("widowed", "widow", "widower"),
+    },
+    "education_level": {
+        "CERTIFICATE": ("certificate",), "DIPLOMA": ("diploma",),
+        "DEGREE": ("degree", "bachelor", "bachelors", "bsc", "ba"),
+        "MASTERS": ("masters", "master", "msc", "ma"),
+    },
+    "specialisation": {
+        "CROP_PRODUCTION": ("crop production", "crop"), "LIVESTOCK": ("livestock",),
+        "NATURAL_RESOURCES": ("natural resources", "natural resource", "nrm"),
+        "AGRONOMY": ("agronomy",), "HORTICULTURE": ("horticulture",), "OTHER": ("other",),
+    },
+    "position": {
+        "DEVELOPMENT_AGENT": ("development agent", "da"),
+        "SENIOR_DA": ("senior da", "senior development agent"),
+    },
+}
+# How a code is named in an error message, where title case gets it wrong.
+CODE_DISPLAY = {"SENIOR_DA": "Senior DA"}
+
+CODE_LABELS = {
+    "prefix": "Salutation", "gender": "Gender", "marital_status": "Marital Status",
+    "education_level": "Education Level", "specialisation": "Specialisation", "position": "Position",
+}
+
+# Needed to place and identify a DA at all. Other blanks are left to the
+# approver; format checks still apply to whatever is filled in.
+IMPORT_REQUIRED = {
+    "first_name": "Name", "middle_name": "Father Name", "foundational_id": "Fayda ID",
+    "region": "Region", "zone": "Zone", "woreda": "Woreda", "kebele": "Kebele",
+}
+
+GEO_LEVELS = ("region", "zone", "woreda", "kebele")
+
+
+def _normalise_header(header) -> str:
+    text = str(header or "").replace("*", " ").strip().lower()
+    return re.sub(r"\s+", " ", text)
+
+
+def _clean(value) -> str:
+    return re.sub(r"\s+", " ", str(value if value is not None else "")).strip()
+
+
+def _code(field: str, value: str) -> str | None:
+    if not value:
+        return None
+    key = value.strip().lower()
+    for code, spellings in CODE_LISTS[field].items():
+        if key == code.lower() or key in spellings:
+            return code
+    allowed = ", ".join(CODE_DISPLAY.get(c, c.replace("_", " ").title()) for c in CODE_LISTS[field])
+    raise ValueError(f"{CODE_LABELS[field]} '{value}' is not one of: {allowed}")
+
+
+def _integer(value: str, label: str) -> int | None:
+    if not value:
+        return None
+    text = value[:-2] if value.endswith(".0") else value
+    if not text.isdigit():
+        raise ValueError(f"{label} '{value}' must be a whole number")
+    return int(text)
+
+
+def _digits(value: str) -> str | None:
+    """Fayda ID: digits only. A spreadsheet number may come back as "1234.0"."""
+    if not value:
+        return None
+    text = value[:-2] if value.endswith(".0") else value
+    return re.sub(r"[\s-]", "", text)
+
+
+def _phone(value: str) -> str | None:
+    if not value:
+        return None
+    text = re.sub(r"[\s()-]", "", value)
+    if text.endswith(".0"):
+        text = text[:-2]
+    # A phone typed into a numeric spreadsheet cell loses its leading 0.
+    if re.fullmatch(r"[1-9][0-9]{8}", text):
+        text = "0" + text
+    return text
+
+
+def _date(value: str, label: str) -> str | None:
+    if not value:
+        return None
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y"):
+        try:
+            return datetime.strptime(value, fmt).date().isoformat()
+        except ValueError:
+            continue
+    raise ValueError(f"{label} '{value}' must be a date like 2024-01-05 or 05/01/2024")
+
+
+class _MasterDataGeo:
+    """Resolves geo names against Master Data, reading its tables directly
+    with the worker's master-data DB settings (REGISTRY_CELERY_WORKERS_
+    MASTER_DATA_DB_*): the platform's geo service looks units up by id, and a
+    file names them."""
+
+    _conn = None
+
+    @classmethod
+    def _connection(cls):
+        if cls._conn is None or cls._conn.closed:
+            prefix = "REGISTRY_CELERY_WORKERS_MASTER_DATA_DB_"
+            cls._conn = psycopg2.connect(
+                host=os.environ.get(prefix + "HOSTNAME", "postgres"),
+                port=os.environ.get(prefix + "PORT", "5432"),
+                dbname=os.environ.get(prefix + "DBNAME", "master_data_db"),
+                user=os.environ.get(prefix + "USERNAME", "postgres"),
+                password=os.environ.get(prefix + "PASSWORD", ""),
+            )
+            cls._conn.autocommit = True
+        return cls._conn
+
+    @classmethod
+    def resolve(cls, names: Dict[str, str]) -> dict:
+        """names: {"region": .., "zone": .., "woreda": .., "kebele": ..}.
+        Walks the chain so a kebele name repeated in another woreda never
+        matches the wrong one."""
+        hierarchy, parent_id, trail = [], None, []
+        with cls._connection().cursor() as cur:
+            for level in GEO_LEVELS:
+                name = names[level]
+                cur.execute(
+                    """
+                    select v.level_value_id, v.level_value_mnemonic, l.level_id, l.level_mnemonic
+                    from g2p_geo_level_values v
+                    join g2p_geo_levels l on l.level_id = v.level_id
+                    where lower(l.level_mnemonic) = %s
+                      and (lower(v.level_value_mnemonic) = lower(%s) or lower(v.display_name) = lower(%s))
+                      and (%s::text is null or v.parent_level_value_id = %s)
+                    """,
+                    (level, name, name, parent_id, parent_id),
+                )
+                rows = cur.fetchall()
+                where = f" in {' / '.join(trail)}" if trail else ""
+                if not rows:
+                    raise ValueError(f"{level.title()} '{name}' not found{where}")
+                if len(rows) > 1:
+                    raise ValueError(f"{level.title()} '{name}' matches more than one place{where}")
+                value_id, mnemonic, level_id, level_mnemonic = rows[0]
+                hierarchy.append({
+                    "level": level_mnemonic, "level_id": level_id, "level_mnemonic": level_mnemonic,
+                    "level_value_id": value_id, "level_value_mnemonic": mnemonic,
+                })
+                trail.append(mnemonic)
+                parent_id = value_id
+        return {"hierarchy": hierarchy, "lowest_level_value_id": parent_id}
+
+    @classmethod
+    def resolve_by_id(cls, kebele_id: str) -> dict:
+        """Hierarchy for a Master Data kebele id (e.g. kebele-ET010101101001),
+        walking up its parents to the region."""
+        chain, current = [], kebele_id
+        with cls._connection().cursor() as cur:
+            while current:
+                cur.execute(
+                    """
+                    select v.level_value_id, v.level_value_mnemonic, v.parent_level_value_id,
+                           l.level_id, l.level_mnemonic
+                    from g2p_geo_level_values v
+                    join g2p_geo_levels l on l.level_id = v.level_id
+                    where v.level_value_id = %s
+                    """,
+                    (current,),
+                )
+                row = cur.fetchone()
+                if row is None:
+                    raise ValueError(f"Location '{current}' not found in Master Data")
+                value_id, mnemonic, parent, level_id, level_mnemonic = row
+                chain.append({
+                    "level": level_mnemonic, "level_id": level_id, "level_mnemonic": level_mnemonic,
+                    "level_value_id": value_id, "level_value_mnemonic": mnemonic,
+                })
+                current = parent
+        if (chain[0]["level_mnemonic"] or "").lower() != "kebele":
+            raise ValueError(f"Location '{kebele_id}' is a {chain[0]['level_mnemonic']}, not a kebele")
+        chain.reverse()
+        return {"hierarchy": chain, "lowest_level_value_id": kebele_id}
+
+
+def _build_da_record(row: Dict, source: str, geo: dict) -> Dict:
+    """Canonical DA fields (row keys are DA field names, values strings) ->
+    the record the intake template expects. Shared by every ingestion path."""
+    out = {
+        "prefix": _code("prefix", row.get("prefix")),
+        "first_name": row.get("first_name"),
+        "middle_name": row.get("middle_name"),
+        "last_name": row.get("last_name") or None,
+        "foundational_id": _digits(row.get("foundational_id")),
+        "gender": _code("gender", row.get("gender")),
+        "marital_status": _code("marital_status", row.get("marital_status")),
+        "birth_month_ec": _integer(row.get("birth_month_ec"), "Month of Birth (EC)"),
+        "birth_year_ec": _integer(row.get("birth_year_ec"), "Year of Birth (EC)"),
+        "mobile_number": _phone(row.get("mobile_number")),
+        "telegram_number": _phone(row.get("telegram_number")),
+        "alternate_number": _phone(row.get("alternate_number")),
+        "email": (row.get("email") or "").lower() or None,
+        "education_level": _code("education_level", row.get("education_level")),
+        "specialisation": _code("specialisation", row.get("specialisation")),
+        "position": _code("position", row.get("position")),
+        "joined_date": _date(row.get("joined_date"), "Joining Date"),
+        "source": source,
+        "upstream_reference": row.get("upstream_reference") or None,
+        "upstream_approved_by": row.get("upstream_approved_by") or None,
+    }
+    names = {entry["level_mnemonic"]: entry["level_value_mnemonic"] for entry in geo["hierarchy"]}
+    out.update({
+        "geo_lowest_level_value_id": geo["lowest_level_value_id"],
+        "geo_code_hierarchy_json": geo,
+        "region_name": names.get("region"),
+        "zone_name": names.get("zone"),
+        "woreda_name": names.get("woreda"),
+        "kebele_name": names.get("kebele"),
+        **geo_codes(geo),
+    })
+    return out
+
+
+class DAImportFileEnricherService(G2PPayloadEnricherInterface):
+    def enrich(self, data: Dict, session: Session) -> Dict:
+        row = {}
+        for header, value in (data or {}).items():
+            field = _HEADER_TO_FIELD.get(_normalise_header(header))
+            if field:
+                row[field] = _clean(value)
+
+        missing = [label for field, label in IMPORT_REQUIRED.items() if not row.get(field)]
+        if missing:
+            raise ValueError("Missing: " + ", ".join(missing))
+
+        geo = _MasterDataGeo.resolve({level: row[level] for level in GEO_LEVELS})
+        out = _build_da_record(row, SOURCE_CSV_IMPORT, geo)
+        _logger.info("DA import row enriched: Fayda ID %s, kebele %s", out["foundational_id"], out["kebele_name"])
+        return out
+
+
+# DA Services (Frappe) -> registry. Field names of `message.da` in the partner
+# ingestion request; docs/da-services-api-contract.md is the reference for
+# DA Services.
+DA_SERVICES_FIELDS = {
+    "salutation": "prefix", "first_name": "first_name", "father_name": "middle_name",
+    "grandfather_name": "last_name", "fayda_id": "foundational_id", "gender": "gender",
+    "marital_status": "marital_status", "birth_month_ec": "birth_month_ec",
+    "birth_year_ec": "birth_year_ec", "phone_number": "mobile_number",
+    "telegram_number": "telegram_number", "alternate_number": "alternate_number", "email": "email",
+    "education_level": "education_level", "specialisation": "specialisation", "position": "position",
+    "joining_date": "joined_date", "region": "region", "zone": "zone", "woreda": "woreda", "kebele": "kebele",
+}
+DA_SERVICES_SOURCES = {"WEB_INTAKE", "CSV_IMPORT"}
+DA_SERVICES_REQUIRED = {"first_name": "first_name", "middle_name": "father_name", "foundational_id": "fayda_id"}
+
+
+class DAServicesEnricherService(G2PPayloadEnricherInterface):
+    """A DA approved in DA Services (Frappe), sent through the partner API.
+
+    `data` is the request's `message`: {"reference_id", "source", "approved_by",
+    "da": {...}}. The location is `da.kebele_id` (Master Data id, preferred) or
+    `da.region/zone/woreda/kebele` names. The record then goes through the same
+    template, validation, duplicate guard and auto-approve as a file import.
+    """
+
+    def enrich(self, data: Dict, session: Session) -> Dict:
+        message = data or {}
+        da = message.get("da") or {}
+        if not isinstance(da, dict):
+            raise ValueError("message.da must be an object")
+        reference = _clean(message.get("reference_id"))
+        if not reference:
+            raise ValueError("Missing: reference_id")
+        source = _clean(message.get("source") or "WEB_INTAKE").upper()
+        if source not in DA_SERVICES_SOURCES:
+            raise ValueError(f"source '{source}' is not one of: {', '.join(sorted(DA_SERVICES_SOURCES))}")
+
+        row = {DA_SERVICES_FIELDS[k]: _clean(v) for k, v in da.items() if k in DA_SERVICES_FIELDS}
+        missing = [name for field, name in DA_SERVICES_REQUIRED.items() if not row.get(field)]
+        kebele_id = _clean(da.get("kebele_id"))
+        if not kebele_id and not all(row.get(level) for level in GEO_LEVELS):
+            missing.append("kebele_id (or region, zone, woreda, kebele)")
+        if missing:
+            raise ValueError("Missing: " + ", ".join(missing))
+
+        row["upstream_reference"] = reference
+        row["upstream_approved_by"] = _clean(message.get("approved_by"))
+        geo = (_MasterDataGeo.resolve_by_id(kebele_id) if kebele_id
+               else _MasterDataGeo.resolve({level: row[level] for level in GEO_LEVELS}))
+        out = _build_da_record(row, source, geo)
+        _logger.info("DA Services record %s enriched: Fayda ID %s, kebele %s",
+                     reference, out["foundational_id"], out["kebele_name"])
+        return out

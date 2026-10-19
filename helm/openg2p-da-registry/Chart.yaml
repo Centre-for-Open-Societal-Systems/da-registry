@@ -1,0 +1,34 @@
+apiVersion: v2
+name: openg2p-da-registry
+description: |
+  OpenG2P DA (Development Agent) Registry — a thin package over the shared
+  openg2p-registry chart published by the registry platform.
+
+  This chart owns no service templates. It declares openg2p-registry as a
+  pinned dependency and supplies the DA values overlay (variant identity,
+  hostname, the DA-built images, seed toggles). Every deployment, service,
+  ingress, keycloak/iam wiring and the db-seed machinery come from the
+  openg2p-registry subchart.
+type: application
+
+# Static placeholder; the real version is set at publish time.
+version: 0.0.0-develop
+appVersion: "develop"
+
+keywords:
+  - openg2p
+  - registry
+  - da-registry
+home: https://openg2p.org
+icon: https://openg2p.github.io/openg2p-helm/openg2p-logo.png
+sources:
+  - https://github.com/Centre-for-Open-Societal-Systems/DA-registry-backend
+
+# The openg2p-registry version is pinned by hand: the DA images extend that
+# same base image tag (ARG RP_VERSION in the root Dockerfile), so the two move
+# together. Aliased to `registry` so the overlay nests under .Values.registry.*.
+dependencies:
+  - name: openg2p-registry
+    alias: registry
+    version: 1.2.2-rc.544
+    repository: https://openg2p.github.io/openg2p-helm

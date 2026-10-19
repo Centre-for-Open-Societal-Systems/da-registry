@@ -1,0 +1,169 @@
+# DA Registry — values overlay for the openg2p-registry chart.
+#
+# This chart owns no templates; everything comes from the openg2p-registry
+# subchart (pinned in Chart.yaml, aliased `registry`) with the overrides below.
+#
+# Three layers, applied in this order by ci/deploy-da-dev.sh:
+#   1. this file          — what is true of the DA Registry in every environment
+#   2. values-<env>.yaml  — hosts, commons endpoints and secret names of one
+#                           cluster (values-dev.yaml for the dev cluster)
+#   3. the image tags     — written by the deploy script for the build it deploys
+#
+# Hostnames here are the subchart's *.openg2p.org placeholders on purpose: the
+# deploy script refuses to apply a render that still carries one, so a missing
+# environment value fails the build instead of deploying something unreachable.
+#
+# Two kinds of override:
+#   * global.*    — Helm propagates these to the subchart (and its subcharts).
+#   * registry.*  — values for the openg2p-registry subchart itself.
+
+# ── Globals (propagate to the openg2p-registry subchart) ──────────────────────
+global:
+  registryVariant: 'da-registry'
+  # Public hostname of the staff portal; set per environment.
+  registryHostname: '{{ .Release.Name }}.{{ .Release.Namespace }}.openg2p.org'
+
+  # AWE posts its approval decision straight to the staff API Service rather
+  # than through the public ingress (the farmer deployment learned that an
+  # ingress signed by a private CA breaks this call). The payload is
+  # HMAC-signed, so the in-cluster hop stays authenticated. values-<env>.yaml
+  # sets the namespace-qualified form.
+  aweDefaultCallbackUrl: 'http://{{ .Release.Name }}-staff-portal-api/awe/webhooks/decision'
+
+  # Browser-facing MinIO host. Pre-signed URLs are signed for this host, so the
+  # browser and the API must use the same name. Set per environment.
+
+  # The shared PostgreSQL; set per environment (namespace-qualified on the
+  # shared cluster). The registry database and user are named after the release
+  # and created by the subchart's postgres-init Job.
+  postgresqlHost: commons-postgresql
+  registryDB:  '{{ printf "%s" .Release.Name | replace "-" "_" }}'
+  registryDBPort: 5432
+  registryDBUser: '{{ printf "%s_user" .Release.Name | replace "-" "_" }}'
+  registryDBSecret: '{{ .Release.Name }}'
+  registryDBUserPasswordKey: '{{ .Release.Name }}-db-user'
+
+  # Master Data is read two ways:
+  #   * over its API, by every registry service (geo levels, code lists; the
+  #     platform's default master_data_read_mode is "api"). The pinned subchart
+  #     does NOT set the API URL, token URL or client for the pods, so they are
+  #     set under each service below, as the farmer registry does.
+  #   * from its database, by the celery worker only: the DA import enricher
+  #     resolves Region / Zone / Woreda / Kebele names with direct reads.
+  # TODO(devops): confirm the Master Data database name, user and the Secret
+  # (name + key) that holds its password in the DA namespace. The names below
+  # are the subchart defaults.
+  masterDataDB: 'master_data'
+  masterDataDBPort: 5432
+  masterDataDBUser: 'master_data_user'
+  masterDataDBSecret: 'master-data'
+  masterDataDBUserPasswordKey: 'master-data-db-user'
+
+# ── openg2p-registry subchart overrides ───────────────────────────────────────
+registry:
+  # DA-built images (each FROM the matching openg2p-registry base image). The
+  # repositories below are placeholders: ci/deploy-da-dev.sh sets the ECR
+  # repository and the tag of the build it deploys.
+  # *_APPLICATION_REFERENCE_FORMAT: four random digits instead of the platform's one,
+  # so records arriving in the same second do not collide during bulk import.
+  # DA_AUTO_APPROVE_IMPORTS: approve unique DAs from file import / partner
+  # ingestion without a user token (da-extension services/auto_approve.py).
+  # *_MASTER_DATA_*: the Master Data API with a client-credentials token as this
+  # registry's own Keycloak client (created by the subchart's keycloak-init;
+  # the Secret is named after the client). Without these the staff form saves
+  # DAs with empty Region / Zone / Woreda / Kebele names.
+  staffApi:
+    envVars:
+      DA_AUTO_APPROVE_IMPORTS: "true"
+      REGISTRY_STAFF_PORTAL_API_APPLICATION_REFERENCE_FORMAT: "{DATE:%Y%b%d|upper}-{SECONDS:5}-{RAND:4}"
+      REGISTRY_STAFF_PORTAL_API_MASTER_DATA_API_URL: '{{ tpl .Values.global.masterDataApiUrl $ }}'
+      REGISTRY_STAFF_PORTAL_API_MASTER_DATA_TOKEN_URL: '{{ tpl .Values.global.keycloakIssuerUrl $ }}/protocol/openid-connect/token'
+      REGISTRY_STAFF_PORTAL_API_MASTER_DATA_CLIENT_ID: '{{ tpl .Values.global.authClientId $ }}'
+    envVarsFrom:
+      REGISTRY_STAFF_PORTAL_API_MASTER_DATA_CLIENT_SECRET:
+        secretKeyRef:
+          name: '{{ tpl .Values.global.authClientSecret $ }}'
+          key: '{{ tpl .Values.global.authClientSecretKey $ }}'
+    image:
+      repository: openg2p/da-registry/staff-api
+      tag: develop
+  staffUi:
+    image:
+      repository: openg2p/da-registry/staff-ui
+      tag: develop
+  partnerApi:
+    envVars:
+      DA_AUTO_APPROVE_IMPORTS: "true"
+      REGISTRY_PARTNER_API_APPLICATION_REFERENCE_FORMAT: "{DATE:%Y%b%d|upper}-{SECONDS:5}-{RAND:4}"
+      # DCI expression search: the platform's default fields plus the DA location (names and codes), position and last_approved_at (changes since), so DA Services can filter exactly by Woreda / Kebele.
+      REGISTRY_PARTNER_API_DCI_EXPRESSION_ALLOWED_FIELDS: '["functional_record_id","first_name","middle_name","last_name","given_name","gender","birth_date","foundational_id","record_name","record_status","search_text","marital_status","income_level","education_level","residency_status","disability_status","displacement_status","region_name","zone_name","woreda_name","kebele_name","geo_lowest_level_value_id","position","specialisation","upstream_reference","region_code","zone_code","woreda_code","last_approved_at"]'
+      REGISTRY_PARTNER_API_MASTER_DATA_API_URL: '{{ tpl .Values.global.masterDataApiUrl $ }}'
+      REGISTRY_PARTNER_API_MASTER_DATA_TOKEN_URL: '{{ tpl .Values.global.keycloakIssuerUrl $ }}/protocol/openid-connect/token'
+      REGISTRY_PARTNER_API_MASTER_DATA_CLIENT_ID: '{{ tpl .Values.global.authClientId $ }}'
+    envVarsFrom:
+      REGISTRY_PARTNER_API_MASTER_DATA_CLIENT_SECRET:
+        secretKeyRef:
+          name: '{{ tpl .Values.global.authClientSecret $ }}'
+          key: '{{ tpl .Values.global.authClientSecretKey $ }}'
+    image:
+      repository: openg2p/da-registry/partner-api
+      tag: develop
+  celeryWorker:
+    envVars:
+      DA_AUTO_APPROVE_IMPORTS: "true"
+      REGISTRY_CELERY_WORKERS_APPLICATION_REFERENCE_FORMAT: "{DATE:%Y%b%d|upper}-{SECONDS:5}-{RAND:4}"
+      REGISTRY_CELERY_WORKERS_MASTER_DATA_API_URL: '{{ tpl .Values.global.masterDataApiUrl $ }}'
+      REGISTRY_CELERY_WORKERS_MASTER_DATA_TOKEN_URL: '{{ tpl .Values.global.keycloakIssuerUrl $ }}/protocol/openid-connect/token'
+      REGISTRY_CELERY_WORKERS_MASTER_DATA_CLIENT_ID: '{{ tpl .Values.global.authClientId $ }}'
+      # Master Data database, read by the DA import enricher (see global above).
+      REGISTRY_CELERY_WORKERS_MASTER_DATA_DB_HOSTNAME: '{{ tpl .Values.global.postgresqlHost $ }}'
+      REGISTRY_CELERY_WORKERS_MASTER_DATA_DB_PORT: '{{ .Values.global.masterDataDBPort }}'
+      REGISTRY_CELERY_WORKERS_MASTER_DATA_DB_DBNAME: '{{ tpl .Values.global.masterDataDB $ }}'
+      REGISTRY_CELERY_WORKERS_MASTER_DATA_DB_USERNAME: '{{ tpl .Values.global.masterDataDBUser $ }}'
+    envVarsFrom:
+      REGISTRY_CELERY_WORKERS_MASTER_DATA_CLIENT_SECRET:
+        secretKeyRef:
+          name: '{{ tpl .Values.global.authClientSecret $ }}'
+          key: '{{ tpl .Values.global.authClientSecretKey $ }}'
+      REGISTRY_CELERY_WORKERS_MASTER_DATA_DB_PASSWORD:
+        secretKeyRef:
+          name: '{{ tpl .Values.global.masterDataDBSecret $ }}'
+          key: '{{ tpl .Values.global.masterDataDBUserPasswordKey $ }}'
+    image:
+      repository: openg2p/da-registry/celery
+      tag: develop
+  celeryBeat:
+    image:
+      repository: openg2p/da-registry/celery
+      tag: develop
+  dbSeed:
+    image:
+      repository: openg2p/da-registry/db-seed
+      tag: develop
+    # Synthetic DAs are for local dev only. Geography and code lists come from
+    # the shared Master Data service (the COSS Ethiopia catalogue, down to
+    # Kebele), never from the registry seed: loadGeoData must stay false, or a
+    # second hierarchy is written over the shared one.
+    loadSampleData: false
+    loadGeoData: false
+    loadImages: false
+    loadTemplates: true
+
+  # Name of this registry's tile in IAM.
+  iamRegister:
+    applicationDescription: "DA Registry"
+
+  # Functional-ID pools, one per register (key = register mnemonic, lowercased).
+  # Helm merges maps, so the subchart's reference pools are still provisioned;
+  # that is harmless.
+  idgenerator:
+    idGenerator:
+      appConfig:
+        idTypes:
+          da:
+            idLength: 10
+
+  # The DA e2e sanity suite does not exist yet; keep the subchart's reference
+  # suite off rather than run it against a register it does not know.
+  sanity:
+    enabled: false

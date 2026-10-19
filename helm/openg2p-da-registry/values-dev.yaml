@@ -1,0 +1,105 @@
+# values-dev.yaml — the dev cluster (RKE2 at 10.0.1.58), namespace `da`,
+# release `da-registry`. Passed with -f by ci/deploy-da-dev.sh after values.yaml;
+# the script adds the image tags.
+#
+# Every key here replaces a subchart default that is wrong for this cluster: a
+# *.openg2p.org placeholder host, or a commons Service name without its
+# namespace (the commons services live in `commons`, this release in `da`, so
+# the short names resolve nowhere). No secret values: passwords and client
+# secrets are read from Secrets in the namespace by name (secretKeyRef), as
+# the subchart's own values do. Never set these on the cluster by hand
+# (kubectl set env): a hand-set variable and the chart's secretKeyRef for the
+# same name conflict, and the next deploy fails.
+#
+# Sources: farmer-coss/helm/environments/dev (same cluster, same commons),
+# cropsown-coss/ci/deploy-crop-dev.sh, and the pinned openg2p-registry chart's
+# values (helm show values). Items marked TODO(devops) still need confirmation.
+
+global:
+  # ── Public hosts ──────────────────────────────────────────────────────────
+  # TODO(devops): confirm the three names and create DNS + TLS for them.
+  # da-registry-development.oanstaging.com is taken by the DA Services mock
+  # frontend, hence da-portal-.
+  registryHostname: 'da-portal-development.oanstaging.com'
+
+  # ── Shared commons services (namespace `commons`) ──────────────────────────
+  postgresqlHost: 'commons-postgresql.commons.svc.cluster.local'
+
+  # Browser-facing Keycloak. keycloakIssuerUrl, the token URLs and the UI's
+  # logout URL derive from it. keycloak-init (the subchart Job that creates the
+  # da-registry-staff-portal client) talks to Keycloak in-cluster, below.
+  keycloakBaseUrl: 'https://keycloak-development.oanstaging.com'
+
+  # IAM, Master Data and AWE, in-cluster.
+  iamServiceUrl: 'http://commons-services-iam-staff-portal-api.commons.svc.cluster.local'
+  masterDataApiUrl: 'http://commons-services-master-data-api.commons.svc.cluster.local'
+  aweBaseUrl: 'http://commons-services-awe.commons.svc.cluster.local'
+  # AWE posts its decision to the staff API Service, namespace-qualified
+  # because AWE runs in `commons`. The HMAC secret is the chart's own
+  # (da-registry-awe-callback-hmac), referenced by secretKeyRef in the subchart.
+  aweDefaultCallbackUrl: 'http://da-registry-staff-portal-api.da.svc.cluster.local/awe/webhooks/decision'
+  # Internal names for the two hosts the subchart would otherwise default to
+  # *.openg2p.org. Neither is public: aweBaseUrl above replaces the one derived
+  # from aweHostname, and the id-generator is reached by its Service.
+  aweHostname: 'awe.da.openg2p.test'
+  idGeneratorHostname: 'idgenerator-da-registry.da.openg2p.test'
+
+  # Browser-facing MinIO (pre-signed URLs are signed for this host, so the API
+  # and the browser must use the same name). TODO(devops): confirm the host
+  # and that the `commons-minio` Secret (root-user / root-password) exists in
+  # namespace da.
+  minioHost: 'minio-api.commons-dev.oanstaging.com'
+  minioSecure: true
+
+  # TODO(devops): the Audit Manager. The subchart default is on, calling
+  # http://commons-services-auditmanager:80. Off until the dev commons has it.
+  auditEnabled: false
+
+  # TODO(devops): Novu (in-app and e-mail notifications). Off until the dev
+  # commons' Novu, its `commons-novu` Secret and public hosts are confirmed.
+  # The subchart's references to that Secret are optional, so its absence does
+  # not block the pods. The two hosts are internal placeholders so the render
+  # carries no *.openg2p.org name.
+  notificationEnabled: false
+  notificationApiHostname: 'novu-api.da.openg2p.test'
+  notificationWsHostname: 'novu-ws.da.openg2p.test'
+
+registry:
+  # The subchart builds redis://<authRedisInstallationName>-master:6379/0,
+  # which cannot take a namespace-qualified name, so the URL is set directly.
+  staffApi:
+    hostname: 'staff-da-development.oanstaging.com'
+    istio:
+      virtualservice:
+        host: 'staff-da-development.oanstaging.com'
+    envVars:
+      REGISTRY_STAFF_PORTAL_API_AUTH_REDIS_URL: 'redis://commons-redis-master.commons.svc.cluster.local:6379/0'
+
+  partnerApi:
+    hostname: 'partner-da-development.oanstaging.com'
+    istio:
+      virtualservice:
+        host: 'partner-da-development.oanstaging.com'
+
+  staffUi:
+    # Browser-facing IAM, and the session cookie must cover the public host.
+    # LOGIN_PROVIDER_ID is the row of IAM's login_providers table for the public
+    # Keycloak issuer: 1 on this cluster (farmer uses 1). TODO(devops): confirm.
+    iamPublicUrl: 'https://staff-iam-development.oanstaging.com'
+    # The subchart derives this from partner-<registryHostname>, which is not
+    # the partner API's host here.
+    partnerIngestUrl: 'https://partner-da-development.oanstaging.com/partner/ingest_data?data_model=dcivc'
+    envVars:
+      COOKIE_DOMAIN: '.oanstaging.com'
+      LOGIN_PROVIDER_ID: '1'
+
+  # keycloak-init creates the da-registry-staff-portal client and its Secret.
+  # It reads the Keycloak admin password from the `commons-keycloak` Secret
+  # (key admin-password), which must exist in namespace da.
+  keycloak-init:
+    keycloak:
+      url: 'http://commons-keycloak.commons.svc.cluster.local:80'
+
+  # postgres-init creates the da_registry database and user. It reads the
+  # postgres superuser password from the `commons-postgresql` Secret (key
+  # postgres-password), which must exist in namespace da.

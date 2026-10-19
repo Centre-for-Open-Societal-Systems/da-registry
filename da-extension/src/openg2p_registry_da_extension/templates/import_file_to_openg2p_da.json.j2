@@ -1,0 +1,53 @@
+{#- One DA (a row of an import file, or a record from DA Services) -> DA intake form sections.
+    `expanded` is the row after DAImportFileEnricherService: column headers are
+    already DA field names and values are already codes / cleaned. Keys are the
+    section mnemonics of the DA intake form; each holds exactly one record. -#}
+{%- set d = expanded -%}
+{%- macro f(name) -%}{{ d.get(name) | tojson }}{%- endmacro -%}
+{
+  "da_identity": [
+    {
+      "prefix": {{ f('prefix') }},
+      "first_name": {{ f('first_name') }},
+      "middle_name": {{ f('middle_name') }},
+      "last_name": {{ f('last_name') }},
+      "foundational_id": {{ f('foundational_id') }},
+      "gender": {{ f('gender') }},
+      "marital_status": {{ f('marital_status') }},
+      "birth_month_ec": {{ f('birth_month_ec') }},
+      "birth_year_ec": {{ f('birth_year_ec') }},
+      "source": {{ f('source') }}
+    }
+  ],
+  "da_contact": [
+    {
+      "mobile_number": {{ f('mobile_number') }},
+      "telegram_number": {{ f('telegram_number') }},
+      "alternate_number": {{ f('alternate_number') }},
+      "email": {{ f('email') }},
+      "source": {{ f('source') }}
+    }
+  ],
+  "da_service": [
+    {
+      "education_level": {{ f('education_level') }},
+      "specialisation": {{ f('specialisation') }},
+      "position": {{ f('position') }},
+      "joined_date": {{ f('joined_date') }},
+      "upstream_reference": {{ f('upstream_reference') }},
+      "upstream_approved_by": {{ f('upstream_approved_by') }},
+      "source": {{ f('source') }}
+    }
+  ],
+  "da_location": [
+    {
+      "geo_lowest_level_value_id": {{ f('geo_lowest_level_value_id') }},
+      "geo_code_hierarchy_json": {{ f('geo_code_hierarchy_json') }},
+      "region_name": {{ f('region_name') }},
+      "zone_name": {{ f('zone_name') }},
+      "woreda_name": {{ f('woreda_name') }},
+      "kebele_name": {{ f('kebele_name') }},
+      "source": {{ f('source') }}
+    }
+  ]
+}

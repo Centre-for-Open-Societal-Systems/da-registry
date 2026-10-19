@@ -1,0 +1,11 @@
+# Host build artifacts must never enter the build context: the Windows
+# node_modules/.bin shims reference node.exe and break the Linux build stage.
+**/node_modules
+**/.next
+**/dist
+**/.venv
+**/__pycache__
+.git
+
+# The dashboard-api clone the Jenkinsfile makes. It has its own build context.
+.build

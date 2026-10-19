@@ -1,0 +1,714 @@
+name: da-openg2p
+
+# Compose project "da-openg2p" (not "da-registry", which the Frappe DA
+# Service dev stack already uses).
+#
+# Self-contained local dev stack for the DA (Development Agent) Registry:
+# infra (Postgres, Redis, MinIO, Keycloak), IAM + AWE (Approval Workflow
+# Engine), the Master Data (geo/reference) catalogue, and the DA registry
+# services built from source (root Dockerfile targets).
+#
+# Quick start:
+#   docker compose up --build -d
+#   # then open http://localhost:3101  (login: staff / staff)
+#
+# Host ports are chosen so this stack can run next to the Frappe DA service
+# (8000, 9001) and the livestock stack, and avoid TCP 9000, which Windows
+# reserves on some machines. Override any of them with the *_PORT variables.
+#
+# Everything here is dev-only: default secrets, no TLS, single replica.
+
+x-depends-on-infra: &depends-on-infra
+  postgres:
+    condition: service_healthy
+  redis:
+    condition: service_healthy
+  minio:
+    condition: service_healthy
+
+services:
+  # ---------------------------------------------------------------- infra --
+  postgres:
+    image: postgres:16
+    container_name: da-registry-postgres
+    # Default max_connections=100 gets exhausted with 6+ services each
+    # pooling connections (staff-api, partner-api, celery x2, master-data,
+    # iam) plus AWE — bump it so a connection-pool spike doesn't lock out
+    # every other service (including plain `psql` for debugging).
+    command: ["postgres", "-c", "max_connections=300"]
+    environment:
+      POSTGRES_USER: ${POSTGRES_SUPERUSER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    ports:
+      - "${POSTGRES_PORT:-5442}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./docker/local-dev/postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_SUPERUSER:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: da-registry-redis
+    ports:
+      - "${REDIS_PORT:-6389}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:latest
+    container_name: da-registry-minio
+    command: server /data --address ":9010" --console-address ":9011"
+    # Presigned document URLs (attachments) are
+    # signed by the API against the same endpoint it uploads through, and the
+    # signature covers the Host header -- so the browser must reach MinIO under
+    # the very name the API used. "minio" only resolves inside the network.
+    # *.localtest.me always resolves to 127.0.0.1, where the published port
+    # is; this alias makes the same name resolve to the container inside the
+    # network, so one hostname works for both signer and browser.
+    networks:
+      default:
+        aliases:
+          - minio.localtest.me
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-admin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-adminsecret}
+    ports:
+      - "${MINIO_API_PORT:-9010}:9010"
+      - "${MINIO_CONSOLE_PORT:-9011}:9011"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9010/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  minio-init:
+    image: minio/mc:latest
+    container_name: da-registry-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-admin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-adminsecret}
+      MINIO_BUCKET_NAME: ${MINIO_BUCKET_NAME:-default-bucket}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        mc alias set local http://minio:9010 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"
+        mc mb --ignore-existing "local/$${MINIO_BUCKET_NAME}"
+        mc mb --ignore-existing local/templates
+        mc mb --ignore-existing local/registrant-photos
+        mc mb --ignore-existing local/documents
+        exit 0
+    restart: "no"
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    platform: linux/amd64
+    container_name: da-registry-keycloak
+    command: start-dev --import-realm
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      KC_HTTP_PORT: 8080
+      # Browser-facing OIDC endpoints must use the host-published address.
+      # Docker services can still reach this container as `keycloak:8080`.
+      KC_HOSTNAME: "http://localhost:${KEYCLOAK_PORT:-8090}"
+    ports:
+      - "${KEYCLOAK_PORT:-8090}:8080"
+    volumes:
+      - ./docker/local-dev/keycloak-realm-staff.json:/opt/keycloak/data/import/staff-realm.json:ro
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    restart: unless-stopped
+
+  keycloak-init:
+    image: quay.io/keycloak/keycloak:26.0
+    platform: linux/amd64
+    container_name: da-registry-keycloak-init
+    depends_on:
+      keycloak:
+        condition: service_healthy
+    environment:
+      KEYCLOAK_URL: http://keycloak:8080
+      KEYCLOAK_HOST: keycloak
+      KEYCLOAK_PORT: "8080"
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      KEYCLOAK_REALM: staff
+      KEYCLOAK_IAM_CLIENT_SECRET: ${KEYCLOAK_IAM_CLIENT_SECRET:-dev-iam-staff-secret}
+      KEYCLOAK_AWE_RESOLVER_CLIENT_SECRET: ${KEYCLOAK_AWE_RESOLVER_CLIENT_SECRET:-dev-awe-resolver-secret}
+      KEYCLOAK_DA_BACKEND_CLIENT_SECRET: ${KEYCLOAK_DA_BACKEND_CLIENT_SECRET:-dev-da-backend-secret}
+      KEYCLOAK_DEV_USER: ${KEYCLOAK_DEV_USER:-staff}
+      KEYCLOAK_DEV_PASSWORD: ${KEYCLOAK_DEV_PASSWORD:-staff}
+      KEYCLOAK_STAFF_ADMIN_USER: ${KEYCLOAK_STAFF_ADMIN_USER:-admin}
+      KEYCLOAK_STAFF_ADMIN_PASSWORD: ${KEYCLOAK_STAFF_ADMIN_PASSWORD:-admin}
+      KEYCLOAK_AWE_APPROVER_PASSWORD: ${KEYCLOAK_AWE_APPROVER_PASSWORD:-pass}
+      IAM_STAFF_PORT: ${IAM_STAFF_PORT:-8120}
+      DA_REGISTRY_UI_PORT: ${DA_REGISTRY_UI_PORT:-3101}
+      AWE_UI_PORT: ${AWE_UI_PORT:-8131}
+    volumes:
+      - ./docker/local-dev/keycloak-init.sh:/keycloak-init.sh:ro
+    entrypoint: ["/bin/bash", "/keycloak-init.sh"]
+    restart: "no"
+
+  id-generator:
+    image: ${ID_GENERATOR_IMAGE:-openg2p/openg2p-id-generator:1.1.2}
+    platform: linux/amd64
+    container_name: da-registry-id-generator
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: idgenerator
+      DB_USER: ${POSTGRES_SUPERUSER:-postgres}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      CONFIG_PATH: /app/config/default.yaml
+      UVICORN_HOST: 0.0.0.0
+      UVICORN_PORT: 8000
+      UVICORN_LOG_LEVEL: info
+    ports:
+      - "${ID_GENERATOR_PORT:-8050}:8000"
+    volumes:
+      - ./docker/local-dev/id-generator.yaml:/app/config/default.yaml:ro
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/v1/idgenerator/health')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    restart: unless-stopped
+
+  # ------------------------------------------------------------- IAM / AWE --
+  iam-staff-api:
+    image: ${IAM_STAFF_PORTAL_API_IMAGE:-openg2p/iam-staff-portal-api:1.4.2}
+    container_name: da-registry-iam-staff-api
+    extra_hosts:
+      - "localhost:host-gateway"
+    depends_on:
+      <<: *depends-on-infra
+      keycloak-init:
+        condition: service_completed_successfully
+    environment:
+      IAM_STAFF_APP_HOST: "0.0.0.0"
+      IAM_STAFF_APP_PORT: 8000
+      IAM_STAFF_AUTH_REDIS_URL: "redis://redis:6379/0"
+      IAM_STAFF_AUTH_TRANSACTION_STORE_BACKEND: redis
+      IAM_STAFF_DB_DRIVER: postgresql+asyncpg
+      IAM_STAFF_DB_HOSTNAME: postgres
+      IAM_STAFF_DB_USERNAME: ${POSTGRES_SUPERUSER:-postgres}
+      IAM_STAFF_DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      IAM_STAFF_DB_DBNAME: iam_staff
+      IAM_STAFF_DB_PORT: 5432
+      IAM_STAFF_OPENAPI_ROOT_PATH: /
+      IAM_STAFF_LOGIN_PROVIDERS_TABLE_ENABLED: "true"
+      IAM_STAFF_AUTH_ENABLED: "true"
+      IAM_STAFF_AUTH_COOKIE_HTTPONLY: "true"
+      IAM_STAFF_AUTH_COOKIE_PATH: /
+      IAM_STAFF_AUTH_COOKIE_DOMAIN: localhost
+      IAM_STAFF_AUTH_COOKIE_MAX_AGE: 1800
+      IAM_STAFF_AUTH_COOKIE_SET_EXPIRES: "true"
+      IAM_STAFF_AUTH_COOKIE_SECURE: "false"
+      IAM_STAFF_DATA_DIR: /opt/iam-staff-portal-data
+      IAM_STAFF_DATA_APPLICATION_URLS__KEYCLOAK_APPLICATION_URL: "http://localhost:${KEYCLOAK_PORT:-8090}"
+      IAM_STAFF_DATA_APPLICATION_URLS__REGISTRY_APPLICATION_URL: "http://localhost:${DA_REGISTRY_STAFF_API_PORT:-8101}"
+      IAM_STAFF_DATA_APPLICATION_URLS__MINIO_APPLICATION_URL: "http://localhost:${MINIO_API_PORT:-9010}"
+      IAM_STAFF_DATA_CLIENT_SECRETS__STAFF_KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_IAM_CLIENT_SECRET:-dev-iam-staff-secret}
+      IAM_STAFF_CORS_ALLOW_ORIGINS: '["*"]'
+    volumes:
+      - ./docker/local-dev/iam-login-providers.json:/opt/iam-staff-portal-data/login_providers.json:ro
+    ports:
+      - "${IAM_STAFF_PORT:-8120}:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ping')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 40s
+    restart: unless-stopped
+
+  # Service name must be `awe` — the AWE UI's nginx proxies /v1/awe/ to awe:8000.
+  awe:
+    image: ${AWE_API_IMAGE:-openg2p/openg2p-awe:1.2.2}
+    container_name: da-registry-awe-api
+    extra_hosts:
+      - "localhost:host-gateway"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      keycloak-init:
+        condition: service_completed_successfully
+    environment:
+      UVICORN_HOST: "0.0.0.0"
+      UVICORN_PORT: 8000
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: awe
+      DB_USER: ${POSTGRES_SUPERUSER:-postgres}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      CONFIG_PATH: /app/config/default.yaml
+      AWE__KEYCLOAK__BASE_URL: "http://localhost:${KEYCLOAK_PORT:-8090}"
+      AWE__KEYCLOAK__REALM: staff
+      AWE__KEYCLOAK__ADMIN_CLIENT_ID: awe-admin-resolver
+      AWE__KEYCLOAK__ADMIN_CLIENT_SECRET: ${KEYCLOAK_AWE_RESOLVER_CLIENT_SECRET:-dev-awe-resolver-secret}
+      AWE__KEYCLOAK__ISSUER: "http://localhost:${KEYCLOAK_PORT:-8090}/realms/staff"
+      AWE__KEYCLOAK__JWKS_URL: "http://localhost:${KEYCLOAK_PORT:-8090}/realms/staff/protocol/openid-connect/certs"
+      AWE__KEYCLOAK__AUDIENCE: ""
+    volumes:
+      - ./docker/local-dev/awe-config.yaml:/app/config/default.yaml:ro
+    ports:
+      - "${AWE_API_PORT:-8130}:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/v1/awe/health')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 30s
+    restart: unless-stopped
+
+  awe-ui:
+    image: ${AWE_UI_IMAGE:-openg2p/openg2p-awe-ui:1.2.2}
+    container_name: da-registry-awe-ui
+    depends_on:
+      awe:
+        condition: service_healthy
+    volumes:
+      - ./docker/local-dev/awe-ui-config.json:/usr/share/nginx/html/config.json:ro
+    ports:
+      - "${AWE_UI_PORT:-8131}:8080"
+    restart: unless-stopped
+
+  # Registers the da-registry-staff-portal application's roles/permission
+  # catalog with IAM (idempotent upsert). Without this, every logged-in user
+  # gets an empty permission set and hits 403 "Access Denied" on every page,
+  # regardless of their Keycloak client roles — IAM's own RBAC tables
+  # (staff_roles / staff_role_permissions / staff_application_permissions)
+  # are entirely separate from Keycloak and start out empty.
+  iam-register-da-app:
+    image: ${IAM_STAFF_PORTAL_API_IMAGE:-openg2p/iam-staff-portal-api:1.4.2}
+    container_name: da-registry-iam-register-app
+    depends_on:
+      iam-staff-api:
+        condition: service_healthy
+    environment:
+      REGISTRY_IAM_PAYLOAD: /opt/da-registry-iam-catalog.json
+      REGISTRY_IAM_VARIANTS: '[{"mnemonic":"da-registry-staff-portal","url":"http://localhost:${DA_REGISTRY_UI_PORT:-3101}"}]'
+      IAM_STAFF_DB_DRIVER: postgresql+asyncpg
+      IAM_STAFF_DB_HOSTNAME: postgres
+      IAM_STAFF_DB_USERNAME: ${POSTGRES_SUPERUSER:-postgres}
+      IAM_STAFF_DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      IAM_STAFF_DB_DBNAME: iam_staff
+      IAM_STAFF_DB_PORT: 5432
+    volumes:
+      - ./docker/local-dev/iam-register-app.py:/opt/iam-register-app.py:ro
+      - ./docker/local-dev/da-registry-iam-catalog.json:/opt/da-registry-iam-catalog.json:ro
+    entrypoint: ["python", "/opt/iam-register-app.py"]
+    restart: "no"
+
+  # --------------------------------------------------------- master data --
+  da-master-data-api:
+    # Same Master Data release as the livestock registry on platform 1.2. The
+    # 1.2 staff UI reads geo levels through its /geo/* API. Move it with RP_VERSION.
+    image: ${MASTER_DATA_API_IMAGE:-openg2p/master-data-api:1.1.0}
+    container_name: da-registry-master-data-api
+    depends_on:
+      <<: *depends-on-infra
+      iam-staff-api:
+        condition: service_healthy
+    environment:
+      MASTER_DATA_API_HOST: "0.0.0.0"
+      MASTER_DATA_API_PORT: 8000
+      MASTER_DATA_API_NO_OF_WORKERS: 2
+      MASTER_DATA_API_OPENAPI_ROOT_PATH: /
+      MASTER_DATA_API_WORKER_TYPE: gunicorn
+      MASTER_DATA_API_DB_DRIVER: postgresql+asyncpg
+      MASTER_DATA_API_DB_HOSTNAME: postgres
+      MASTER_DATA_API_DB_PORT: 5432
+      MASTER_DATA_API_DB_USERNAME: ${POSTGRES_SUPERUSER:-postgres}
+      MASTER_DATA_API_DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      MASTER_DATA_API_DB_DBNAME: da_master_data_db
+      MASTER_DATA_API_AUTH_ENABLED: "false"
+      # The registry services call this API server to server (no browser), as
+      # in the livestock registry on platform 1.2.
+      MASTER_DATA_API_CSRF_ENABLED: "false"
+      MASTER_DATA_API_AUTH_PROVIDER_API_URL: "http://iam-staff-api:8000"
+      MASTER_DATA_API_KEYCLOAK_CLIENT_ID: da-registry-staff-portal
+      MASTER_DATA_API_AUTH_REDIS_URL: "redis://redis:6379/0"
+      MASTER_DATA_API_AUTH_VERIFY_SSL: "false"
+    ports:
+      - "${MASTER_DATA_API_PORT:-8142}:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ping')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 60s
+    restart: unless-stopped
+
+  # Loads the real Ethiopia region/zone/woreda/kebele hierarchy (14 regions,
+  # 125 zones, 1,379 woredas, 19,535 kebeles) into master-data's geo tables.
+  # Without this, g2p_geo_levels/g2p_geo_level_values are empty and the
+  # Location tab's geo-hierarchy widget has nothing to resolve or display.
+  da-registry-geo-seed:
+    image: postgres:16
+    container_name: da-registry-geo-seed
+    depends_on:
+      da-master-data-api:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGPORT: 5432
+      PGDATABASE: da_master_data_db
+      PGUSER: ${POSTGRES_SUPERUSER:-postgres}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    volumes:
+      - ./docker/local-dev/geo-seed/ethiopia_geo_seed.sql.gz:/opt/ethiopia_geo_seed.sql.gz:ro
+      - ./docker/local-dev/geo-seed/master-data-schema-topup.sql:/opt/master-data-schema-topup.sql:ro
+    # The master-data-api image creates g2p_geo_levels with three columns only;
+    # the geo seed also writes display_name & co. Add the missing nullable
+    # columns first (idempotent ADD COLUMN IF NOT EXISTS, from the farmer
+    # registry's ci/commons-services/master-data-schema-topup.sql).
+    # The seed guards each INSERT with ON CONFLICT on the primary key only, but
+    # master-data also enforces unique (mnemonic, parent, level) and the pack
+    # has a few same-named kebeles under one woreda (e.g. "Yeha"). Loading it
+    # with an untargeted ON CONFLICT DO NOTHING keeps the first of each.
+    entrypoint: ["sh", "-c", "psql -v ON_ERROR_STOP=1 -q -f /opt/master-data-schema-topup.sql && gunzip -c /opt/ethiopia_geo_seed.sql.gz | sed -E 's/ON CONFLICT [(][a-z_]+[)] DO NOTHING/ON CONFLICT DO NOTHING/' | psql -v ON_ERROR_STOP=1 -q"]
+    restart: "no"
+
+  # -------------------------------------------------------- DA registry --
+  da-registry-staff-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: staff-api
+    image: da-registry-local/staff-api:dev
+    container_name: da-registry-staff-api
+    extra_hosts:
+      - "localhost:host-gateway"
+    depends_on:
+      <<: *depends-on-infra
+      iam-staff-api:
+        condition: service_healthy
+      awe:
+        condition: service_healthy
+      da-master-data-api:
+        condition: service_healthy
+    environment: &staff-api-env
+      REGISTRY_STAFF_PORTAL_API_APP_HOST: "0.0.0.0"
+      REGISTRY_STAFF_PORTAL_API_APP_PORT: 8000
+      REGISTRY_STAFF_PORTAL_API_DB_DRIVER: postgresql+asyncpg
+      REGISTRY_STAFF_PORTAL_API_DB_USERNAME: ${POSTGRES_SUPERUSER:-postgres}
+      REGISTRY_STAFF_PORTAL_API_DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      REGISTRY_STAFF_PORTAL_API_DB_HOSTNAME: postgres
+      REGISTRY_STAFF_PORTAL_API_DB_PORT: 5432
+      REGISTRY_STAFF_PORTAL_API_DB_DBNAME: da_registry_db
+      # Browser-reachable name, see the minio service. Uploads go through it
+      # too (Docker DNS resolves the alias to the container).
+      REGISTRY_STAFF_PORTAL_API_MINIO_ENDPOINT: "minio.localtest.me:9010"
+      REGISTRY_STAFF_PORTAL_API_MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-admin}
+      REGISTRY_STAFF_PORTAL_API_MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-adminsecret}
+      REGISTRY_STAFF_PORTAL_API_MINIO_SECURE: "false"
+      REGISTRY_STAFF_PORTAL_API_MINIO_BUCKET_NAME: ${MINIO_BUCKET_NAME:-default-bucket}
+      REGISTRY_STAFF_PORTAL_API_TEMPLATE_BUCKET_NAME: templates
+      REGISTRY_STAFF_PORTAL_API_MASTER_DATA_DB_DRIVER: postgresql+asyncpg
+      REGISTRY_STAFF_PORTAL_API_MASTER_DATA_DB_USERNAME: ${POSTGRES_SUPERUSER:-postgres}
+      REGISTRY_STAFF_PORTAL_API_MASTER_DATA_DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      REGISTRY_STAFF_PORTAL_API_MASTER_DATA_DB_HOSTNAME: postgres
+      REGISTRY_STAFF_PORTAL_API_MASTER_DATA_DB_PORT: 5432
+      REGISTRY_STAFF_PORTAL_API_MASTER_DATA_DB_DBNAME: da_master_data_db
+      REGISTRY_STAFF_PORTAL_API_MASTER_DATA_READ_MODE: db
+      # Platform 1.2 reads geo hierarchy and code lists through the Master Data API.
+      REGISTRY_STAFF_PORTAL_API_MASTER_DATA_API_URL: http://da-master-data-api:8000
+      REGISTRY_STAFF_PORTAL_API_MASTER_DATA_TOKEN_URL: http://keycloak:8080/realms/staff/protocol/openid-connect/token
+      REGISTRY_STAFF_PORTAL_API_MASTER_DATA_CLIENT_ID: da-registry-backend
+      REGISTRY_STAFF_PORTAL_API_MASTER_DATA_CLIENT_SECRET: ${KEYCLOAK_DA_BACKEND_CLIENT_SECRET:-dev-da-backend-secret}
+      DA_AUTO_APPROVE_IMPORTS: "true"  # see da-extension .../services/auto_approve.py
+      # Application reference: the platform default ends in one random digit, so two records in the same second collide (unique index) during bulk import; four digits.
+      REGISTRY_STAFF_PORTAL_API_APPLICATION_REFERENCE_FORMAT: "{DATE:%Y%b%d|upper}-{SECONDS:5}-{RAND:4}"
+      REGISTRY_STAFF_PORTAL_API_AUTH_ENABLED: "false"
+      REGISTRY_STAFF_PORTAL_API_AUTH_PROVIDER_API_URL: "http://iam-staff-api:8000"
+      REGISTRY_STAFF_PORTAL_API_KEYCLOAK_CLIENT_ID: da-registry-staff-portal
+      REGISTRY_STAFF_PORTAL_API_AUTH_REDIS_URL: "redis://redis:6379/0"
+      REGISTRY_STAFF_PORTAL_API_REGISTRANT_AUTH_REDIS_URL: "redis://redis:6379/0"
+      REGISTRY_STAFF_PORTAL_API_AUDIT_ENABLED: "false"
+      REGISTRY_STAFF_PORTAL_API_OPENAPI_ROOT_PATH: /
+      REGISTRY_STAFF_PORTAL_API_CORS_ALLOW_ORIGINS: '["*"]'
+      # Approval Workflow Engine (AWE) — change request + intake approvals
+      REGISTRY_STAFF_PORTAL_API_AWE_ENABLED: "true"
+      REGISTRY_STAFF_PORTAL_API_AWE_BASE_URL: "http://awe:8000"
+      REGISTRY_STAFF_PORTAL_API_AWE_DEFAULT_CALLBACK_URL: "http://da-registry-staff-api:8000/awe/webhooks/decision"
+      REGISTRY_STAFF_PORTAL_API_AWE_CALLBACK_SECRET_ID: ${AWE_REGISTRY_CALLBACK_SECRET_ID:-00000000-0000-4000-8000-000000000001}
+      REGISTRY_STAFF_PORTAL_API_AWE_CALLBACK_HMAC_SECRET: ${AWE_REGISTRY_CALLBACK_HMAC_SECRET:-dev-registry-awe-callback-secret}
+    ports:
+      - "${DA_REGISTRY_STAFF_API_PORT:-8101}:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ping')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 60s
+    restart: unless-stopped
+
+  da-registry-partner-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: partner-api
+    image: da-registry-local/partner-api:dev
+    container_name: da-registry-partner-api
+    depends_on:
+      <<: *depends-on-infra
+      da-registry-staff-api:
+        condition: service_healthy
+    environment:
+      REGISTRY_PARTNER_API_APP_HOST: "0.0.0.0"
+      REGISTRY_PARTNER_API_APP_PORT: 8000
+      REGISTRY_PARTNER_API_DB_DRIVER: postgresql+asyncpg
+      REGISTRY_PARTNER_API_DB_USERNAME: ${POSTGRES_SUPERUSER:-postgres}
+      REGISTRY_PARTNER_API_DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      REGISTRY_PARTNER_API_DB_HOSTNAME: postgres
+      REGISTRY_PARTNER_API_DB_PORT: 5432
+      REGISTRY_PARTNER_API_DB_DBNAME: da_registry_db
+      REGISTRY_PARTNER_API_MINIO_ENDPOINT: "minio.localtest.me:9010"
+      REGISTRY_PARTNER_API_MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-admin}
+      REGISTRY_PARTNER_API_MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-adminsecret}
+      REGISTRY_PARTNER_API_MINIO_SECURE: "false"
+      REGISTRY_PARTNER_API_DOCUMENT_STORAGE_BACKEND: minio
+      REGISTRY_PARTNER_API_MINIO_BUCKET_NAME: ${MINIO_BUCKET_NAME:-default-bucket}
+      REGISTRY_PARTNER_API_TEMPLATE_BUCKET_NAME: templates
+      REGISTRY_PARTNER_API_MASTER_DATA_DB_DRIVER: postgresql+asyncpg
+      REGISTRY_PARTNER_API_MASTER_DATA_DB_USERNAME: ${POSTGRES_SUPERUSER:-postgres}
+      REGISTRY_PARTNER_API_MASTER_DATA_DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      REGISTRY_PARTNER_API_MASTER_DATA_DB_HOSTNAME: postgres
+      REGISTRY_PARTNER_API_MASTER_DATA_DB_PORT: 5432
+      REGISTRY_PARTNER_API_MASTER_DATA_DB_DBNAME: da_master_data_db
+      REGISTRY_PARTNER_API_MASTER_DATA_READ_MODE: db
+      # Platform 1.2 reads geo hierarchy and code lists through the Master Data API.
+      REGISTRY_PARTNER_API_MASTER_DATA_API_URL: http://da-master-data-api:8000
+      REGISTRY_PARTNER_API_MASTER_DATA_TOKEN_URL: http://keycloak:8080/realms/staff/protocol/openid-connect/token
+      REGISTRY_PARTNER_API_MASTER_DATA_CLIENT_ID: da-registry-backend
+      REGISTRY_PARTNER_API_MASTER_DATA_CLIENT_SECRET: ${KEYCLOAK_DA_BACKEND_CLIENT_SECRET:-dev-da-backend-secret}
+      DA_AUTO_APPROVE_IMPORTS: "true"  # see da-extension .../services/auto_approve.py
+      # Application reference: the platform default ends in one random digit, so two records in the same second collide (unique index) during bulk import; four digits.
+      REGISTRY_PARTNER_API_APPLICATION_REFERENCE_FORMAT: "{DATE:%Y%b%d|upper}-{SECONDS:5}-{RAND:4}"
+      # DCI expression search: the platform's default fields plus the DA location (names and codes), position and last_approved_at (changes since), so DA Services can filter exactly by Woreda / Kebele.
+      REGISTRY_PARTNER_API_DCI_EXPRESSION_ALLOWED_FIELDS: '["functional_record_id","first_name","middle_name","last_name","given_name","gender","birth_date","foundational_id","record_name","record_status","search_text","marital_status","income_level","education_level","residency_status","disability_status","displacement_status","region_name","zone_name","woreda_name","kebele_name","geo_lowest_level_value_id","position","specialisation","upstream_reference","region_code","zone_code","woreda_code","last_approved_at"]'
+      # Local stack only: there is no Partner Management (signing keys) or
+      # Consent Manager here, so DCI search skips both checks. The response is
+      # stamped "disabled" for each. Keep both on (the default) in deployments.
+      REGISTRY_PARTNER_API_SIGNATURE_VALIDATION_ENABLED: "false"
+      REGISTRY_PARTNER_API_CONSENT_ENFORCEMENT_ENABLED: "false"
+      REGISTRY_PARTNER_API_KEYMANAGER_AUTH_ENABLED: "false"
+      REGISTRY_PARTNER_API_AUDIT_ENABLED: "false"
+      REGISTRY_PARTNER_API_OPENAPI_ROOT_PATH: /
+      REGISTRY_PARTNER_API_CORS_ALLOW_ORIGINS: '["*"]'
+    ports:
+      - "${DA_REGISTRY_PARTNER_API_PORT:-8106}:8000"
+    restart: unless-stopped
+
+  da-registry-celery-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: celery
+    image: da-registry-local/celery:dev
+    container_name: da-registry-celery-worker
+    depends_on:
+      <<: *depends-on-infra
+      id-generator:
+        condition: service_healthy
+      da-registry-staff-api:
+        condition: service_healthy
+    environment:
+      CELERY_APP: openg2p_registry_celery_worker.main.celery_app
+      CELERY_OPTS: worker -Q da_registry_worker_queue --loglevel=info
+      REGISTRY_CELERY_WORKERS_DB_USERNAME: ${POSTGRES_SUPERUSER:-postgres}
+      REGISTRY_CELERY_WORKERS_DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      REGISTRY_CELERY_WORKERS_DB_HOSTNAME: postgres
+      REGISTRY_CELERY_WORKERS_DB_PORT: 5432
+      REGISTRY_CELERY_WORKERS_DB_DBNAME: da_registry_db
+      REGISTRY_CELERY_WORKERS_CELERY_BROKER_URL: "redis://redis:6379/0"
+      REGISTRY_CELERY_WORKERS_CELERY_BACKEND_URL: "redis://redis:6379/0"
+      REGISTRY_CELERY_WORKERS_WORKER_QUEUE: da_registry_worker_queue
+      REGISTRY_CELERY_WORKERS_BATCH_SIZE: 2000
+      REGISTRY_CELERY_WORKERS_WORKER_MAX_ATTEMPTS: 5
+      REGISTRY_CELERY_WORKERS_MINIO_ENDPOINT: "minio:9010"
+      REGISTRY_CELERY_WORKERS_MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-admin}
+      REGISTRY_CELERY_WORKERS_MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-adminsecret}
+      REGISTRY_CELERY_WORKERS_MINIO_SECURE: "false"
+      REGISTRY_CELERY_WORKERS_MINIO_BUCKET_NAME: templates
+      REGISTRY_CELERY_WORKERS_MASTER_DATA_DB_DRIVER: postgresql+asyncpg
+      REGISTRY_CELERY_WORKERS_MASTER_DATA_DB_USERNAME: ${POSTGRES_SUPERUSER:-postgres}
+      REGISTRY_CELERY_WORKERS_MASTER_DATA_DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      REGISTRY_CELERY_WORKERS_MASTER_DATA_DB_HOSTNAME: postgres
+      REGISTRY_CELERY_WORKERS_MASTER_DATA_DB_PORT: 5432
+      REGISTRY_CELERY_WORKERS_MASTER_DATA_DB_DBNAME: da_master_data_db
+      REGISTRY_CELERY_WORKERS_MASTER_DATA_READ_MODE: db
+      # Platform 1.2 reads geo hierarchy and code lists through the Master Data API.
+      REGISTRY_CELERY_WORKERS_MASTER_DATA_API_URL: http://da-master-data-api:8000
+      REGISTRY_CELERY_WORKERS_MASTER_DATA_TOKEN_URL: http://keycloak:8080/realms/staff/protocol/openid-connect/token
+      REGISTRY_CELERY_WORKERS_MASTER_DATA_CLIENT_ID: da-registry-backend
+      REGISTRY_CELERY_WORKERS_MASTER_DATA_CLIENT_SECRET: ${KEYCLOAK_DA_BACKEND_CLIENT_SECRET:-dev-da-backend-secret}
+      DA_AUTO_APPROVE_IMPORTS: "true"  # see da-extension .../services/auto_approve.py
+      # Application reference: the platform default ends in one random digit, so two records in the same second collide (unique index) during bulk import; four digits.
+      REGISTRY_CELERY_WORKERS_APPLICATION_REFERENCE_FORMAT: "{DATE:%Y%b%d|upper}-{SECONDS:5}-{RAND:4}"
+      REGISTRY_CELERY_WORKERS_FUNCTIONAL_ID_GENERATION_URL: "http://id-generator:8000/v1"
+      REGISTRY_CELERY_WORKERS_ID_GENERATION_ALLOCATION_PATH: "/idgenerator/{id_type}/id"
+      REGISTRY_CELERY_WORKERS_ID_GENERATION_UPDATION_PATH: ""
+    restart: unless-stopped
+
+  da-registry-celery-beat:
+    image: da-registry-local/celery:dev
+    pull_policy: never
+    container_name: da-registry-celery-beat
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      da-registry-celery-worker:
+        condition: service_started
+    environment:
+      CELERY_APP: openg2p_registry_celery_beat.main.celery_app
+      CELERY_OPTS: worker --beat -Q celery --loglevel=info --schedule=/tmp/celery-beat-schedule.db
+      REGISTRY_CELERY_BEAT_DB_USERNAME: ${POSTGRES_SUPERUSER:-postgres}
+      REGISTRY_CELERY_BEAT_DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      REGISTRY_CELERY_BEAT_DB_HOSTNAME: postgres
+      REGISTRY_CELERY_BEAT_DB_PORT: 5432
+      REGISTRY_CELERY_BEAT_DB_DBNAME: da_registry_db
+      REGISTRY_CELERY_BEAT_MASTER_DATA_READ_MODE: db
+      REGISTRY_CELERY_BEAT_CELERY_BROKER_URL: "redis://redis:6379/0"
+      REGISTRY_CELERY_BEAT_CELERY_BACKEND_URL: "redis://redis:6379/0"
+      REGISTRY_CELERY_BEAT_WORKER_QUEUE: da_registry_worker_queue
+      REGISTRY_CELERY_BEAT_BATCH_SIZE: 2000
+      REGISTRY_CELERY_BEAT_NO_OF_TASKS_TO_PROCESS: 4
+      REGISTRY_CELERY_BEAT_DATA_TRANSFORMATION_BEAT_PRODUCER_FREQUENCY: 20
+      REGISTRY_CELERY_BEAT_INGEST_DATA_BEAT_PRODUCER_FREQUENCY: 20
+      REGISTRY_CELERY_BEAT_INGEST_DATA_CLASSIFICATION_BEAT_PRODUCER_FREQUENCY: 20
+      REGISTRY_CELERY_BEAT_OUTGEST_DATA_PUBLISH_BEAT_PRODUCER_FREQUENCY: 20
+      REGISTRY_CELERY_BEAT_OUTGEST_TOPIC_REGISTER_BEAT_PRODUCER_FREQUENCY: 20
+      REGISTRY_CELERY_BEAT_DEDUPLICATION_BEAT_PRODUCER_FREQUENCY: 30
+    restart: unless-stopped
+
+  da-registry-staff-ui:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: staff-ui
+      args:
+        STAFF_UI_VERSION: ${REGISTRY_STAFF_PORTAL_UI_VERSION:-1.2.2-rc.544}  # keep equal to RP_VERSION in the Dockerfile
+    image: ${REGISTRY_STAFF_PORTAL_UI_IMAGE:-da-registry-local/staff-ui:dev}
+    container_name: da-registry-staff-ui
+    extra_hosts:
+      - "localhost:host-gateway"
+    depends_on:
+      da-registry-staff-api:
+        condition: service_healthy
+      iam-staff-api:
+        condition: service_healthy
+      iam-register-da-app:
+        condition: service_completed_successfully
+    environment:
+      PORT: "3000"
+      HOSTNAME: "0.0.0.0"
+      BACKEND_API_URL: "http://da-registry-staff-api:8000"
+      MASTERDATA_BACKEND_API_URL: "http://da-master-data-api:8000"
+      DEFAULT_LOCALE: en
+      PARTNER_IMPORT_EXPORT_ENABLE: "true"
+      PAGE_SIZE: 10
+      IAM_URL: "http://localhost:${IAM_STAFF_PORT:-8120}"
+      KEYCLOAK_LOGOUT_URL: "http://localhost:${KEYCLOAK_PORT:-8090}/realms/staff/protocol/openid-connect/logout"
+      LOGIN_PROVIDER_ID: "1"
+      APPLICATION_MNEMONIC: da-registry-staff-portal
+      COOKIE_DOMAIN: localhost
+      REDIRECT_URL: "http://localhost:${DA_REGISTRY_UI_PORT:-3101}"
+      # The image's middleware builds a CSP of `img-src 'self' blob: data:` plus a
+      # hard-coded `upgrade-insecure-requests`: every MinIO-hosted image (DA
+      # photo, land certificate) is blocked and the widget shows its placeholder,
+      # and on plain http the upgrade breaks the URL outright. CSP_SRC_IMG can
+      # widen img-src but only CSP_HEADER drops the upgrade. Same directives as
+      # the default, plus the MinIO origin, minus the upgrade. A TLS deployment
+      # should instead set CSP_SRC_IMG to include its public MinIO host.
+      CSP_HEADER: "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data: http://minio.localtest.me:9010; font-src 'self'; connect-src 'self'; frame-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+    ports:
+      - "${DA_REGISTRY_UI_PORT:-3101}:3000"
+    restart: unless-stopped
+
+  da-registry-db-seed:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: db-seed
+    image: da-registry-local/db-seed:dev
+    container_name: da-registry-db-seed
+    depends_on:
+      minio:
+        condition: service_healthy
+      da-registry-staff-api:
+        condition: service_healthy
+      da-registry-geo-seed:
+        condition: service_completed_successfully
+    environment:
+      PGHOST: postgres
+      PGPORT: 5432
+      PGDATABASE: da_registry_db
+      PGUSER: ${POSTGRES_SUPERUSER:-postgres}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      MD_PGHOST: postgres
+      MD_PGPORT: 5432
+      MD_PGDATABASE: da_master_data_db
+      MD_PGUSER: ${POSTGRES_SUPERUSER:-postgres}
+      MD_PGPASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      AWE_DB_SEED_ENABLED: ${AWE_DB_SEED_ENABLED:-true}
+      AWE_PGHOST: postgres
+      AWE_PGPORT: 5432
+      AWE_PGDATABASE: awe
+      AWE_PGUSER: ${POSTGRES_SUPERUSER:-postgres}
+      AWE_PGPASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      AWE_CALLBACK_SECRET_ID: ${AWE_REGISTRY_CALLBACK_SECRET_ID:-00000000-0000-4000-8000-000000000001}
+      AWE_CALLBACK_HMAC_SECRET: ${AWE_REGISTRY_CALLBACK_HMAC_SECRET:-dev-registry-awe-callback-secret}
+      AWE_CALLBACK_CALLER_SERVICE: ${AWE_CALLBACK_CALLER_SERVICE:-registry}
+      LOAD_SAMPLE_DATA: ${LOAD_SAMPLE_DATA:-true}
+      # false: the da-registry-geo-seed job already loaded the Ethiopia
+      # hierarchy into master data; loading it a second time from
+      # seed-data/geo trips master data's unique (mnemonic, parent, level).
+      LOAD_GEO_DATA: ${LOAD_GEO_DATA:-false}
+      LOAD_IMAGES: ${LOAD_IMAGES:-false}
+      LOAD_TEMPLATES: ${LOAD_TEMPLATES:-true}
+      MINIO_ENDPOINT: "minio:9010"
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-admin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-adminsecret}
+      MINIO_SECURE: "false"
+      TEMPLATE_BUCKET_NAME: templates
+      # Must stay "documents": DocumentBucket in registry-core is hard-set
+      # ("the physical bucket name is always the enum value"), and
+      # upload_images.py writes the g2p_registry_documents catalog row with a
+      # hardcoded "documents" regardless of this variable. Pointing it at
+      # registrant-photos uploaded the objects to a bucket the catalog does
+      # not reference, so every search_in_a_register call failed with
+      # NoSuchBucket and the register list rendered empty.
+      IMAGE_BUCKET_NAME: documents
+    restart: "no"
+
+volumes:
+  postgres-data:
+  minio-data:

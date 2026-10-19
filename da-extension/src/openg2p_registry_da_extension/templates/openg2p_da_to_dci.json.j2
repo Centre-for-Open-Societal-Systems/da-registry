@@ -1,0 +1,77 @@
+{#- DA register record -> DCI search result. This is what the Frappe DA Service
+    receives from the partner API (POST /dci/registry/sync/search). Only the DA
+    person record lives in this registry; workflow state is Frappe's.
+    Everything sits under one top-level key, da_details, because the partner API
+    clamps each record to the consented scopes (its top-level keys). -#}
+{%- macro sex(value) -%}
+{%- set v = (value or '') | string | trim | upper -%}
+{%- if v in ['MALE', 'M'] -%}male
+{%- elif v in ['FEMALE', 'F'] -%}female
+{%- elif v -%}{{ v | lower }}
+{%- else -%}unknown
+{%- endif -%}
+{%- endmacro -%}
+
+{#- Master Data location code of one level, from the record's stored chain,
+    for records whose region/zone/woreda_code columns are still empty
+    (geo_code_hierarchy_json). A level's id is its type and P-code, e.g.
+    "woreda-ET040301", so the code is the part after the first "-". Kebele ids
+    do not carry their parents' codes, so each level is read from its own entry. -#}
+{%- macro geo_code(chain, level) -%}
+{%- set ns = namespace(code='') -%}
+{%- if chain is mapping -%}
+{%- for entry in (chain.get('hierarchy') or []) -%}
+{%- if entry is mapping and ((entry.get('level_mnemonic') or entry.get('level') or '') | lower) == level -%}
+{%- set ns.code = ((entry.get('level_value_id') or '') | string).split('-', 1) | last -%}
+{%- endif -%}
+{%- endfor -%}
+{%- endif -%}
+{{- ns.code -}}
+{%- endmacro -%}
+
+{%- set d = expanded -%}
+{%- set da_list = d.get('da') or [] -%}
+{%- set da = d if d.get('foundational_id') is not none or d.get('first_name') is not none or d.get('functional_record_id') is not none else (da_list[0] if da_list else {}) -%}
+{
+  "da_details": {
+    "da_id": {{ (da.get('functional_record_id') or '') | tojson }},
+    "internal_record_id": {{ (da.get('internal_record_id') or '') | tojson }},
+    "fayda_id": {{ (da.get('foundational_id') or '') | tojson }},
+    "name": {
+      "salutation": {{ (da.get('prefix') or '') | tojson }},
+      "given_name": {{ (da.get('first_name') or '') | tojson }},
+      "father_name": {{ (da.get('middle_name') or '') | tojson }},
+      "grandfather_name": {{ (da.get('last_name') or '') | tojson }},
+      "full_name": {{ (da.get('record_name') or '') | tojson }}
+    },
+    "sex": {{ sex(da.get('gender')) | tojson }},
+    "marital_status": {{ (da.get('marital_status') or '') | tojson }},
+    "birth_month_ec": {{ da.get('birth_month_ec') | tojson }},
+    "birth_year_ec": {{ da.get('birth_year_ec') | tojson }},
+    "contact": {
+      "phone_number": {{ (da.get('mobile_number') or '') | tojson }},
+      "telegram_number": {{ (da.get('telegram_number') or '') | tojson }},
+      "alternate_number": {{ (da.get('alternate_number') or '') | tojson }},
+      "email": {{ (da.get('email') or '') | tojson }}
+    },
+    "education_level": {{ (da.get('education_level') or '') | tojson }},
+    "specialisation": {{ (da.get('specialisation') or '') | tojson }},
+    "position": {{ (da.get('position') or '') | tojson }},
+    "joined_date": {{ (da.get('joined_date') or '') | tojson }},
+    "source": {{ (da.get('source') or '') | tojson }},
+    "posting": {
+      "region": {{ (da.get('region_name') or '') | tojson }},
+      "zone": {{ (da.get('zone_name') or '') | tojson }},
+      "woreda": {{ (da.get('woreda_name') or '') | tojson }},
+      "kebele": {{ (da.get('kebele_name') or '') | tojson }},
+      "region_code": {{ (da.get('region_code') or geo_code(da.get('geo_code_hierarchy_json'), 'region')) | tojson }},
+      "zone_code": {{ (da.get('zone_code') or geo_code(da.get('geo_code_hierarchy_json'), 'zone')) | tojson }},
+      "woreda_code": {{ (da.get('woreda_code') or geo_code(da.get('geo_code_hierarchy_json'), 'woreda')) | tojson }},
+      "kebele_code": {{ ((da.get('geo_lowest_level_value_id') or '') | string).split('-', 1) | last | tojson }},
+      "geo_lowest_level_value_id": {{ (da.get('geo_lowest_level_value_id') or '') | tojson }}
+    },
+    "record_status": {{ (da.get('record_status') or '') | tojson }},
+    "registration_date": {{ (da.get('registration_date') or da.get('created_at') or '') | tojson }},
+    "last_updated": {{ (da.get('last_approved_at') or '') | tojson }}
+  }
+}
