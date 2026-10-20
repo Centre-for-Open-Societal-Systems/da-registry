@@ -6,6 +6,11 @@
 #     helm dependency update ./helm/openg2p-da-registry
 #     helm install da-registry ./helm/openg2p-da-registry
 #
+# Release name: use `da-registry`. The subchart caps it at 18 characters, and
+# it names the Keycloak client (<release>-staff-portal), which must be
+# `da-registry-staff-portal`: the IAM application, the DA Services roles and
+# the data policies (docs/rbac-registry-roles.md) all use that mnemonic.
+#
 # NOT YET DEPLOYABLE AS-IS: the DA namespace, public hostnames, image registry
 # and the shared commons services (Postgres, Keycloak, master data, MinIO, AWE)
 # are still to be confirmed with DevOps. Values marked TODO depend on that.
@@ -54,7 +59,8 @@ global:
 registry:
   # DA-built images (each FROM the matching openg2p-registry base image).
   # TODO(devops): repository = the ECR path the Jenkinsfile pushes to
-  # (<account>.dkr.ecr.ap-south-1.amazonaws.com/openg2p/da-registry/<name>);
+  # (<account>.dkr.ecr.ap-south-1.amazonaws.com/openg2p/da-registry, one repo, tag
+  # <component>-<commit> or <component>-develop);
   # CI or the deploy step sets the tag.
   # *_APPLICATION_REFERENCE_FORMAT: four random digits instead of the platform's one,
   # so records arriving in the same second do not collide during bulk import.
@@ -65,12 +71,12 @@ registry:
       DA_AUTO_APPROVE_IMPORTS: "true"
       REGISTRY_STAFF_PORTAL_API_APPLICATION_REFERENCE_FORMAT: "{DATE:%Y%b%d|upper}-{SECONDS:5}-{RAND:4}"
     image:
-      repository: openg2p/da-registry/staff-api
-      tag: develop
-  staffPortalUi:
+      repository: openg2p/da-registry
+      tag: staff-api-develop
+  staffUi:
     image:
-      repository: openg2p/da-registry/staff-ui
-      tag: develop
+      repository: openg2p/da-registry
+      tag: staff-ui-develop
   partnerApi:
     envVars:
       DA_AUTO_APPROVE_IMPORTS: "true"
@@ -78,8 +84,8 @@ registry:
       # DCI expression search: the platform's default fields plus the DA location (names and codes), position and last_approved_at (changes since), so DA Services can filter exactly by Woreda / Kebele.
       REGISTRY_PARTNER_API_DCI_EXPRESSION_ALLOWED_FIELDS: '["functional_record_id","first_name","middle_name","last_name","given_name","gender","birth_date","foundational_id","record_name","record_status","search_text","marital_status","income_level","education_level","residency_status","disability_status","displacement_status","region_name","zone_name","woreda_name","kebele_name","geo_lowest_level_value_id","position","specialisation","upstream_reference","region_code","zone_code","woreda_code","last_approved_at"]'
     image:
-      repository: openg2p/da-registry/partner-api
-      tag: develop
+      repository: openg2p/da-registry
+      tag: partner-api-develop
   celeryWorker:
     envVars:
       DA_AUTO_APPROVE_IMPORTS: "true"
@@ -95,16 +101,16 @@ registry:
           name: '{{ tpl .Values.global.masterDataDBSecret $ }}'
           key: '{{ tpl .Values.global.masterDataDBUserPasswordKey $ }}'
     image:
-      repository: openg2p/da-registry/celery
-      tag: develop
+      repository: openg2p/da-registry
+      tag: celery-develop
   celeryBeat:
     image:
-      repository: openg2p/da-registry/celery
-      tag: develop
+      repository: openg2p/da-registry
+      tag: celery-develop
   dbSeed:
     image:
-      repository: openg2p/da-registry/db-seed
-      tag: develop
+      repository: openg2p/da-registry
+      tag: db-seed-develop
     # Synthetic DAs are for local dev only. Geography and code lists come from
     # the Master Data service, not from the registry seed.
     loadSampleData: false

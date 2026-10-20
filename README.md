@@ -21,7 +21,8 @@ follows the same build model as the farmer registry.
 | `import-templates/` | Blank CSV and Excel templates for bulk import |
 | `docker-compose.yml` | Self-contained local stack |
 | `helm/openg2p-da-registry/` | Helm overlay on the `openg2p-registry` chart (not deployable yet, see TODOs) |
-| `Jenkinsfile` | CI: build and push images only; no deploy stage yet |
+| `Jenkinsfile` | CI/CD: builds and pushes images to ECR (`openg2p/da-registry`, tag `<component>-<commit>`); on `develop` also upgrades the dev release `da` (namespace `commons`) |
+| `deploy/dev/values-da.yaml` | Dev values the Jenkinsfile applies over the `oan-coss/openg2p-da-registry` release |
 
 ## The DA register
 
