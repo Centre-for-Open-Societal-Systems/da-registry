@@ -22,7 +22,7 @@ keywords:
 home: https://openg2p.org
 icon: https://openg2p.github.io/openg2p-helm/openg2p-logo.png
 sources:
-  - https://github.com/Centre-for-Open-Societal-Systems/DA-registry-backend
+  - https://github.com/Centre-for-Open-Societal-Systems/da-registry
 
 # The openg2p-registry version is pinned by hand: the DA images extend that
 # same base image tag (ARG RP_VERSION in the root Dockerfile), so the two move

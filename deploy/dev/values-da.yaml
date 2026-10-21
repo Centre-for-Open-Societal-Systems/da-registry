@@ -1,0 +1,61 @@
+# Dev deployment of the DA registry: release `da`, namespace `commons`, chart
+# oan-coss/openg2p-da-registry (Centre-for-Open-Societal-Systems/oan-helm).
+#
+# The Jenkinsfile applies this on every develop build, over the release's own
+# values (--reuse-values), and sets each image tag to the commit it built
+# (<component>-<12-char sha>). The commons service URLs, Keycloak, MinIO and
+# gateway settings come from the chart's dev defaults and are not repeated here.
+#
+# The oan-helm chart ships every DA workload disabled with empty images; this
+# turns them on and points them at the images CI pushes to ECR.
+
+global:
+  registryHostname: da-registry.development.oanstaging.com
+
+registry:
+  staffApi:
+    enabled: true
+    image:
+      repository: 379220350808.dkr.ecr.ap-south-1.amazonaws.com/openg2p/da-registry
+      tag: staff-api-develop
+  partnerApi:
+    enabled: true
+    image:
+      repository: 379220350808.dkr.ecr.ap-south-1.amazonaws.com/openg2p/da-registry
+      tag: partner-api-develop
+    envVars:
+      # Same list as docker-compose.yml: DA location (names and codes), position
+      # and last_approved_at, so DA Services can filter by Woreda / Kebele.
+      REGISTRY_PARTNER_API_DCI_EXPRESSION_ALLOWED_FIELDS: '["functional_record_id","first_name","middle_name","last_name","given_name","gender","birth_date","foundational_id","record_name","record_status","search_text","marital_status","income_level","education_level","residency_status","disability_status","displacement_status","region_name","zone_name","woreda_name","kebele_name","geo_lowest_level_value_id","position","specialisation","upstream_reference","region_code","zone_code","woreda_code","last_approved_at"]'
+  celeryWorker:
+    enabled: true
+    image:
+      repository: 379220350808.dkr.ecr.ap-south-1.amazonaws.com/openg2p/da-registry
+      tag: celery-develop
+  celeryBeat:
+    enabled: true
+    image:
+      repository: 379220350808.dkr.ecr.ap-south-1.amazonaws.com/openg2p/da-registry
+      tag: celery-develop
+  staffUi:
+    enabled: true
+    image:
+      repository: 379220350808.dkr.ecr.ap-south-1.amazonaws.com/openg2p/da-registry
+      tag: staff-ui-develop
+  dbSeed:
+    enabled: true
+    image:
+      repository: 379220350808.dkr.ecr.ap-south-1.amazonaws.com/openg2p/da-registry
+      tag: db-seed-develop
+  # What a first install provisions: the registry DB and user, its Keycloak
+  # client, its IAM tile and roles, the DA-ID pool and its Celery broker.
+  postgres-init:
+    enabled: true
+  keycloak-init:
+    enabled: true
+  iamRegister:
+    enabled: true
+  idgenerator:
+    enabled: true
+  redis:
+    enabled: true
