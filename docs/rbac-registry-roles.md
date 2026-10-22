@@ -32,6 +32,31 @@ needs:
 | `change-requests/create_change_request` | `changeRequest:create` |
 | `change-requests/search_in_change_request` | `changeRequest:view` |
 
+### Who approves a DA
+
+Decision (22 Oct 2026): DAs from the bulk import and from the DA Services
+push are approved automatically (`DA_AUTO_APPROVE_IMPORTS=true`); a DA entered
+on the web intake form is approved by an administrator.
+
+A submitted DA (web form) goes to AWE, which assigns the approval task by the
+seeded approver rules (`awe_meta_data/30_approver_rule.sql`). The rules are by
+role on the client `da-registry-staff-portal`, so they work in every
+environment without naming a user:
+
+| Stage | Approvers: users holding either role |
+|---|---|
+| DA intake form | Operations Administrator, Intake Validator |
+| DA change request | Operations Administrator, Data Validator |
+
+AWE asks Keycloak for the users that hold the role **directly**. A role that
+comes through a group (the DA Services role groups above) is not seen by that
+lookup. So an approver must hold the role directly, or, once the DA Services
+groups exist in an environment, a `group` rule can be added for
+`DA Services - Supervisor` and `DA Services - OAN Administrator` (a group rule
+fails the whole resolution while the group is missing). AWE's resolver client
+needs `view-users` and `view-clients` in Keycloak. Routing a submission to its
+own Woreda's supervisor is DA-33.
+
 ## 2. Scope by Woreda, Zone or Region (DA-166)
 
 DA records carry `woreda_code`, `zone_code` and `region_code` (Master Data
