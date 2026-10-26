@@ -1,0 +1,37 @@
+# New dev sandbox (development.oanstaging.com): release `da-registry`,
+# namespace `da-registry`. Hostnames only; commons URLs, Keycloak, MinIO and the
+# gateway come from oan-helm environments/dev/values/da.yaml, and the images
+# from values-da.yaml (CI overrides the tags with the commit it built).
+#
+# Layer order used by the Jenkinsfile and by manual deploys:
+#   da.yaml (oan-helm)  ->  values-da.yaml  ->  this file  ->  images (CI)
+global:
+  registryHostname: da-registry.development.oanstaging.com
+  idGeneratorHostname: idgenerator-da.development.oanstaging.com
+  staffPortalBaseUrl: https://da-registry.development.oanstaging.com
+registry:
+  staffUi:
+    hostname: da-registry.development.oanstaging.com
+    partnerIngestUrl: https://partner-da-registry.development.oanstaging.com/partner/ingest_data?data_model=dcivc
+    envVars:
+      APP_URL: https://da-registry.development.oanstaging.com
+      REDIRECT_URL: https://da-registry.development.oanstaging.com
+    istio:
+      virtualservice:
+        host: da-registry.development.oanstaging.com
+      gateway:
+        host: da-registry.development.oanstaging.com
+  staffApi:
+    hostname: staff-da-registry.development.oanstaging.com
+    istio:
+      virtualservice:
+        host: staff-da-registry.development.oanstaging.com
+      gateway:
+        host: staff-da-registry.development.oanstaging.com
+  partnerApi:
+    hostname: partner-da-registry.development.oanstaging.com
+    istio:
+      virtualservice:
+        host: partner-da-registry.development.oanstaging.com
+      gateway:
+        host: partner-da-registry.development.oanstaging.com

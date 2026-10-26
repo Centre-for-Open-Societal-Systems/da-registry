@@ -1,10 +1,3 @@
-// DA Registry (OpenG2P) -- CI/CD pipeline.
-//
-// Every branch: build the five images and push them to ECR.
-// develop:      also deploy them to the dev cluster, release `da` in namespace
-//               `commons`, chart oan-coss/openg2p-da-registry (the one Rancher
-//               installed). Values: deploy/dev/values-da.yaml.
-// staging/main: build and push only; no deploy target yet.
 pipeline {
     // The agent that reaches the dev cluster (as the livestock pipeline uses).
     agent { label 'vpn-agent2' }
@@ -27,17 +20,24 @@ pipeline {
         // The staff UI is built from the same registry-platform run.
         RP_VERSION     = "1.2.2-rc.544"
 
-        // Dev deployment. The chart and version are the ones the release was
-        // installed with in Rancher; move them together with that install.
-        HELM_CHART_REPO_NAME = "oan-coss"
-        HELM_CHART_REPO_URL  = "https://raw.githubusercontent.com/Centre-for-Open-Societal-Systems/oan-helm/main/repository/"
-        HELM_CHART           = "oan-coss/openg2p-da-registry"
-        HELM_CHART_VERSION   = "1.0.0-dev.5"
-        DEV_RELEASE          = "da"
-        DEV_NAMESPACE        = "commons"
+        // New dev sandbox (development.oanstaging.com). The chart is the
+        // published, immutable archive from the COSS oan-helm repository,
+        // downloaded and checked against HELM_CHART_SHA256 before every deploy.
+        // A newer chart is a reviewed change here: bump both lines together.
+        OAN_HELM_RAW         = "https://raw.githubusercontent.com/Centre-for-Open-Societal-Systems/oan-helm/main"
+        HELM_CHART_NAME      = "openg2p-da-registry"
+        HELM_CHART_VERSION   = "1.0.0-dev.6"
+        HELM_CHART_SHA256    = "1be5a9cd869340fb2fcb54e895aae0db480da8fb83129c3d23ad16455767e017"
+        DEV_RELEASE          = "da-registry"
+        DEV_NAMESPACE        = "da-registry"
+        // Value layers, lowest first: oan-helm dev defaults, this repo's
+        // DA values (images/enable flags), this repo's new-dev hostnames,
+        // then the commit's image tags generated below.
+        DEV_ENV_VALUES_URL   = "${OAN_HELM_RAW}/environments/dev/values/da.yaml"
         DEV_VALUES           = "deploy/dev/values-da.yaml"
-        // Kubeconfig (Jenkins "Secret file") allowed to upgrade the release in DEV_NAMESPACE.
-        DEV_KUBECONFIG_CRED_ID = "da-dev-kubeconfig"
+        DEV_OVERLAY          = "deploy/dev/values-newdev.yaml"
+        // Kubeconfig (Jenkins "Secret file") of the da-registry-ci ServiceAccount.
+        DEV_KUBECONFIG_CRED_ID = "da-registry-newdev-kubeconfig"
     }
 
     stages {
@@ -85,48 +85,120 @@ pipeline {
         }
 
         stage('Deploy to Development') {
-            // Upgrades the existing release only (no --install), so a wrong
-            // name or namespace fails instead of creating a second release.
-            // --reuse-values keeps what was set in Rancher; DEV_VALUES and the
-            // commit's image tags go on top. No --atomic: a failing db-seed
-            // hook should leave the release inspectable, not roll it back.
+            // Installs or upgrades release `da-registry` in namespace `da-registry`
+            // with the verified chart archive and this commit's images (by commit
+            // tag, never by the moving -develop tag).
+            //
+            // Rollback: the upgrade is not --atomic, so a failure can be
+            // inspected first. When the upgrade or a rollout check fails, the
+            // pods/events/job logs are saved to deploy-failure-<build>.txt and the
+            // release is rolled back to the last revision that was `deployed`,
+            // then the build fails. On a first install there is nothing to roll
+            // back to; the failed release is left in place to debug.
             when { branch 'develop' }
             steps {
                 withCredentials([file(credentialsId: "${DEV_KUBECONFIG_CRED_ID}", variable: 'KUBECONFIG')]) {
-                    sh """
+                    sh '''
                         set -eu
-                        helm repo add ${HELM_CHART_REPO_NAME} ${HELM_CHART_REPO_URL} --force-update
-                        helm repo update ${HELM_CHART_REPO_NAME}
-                        helm status ${DEV_RELEASE} -n ${DEV_NAMESPACE} > /dev/null
+                        WORK=.build
+                        mkdir -p "$WORK"
+                        CHART="$WORK/${HELM_CHART_NAME}-${HELM_CHART_VERSION}.tgz"
 
-                        IMAGE_SET_FLAGS="
-                            --set-string registry.staffApi.image.tag=staff-api-${IMAGE_TAG}
-                            --set-string registry.partnerApi.image.tag=partner-api-${IMAGE_TAG}
-                            --set-string registry.celeryWorker.image.tag=celery-${IMAGE_TAG}
-                            --set-string registry.celeryBeat.image.tag=celery-${IMAGE_TAG}
-                            --set-string registry.staffUi.image.tag=staff-ui-${IMAGE_TAG}
-                            --set-string registry.dbSeed.image.tag=db-seed-${IMAGE_TAG}
-                        "
+                        # Pinned chart archive, verified.
+                        curl -fsSL -o "$CHART" "${OAN_HELM_RAW}/repository/${HELM_CHART_NAME}-${HELM_CHART_VERSION}.tgz"
+                        echo "${HELM_CHART_SHA256}  $CHART" | sha256sum -c -
 
-                        # Values before, and the manifests about to be applied, kept for audit.
-                        helm get values ${DEV_RELEASE} -n ${DEV_NAMESPACE} -a -o yaml > dev-values-before-${BUILD_NUMBER}.yaml
-                        helm template ${DEV_RELEASE} ${HELM_CHART} --version ${HELM_CHART_VERSION} -n ${DEV_NAMESPACE} \
-                            -f dev-values-before-${BUILD_NUMBER}.yaml -f ${DEV_VALUES} \$IMAGE_SET_FLAGS \
-                            > dev-rendered-${BUILD_NUMBER}.yaml
+                        # oan-helm dev defaults (Keycloak, commons services, gateway).
+                        curl -fsSL -o "$WORK/da-env.yaml" "$DEV_ENV_VALUES_URL"
 
-                        helm upgrade ${DEV_RELEASE} ${HELM_CHART} --version ${HELM_CHART_VERSION} -n ${DEV_NAMESPACE} \
-                            --reuse-values -f ${DEV_VALUES} \$IMAGE_SET_FLAGS \
-                            --cleanup-on-fail --timeout 15m
+                        # Image tags for this commit.
+                        cat > "$WORK/images.yaml" <<EOF
+registry:
+  staffApi:
+    image:
+      tag: "staff-api-${IMAGE_TAG}"
+  partnerApi:
+    image:
+      tag: "partner-api-${IMAGE_TAG}"
+  celeryWorker:
+    image:
+      tag: "celery-${IMAGE_TAG}"
+  celeryBeat:
+    image:
+      tag: "celery-${IMAGE_TAG}"
+  staffUi:
+    image:
+      tag: "staff-ui-${IMAGE_TAG}"
+  dbSeed:
+    image:
+      tag: "db-seed-${IMAGE_TAG}"
+EOF
+                        VALS="-f $WORK/da-env.yaml -f $DEV_VALUES -f $DEV_OVERLAY -f $WORK/images.yaml"
 
-                        for d in staff-portal-api staff-portal-ui partner-api; do
-                            kubectl rollout status deployment/${DEV_RELEASE}-\$d -n ${DEV_NAMESPACE} --timeout=300s
-                        done
-                    """
+                        # What is about to be applied, kept for audit.
+                        helm template "$DEV_RELEASE" "$CHART" -n "$DEV_NAMESPACE" $VALS > "$WORK/rendered.yaml"
+
+                        # Guards: new-dev hostnames present, every DA image on this commit.
+                        grep -q 'da-registry.development.oanstaging.com' "$WORK/rendered.yaml"
+                        if grep -E "openg2p/da-registry:[a-z-]+-(develop|staging|main)\\b" "$WORK/rendered.yaml"; then
+                            echo "ERROR: a DA image is not pinned to commit ${IMAGE_TAG}" >&2
+                            exit 1
+                        fi
+                        N=$(grep -cE "openg2p/da-registry:[a-z-]+-${IMAGE_TAG}\\b" "$WORK/rendered.yaml" || true)
+                        [ "$N" -ge 6 ] || { echo "ERROR: expected >= 6 DA image refs on ${IMAGE_TAG}, found $N" >&2; exit 1; }
+
+                        # Last good revision, if any, to roll back to.
+                        PREV=""
+                        if helm list -n "$DEV_NAMESPACE" --deployed -q --filter "^${DEV_RELEASE}\\$" | grep -qx "$DEV_RELEASE"; then
+                            PREV=$(helm status "$DEV_RELEASE" -n "$DEV_NAMESPACE" -o json | sed -n 's/.*"version":\\([0-9][0-9]*\\).*/\\1/p' | head -1)
+                            helm get values "$DEV_RELEASE" -n "$DEV_NAMESPACE" -a -o yaml > "$WORK/values-before.yaml"
+                        fi
+                        echo "Last deployed revision: ${PREV:-none (first install)}"
+
+                        # Server-side dry run: catches RBAC, schema and admission errors first.
+                        helm upgrade --install "$DEV_RELEASE" "$CHART" -n "$DEV_NAMESPACE" $VALS --dry-run=server > "$WORK/dryrun.txt"
+
+                        diag() {
+                            {
+                                echo "== helm history"; helm history "$DEV_RELEASE" -n "$DEV_NAMESPACE" --max 5
+                                echo "== pods"; kubectl get pods -n "$DEV_NAMESPACE" -o wide
+                                echo "== pods not Running/Succeeded"; kubectl get pods -n "$DEV_NAMESPACE" --field-selector=status.phase!=Running,status.phase!=Succeeded
+                                echo "== events"; kubectl get events -n "$DEV_NAMESPACE" --sort-by=.lastTimestamp | tail -40
+                                for j in $(kubectl get jobs -n "$DEV_NAMESPACE" -o name); do
+                                    echo "== logs $j"; kubectl logs -n "$DEV_NAMESPACE" "$j" --all-containers --tail=40 2>&1 || true
+                                done
+                            } > "deploy-failure-${BUILD_NUMBER}.txt" 2>&1 || true
+                        }
+
+                        set +e
+                        helm upgrade --install "$DEV_RELEASE" "$CHART" -n "$DEV_NAMESPACE" $VALS --wait --timeout 15m
+                        RC=$?
+                        if [ "$RC" -eq 0 ]; then
+                            for d in staff-portal-api staff-portal-ui partner-api celery-worker; do
+                                kubectl rollout status "deployment/${DEV_RELEASE}-$d" -n "$DEV_NAMESPACE" --timeout=300s || RC=1
+                            done
+                        fi
+                        set -e
+
+                        if [ "$RC" -ne 0 ]; then
+                            diag
+                            if [ -n "$PREV" ]; then
+                                echo "Deploy failed; rolling back to revision $PREV"
+                                helm rollback "$DEV_RELEASE" "$PREV" -n "$DEV_NAMESPACE" --wait --timeout 10m
+                                echo "Rolled back to revision $PREV"
+                            else
+                                echo "Deploy failed on first install; nothing to roll back to."
+                            fi
+                            exit 1
+                        fi
+
+                        helm status "$DEV_RELEASE" -n "$DEV_NAMESPACE"
+                    '''
                 }
             }
             post {
                 always {
-                    archiveArtifacts artifacts: 'dev-values-before-*.yaml, dev-rendered-*.yaml', allowEmptyArchive: true
+                    archiveArtifacts artifacts: '.build/rendered.yaml, .build/da-env.yaml, .build/images.yaml, .build/values-before.yaml, .build/dryrun.txt, deploy-failure-*.txt', allowEmptyArchive: true
                 }
             }
         }
@@ -134,7 +206,7 @@ pipeline {
 
     post {
         failure {
-            echo "DA registry ${env.BRANCH_NAME} build/deploy failed. For a deploy failure, 'helm history ${env.DEV_RELEASE} -n ${env.DEV_NAMESPACE}' shows the release state."
+            echo "DA registry ${env.BRANCH_NAME} build/deploy failed. For a deploy failure see the archived deploy-failure-${env.BUILD_NUMBER}.txt; 'helm history ${env.DEV_RELEASE} -n ${env.DEV_NAMESPACE}' shows the release state."
         }
         always {
             sh 'docker image prune -f || true'
