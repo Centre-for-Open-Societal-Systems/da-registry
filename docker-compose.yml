@@ -6,7 +6,7 @@ name: da-openg2p
 # Self-contained local dev stack for the DA (Development Agent) Registry:
 # infra (Postgres, Redis, MinIO, Keycloak), IAM + AWE (Approval Workflow
 # Engine), the Master Data (geo/reference) catalogue, and the DA registry
-# services built from source (root Dockerfile targets).
+# services built from source (component Dockerfiles under docker/).
 #
 # Quick start:
 #   docker compose up --build -d
@@ -398,8 +398,7 @@ services:
   da-registry-staff-api:
     build:
       context: .
-      dockerfile: Dockerfile
-      target: staff-api
+      dockerfile: docker/staff-api/Dockerfile
     image: da-registry-local/staff-api:dev
     container_name: da-registry-staff-api
     extra_hosts:
@@ -471,8 +470,7 @@ services:
   da-registry-partner-api:
     build:
       context: .
-      dockerfile: Dockerfile
-      target: partner-api
+      dockerfile: docker/partner-api/Dockerfile
     image: da-registry-local/partner-api:dev
     container_name: da-registry-partner-api
     depends_on:
@@ -528,8 +526,7 @@ services:
   da-registry-celery-worker:
     build:
       context: .
-      dockerfile: Dockerfile
-      target: celery
+      dockerfile: docker/celery/Dockerfile
     image: da-registry-local/celery:dev
     container_name: da-registry-celery-worker
     depends_on:
@@ -612,10 +609,7 @@ services:
   da-registry-staff-ui:
     build:
       context: .
-      dockerfile: Dockerfile
-      target: staff-ui
-      args:
-        STAFF_UI_VERSION: ${REGISTRY_STAFF_PORTAL_UI_VERSION:-1.2.2-rc.544}  # keep equal to RP_VERSION in the Dockerfile
+      dockerfile: docker/staff-ui/Dockerfile
     image: ${REGISTRY_STAFF_PORTAL_UI_IMAGE:-da-registry-local/staff-ui:dev}
     container_name: da-registry-staff-ui
     extra_hosts:
@@ -656,8 +650,7 @@ services:
   da-registry-db-seed:
     build:
       context: .
-      dockerfile: Dockerfile
-      target: db-seed
+      dockerfile: docker/db-seed/Dockerfile
     image: da-registry-local/db-seed:dev
     container_name: da-registry-db-seed
     depends_on:

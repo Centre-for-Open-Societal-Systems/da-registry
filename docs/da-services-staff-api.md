@@ -16,7 +16,7 @@ The partner API (bulk import and push status) is in
 | Recorded as | `system` / partner | The person's name |
 
 Every call below was run end to end against the local stack on
-registry-platform `1.2.2-rc.544`; the JSON is taken from those runs and trimmed.
+registry-platform `1.2.2-rc.557`; the JSON is taken from those runs and trimmed.
 
 | | Local stack | Deployment |
 |---|---|---|

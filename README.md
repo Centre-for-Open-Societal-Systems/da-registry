@@ -14,7 +14,7 @@ follows the same build model as the farmer registry.
 | Path | What it is |
 |---|---|
 | `da-extension/` | Python extension: DA model, domain rules, ID prefix, file-import enricher, seed metadata, Jinja templates |
-| `Dockerfile` | One build with targets `staff-api`, `partner-api`, `celery`, `staff-ui`, `db-seed` |
+| `docker/*/Dockerfile` | Thin native registry-platform images for the DA APIs, worker/beat, UI and seed job |
 | `docker/patches/` | Fixes applied to the pinned platform images at build time |
 | `docker/db-seed/` | Synthetic DA loader (local only) |
 | `docker/local-dev/` | Config for the local stack (Keycloak, IAM, AWE, ID generator, Postgres, geo seed) |
@@ -131,10 +131,10 @@ docker exec -w /tmp da-registry-staff-api python -m unittest discover -s /tmp/da
 ## Platform version
 
 Platform images come from Docker Hub (`openg2p/openg2p-registry-*`), pinned to
-`1.2.2-rc.544`, the same release as the livestock registry. Keep these in step:
+`1.2.2-rc.557`, the same native release used by the refactored crop/livestock
+registries. Keep the component Dockerfiles and chart dependency in step:
 
-- `ARG RP_VERSION` and `ARG STAFF_UI_VERSION` in the root `Dockerfile`
-- the `STAFF_UI_VERSION` build arg default in `docker-compose.yml`
+- `ARG RP_VERSION` in `docker/*/Dockerfile`
 - `RP_VERSION` in the `Jenkinsfile`
 - the `openg2p-registry` dependency in `helm/openg2p-da-registry/Chart.yaml`
   (repository `https://openg2p.github.io/openg2p-helm`)
@@ -151,10 +151,10 @@ Platform images come from Docker Hub (`openg2p/openg2p-registry-*`), pinned to
 
 When the version moves, re-check:
 
-- `docker/patches/patch_platform.py`: the build fails if a patch stops matching.
-  Current patches: partner API ingest response (datetime), IAM permission lookup, and the
-  celery worker's database engine (`NullPool`, so no pooled connection crosses the per-task
-  event loops; without it valid records could get stuck behind an invalid one).
+- `docker/patches/patch_platform.py`: compatibility fixes retained from the
+  existing DA build are applied to the API/worker images and fail loudly when
+  the pinned platform changes. Remove each entry only after its upstream fix is
+  verified in the selected platform image.
 - `*_APPLICATION_REFERENCE_FORMAT` (compose and Helm): four random digits instead of the
   platform's one, so records arriving in the same second do not collide on the unique index.
 - Celery beat picks `NO_OF_TASKS_TO_PROCESS` (4) records per tick (20 s) per stage, about

@@ -15,7 +15,7 @@ git checkout develop          # until PR #1 is merged: the PR branch
 docker compose up --build -d
 ```
 
-The first start pulls the platform images (registry-platform `1.2.2-rc.544`)
+The first start pulls the platform images (registry-platform `1.2.2-rc.557`)
 and takes 5–10 minutes. It is ready when the staff API answers:
 
 ```bash

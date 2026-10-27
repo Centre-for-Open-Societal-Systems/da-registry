@@ -22,10 +22,10 @@ pipeline {
         // prefix (staff-api-<commit>, staff-api-develop, ...).
         ECR_REPO       = "openg2p/da-registry"
 
-        // Must match ARG RP_VERSION / STAFF_UI_VERSION in the root Dockerfile
+        // Must match ARG RP_VERSION in the component Dockerfiles
         // and the openg2p-registry dependency in helm/openg2p-da-registry/Chart.yaml.
         // The staff UI is built from the same registry-platform run.
-        RP_VERSION     = "1.2.2-rc.544"
+        RP_VERSION     = "1.2.2-rc.557"
 
         // Dev deployment. The chart and version are the ones the release was
         // installed with in Rancher; move them together with that install.
@@ -58,14 +58,14 @@ pipeline {
                 script {
                     env.IMAGE_TAG = env.GIT_COMMIT.take(12)
 
-                    // Build the root Dockerfile's targets, the same definition
-                    // docker compose builds, so CI ships what developers run.
+                    // Build the same component Dockerfiles that docker compose
+                    // uses, so CI ships what developers run.
                     def components = [
-                        [name: 'staff-api',   target: 'staff-api',   args: "--build-arg RP_VERSION=${RP_VERSION}"],
-                        [name: 'staff-ui',    target: 'staff-ui',    args: "--build-arg STAFF_UI_VERSION=${RP_VERSION}"],
-                        [name: 'partner-api', target: 'partner-api', args: "--build-arg RP_VERSION=${RP_VERSION}"],
-                        [name: 'celery',      target: 'celery',      args: "--build-arg RP_VERSION=${RP_VERSION}"],
-                        [name: 'db-seed',     target: 'db-seed',     args: "--build-arg RP_VERSION=${RP_VERSION}"],
+                        [name: 'staff-api',   dockerfile: 'docker/staff-api/Dockerfile',   args: "--build-arg RP_VERSION=${RP_VERSION}"],
+                        [name: 'staff-ui',    dockerfile: 'docker/staff-ui/Dockerfile',    args: "--build-arg RP_VERSION=${RP_VERSION}"],
+                        [name: 'partner-api', dockerfile: 'docker/partner-api/Dockerfile', args: "--build-arg RP_VERSION=${RP_VERSION}"],
+                        [name: 'celery',      dockerfile: 'docker/celery/Dockerfile',      args: "--build-arg RP_VERSION=${RP_VERSION}"],
+                        [name: 'db-seed',     dockerfile: 'docker/db-seed/Dockerfile',     args: "--build-arg RP_VERSION=${RP_VERSION}"],
                     ]
 
                     // Each environment branch also moves a tag of its own name.
@@ -74,8 +74,8 @@ pipeline {
                         def image  = "${ECR_REGISTRY}/${ECR_REPO}:${c.name}-${env.IMAGE_TAG}"
                         def latest = movingTag ? "${ECR_REGISTRY}/${ECR_REPO}:${c.name}-${movingTag}" : null
                         sh """
-                            docker build ${c.args} --target ${c.target} \
-                                -f Dockerfile -t ${image} ${latest ? "-t ${latest}" : ''} .
+                            docker build ${c.args} \
+                                -f ${c.dockerfile} -t ${image} ${latest ? "-t ${latest}" : ''} .
                             docker push ${image}
                             ${latest ? "docker push ${latest}" : ''}
                         """
