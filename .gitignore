@@ -189,6 +189,10 @@ Desktop.ini
 # da-registry-dashboard-api, cloned by the Jenkinsfile
 /.build/
 
+# Generated staff-ui checkout and dependency marker.
+**/.app/
+**/.deps-stamp
+
 # ---------------------------------------------------------------------------
 # Helm artifacts
 # ---------------------------------------------------------------------------

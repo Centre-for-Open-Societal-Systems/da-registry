@@ -15,6 +15,7 @@ follows the same build model as the farmer registry.
 |---|---|
 | `da-extension/` | Python extension: DA model, domain rules, ID prefix, file-import enricher, seed metadata, Jinja templates |
 | `docker/*/Dockerfile` | Thin native registry-platform images for the DA APIs, worker/beat, UI and seed job |
+| `ui/staff-ui/` | Pinned upstream Staff UI materialization with an empty DA override layer for future UI additions |
 | `docker/patches/` | Fixes applied to the pinned platform images at build time |
 | `docker/db-seed/` | Synthetic DA loader (local only) |
 | `docker/local-dev/` | Config for the local stack (Keycloak, IAM, AWE, ID generator, Postgres, geo seed) |
@@ -136,6 +137,7 @@ registries. Keep the component Dockerfiles and chart dependency in step:
 
 - `ARG RP_VERSION` in `docker/*/Dockerfile`
 - `RP_VERSION` in the `Jenkinsfile`
+- the upstream staff-ui source revision in `ui/staff-ui/deps.json`
 - the `openg2p-registry` dependency in `helm/openg2p-da-registry/Chart.yaml`
   (repository `https://openg2p.github.io/openg2p-helm`)
 - the Master Data image (`openg2p/master-data-api:1.1.0`) and the ID generator image
