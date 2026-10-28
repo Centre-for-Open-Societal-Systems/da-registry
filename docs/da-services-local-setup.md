@@ -22,8 +22,9 @@ and takes 5–10 minutes. It is ready when the staff API answers:
 curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8101/docs   # 200
 ```
 
-The seed loads the Ethiopia geo hierarchy and **50 sample DAs**, all approved
-and active, with DA-IDs `DA-3500000001` to `DA-3500000050`. No real personal
+The seed loads the Ethiopia geo hierarchy, the dropdown code lists and
+**nine sample DAs** from the openg2p-data pack (`packs/ETH-OAN`), all approved
+and active, with DA-IDs `DA-3700000001` to `DA-3700000009`. No real personal
 data is used.
 
 Stop with `docker compose stop`; `docker compose down -v` also deletes the data.
@@ -79,7 +80,7 @@ Only `search_criteria.query` (and `pagination`) change between the three.
       "reference_id": "q1", "timestamp": "2026-10-13T04:30:00Z", "locale": "eng",
       "search_criteria": {
         "version": "1.0.0", "reg_type": "DA", "reg_record_type": "DA", "query_type": "expression",
-        "query": {"type": "expression", "value": {"expression": {"query": {"search_text": {"$eq": "DA-3500000001"}}}}}
+        "query": {"type": "expression", "value": {"expression": {"query": {"search_text": {"$eq": "DA-3700000001"}}}}}
       }
     }]
   }
@@ -88,8 +89,8 @@ Only `search_criteria.query` (and `pagination`) change between the three.
 
 | Search by | `query` | `pagination` | Result on the local seed |
 |---|---|---|---|
-| DA-ID | `{"search_text": {"$eq": "DA-3500000001"}}` | (default 10) | 1 record, DA-3500000001 |
-| Fayda ID | `{"search_text": {"$eq": "783433844718"}}` | (default 10) | 1 record, DA-3500000001 |
+| DA-ID | `{"search_text": {"$eq": "DA-3700000001"}}` | (default 10) | 1 record, DA-3700000001 |
+| Fayda ID | `{"search_text": {"$eq": "9311502628318720"}}` | (default 10) | 1 record, DA-3700000001 |
 | Woreda | `{"woreda_code": {"$eq": "ET010101"}}` | `{"page_size": 2, "page_number": 1}` | 2 records, `total_count` 41 |
 
 `search_text` is a partial match: check that a returned `da_id` or `fayda_id`
@@ -112,9 +113,9 @@ The answer is under `message.search_response[0]`:
   "status": "succ",
   "pagination": {"page_size": 10, "page_number": 1, "total_count": 1},
   "data": {"reg_records": [{"da_details": {
-    "da_id": "DA-3500000001",
+    "da_id": "DA-3700000001",
     "internal_record_id": "ec94f841-57cf-59c3-b30e-5d2e778342b8",
-    "fayda_id": "783433844718",
+    "fayda_id": "9311502628318720",
     "name": {"salutation": "", "given_name": "Solomon", "father_name": "Kassa", "grandfather_name": "Tadesse",
              "full_name": "Solomon Kassa Tadesse"},
     "sex": "male", "marital_status": "SINGLE", "birth_month_ec": 12, "birth_year_ec": 1982,

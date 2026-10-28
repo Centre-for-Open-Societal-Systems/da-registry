@@ -121,9 +121,29 @@ Host ports are chosen to run next to the Frappe DA Service and to avoid TCP
 | Postgres | 5442 |
 | Redis | 6389 |
 
-The geo-seed job loads the Ethiopia geo hierarchy into Master Data; db-seed
-loads the DA metadata and 50 synthetic DAs (`LOAD_SAMPLE_DATA=true`). No real
-personal data is used.
+Seeding, in order: the geo-seed job loads the Ethiopia geo hierarchy into
+Master Data; the codelist-seed job loads the dropdown code lists from the
+openg2p-data pack (`packs/ETH-OAN`: `GENDER`, `MARITAL_STATUS`, `PREFIX` and the
+`agriculture` domain's `DA_*` lists) into Master Data; db-seed loads the DA
+metadata and the pack's nine sample DAs (`samples/development_agents.json`,
+`LOAD_SAMPLE_DATA=true`). All sample and reference data comes from the COSS
+fork of [openg2p-data](https://github.com/Centre-for-Open-Societal-Systems/openg2p-data),
+baked into the db-seed image at build time (`OPENG2P_DATA_REF`, default
+`develop`); nothing is generated or hardcoded in this repo. No real personal
+data is used. To seed from a local openg2p-data checkout (for example while a
+data PR is open), point the jobs at it:
+
+```bash
+OPENG2P_DATA_PATH=/path/to/openg2p-data OPENG2P_DATA_DIR=/openg2p-data-local \
+  docker compose run --rm da-registry-codelist-seed && \
+OPENG2P_DATA_PATH=/path/to/openg2p-data OPENG2P_DATA_DIR=/openg2p-data-local \
+  docker compose run --rm da-registry-db-seed
+```
+
+On a cluster the Master Data db-seed image (openg2p-data's
+`docker/master-data-db-seed`, `PACK_LOAD=codelists`, `PACK_DOMAINS=agriculture`)
+loads the lists; the registry's db-seed loads the sample DAs from the same
+pack.
 
 Local-only settings in `docker-compose.yml`: Master Data is read from its
 database (`*_MASTER_DATA_READ_MODE=db`), and DCI search skips partner signature

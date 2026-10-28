@@ -130,8 +130,11 @@ registry:
     image:
       repository: openg2p/da-registry
       tag: db-seed-develop
-    # Synthetic DAs are for local dev only. Geography and code lists come from
-    # the Master Data service, not from the registry seed.
+    # Sample DAs come from the openg2p-data pack baked into the db-seed image
+    # (packs/ETH-OAN/samples/development_agents.json); off outside local dev.
+    # Geography and the dropdown code lists come from the Master Data service,
+    # seeded by openg2p-data's master-data-db-seed with PACK_DOMAINS=agriculture
+    # (the DA_* lists live in that domain), never from the registry seed.
     loadSampleData: false
     loadImages: false
     loadTemplates: true

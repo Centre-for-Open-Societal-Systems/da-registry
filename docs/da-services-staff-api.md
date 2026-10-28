@@ -169,6 +169,32 @@ Call `get_geo_level_values` level by level (`level-region` → `level-zone` →
 }
 ```
 
+### 2.2b Dropdown values (code lists)
+
+Every dropdown on the form reads Master Data too, same token and CSRF pair.
+The lists live in the openg2p-data country pack (`ETH-OAN`), nothing is
+hardcoded in the registry; a value is added or renamed there, never in code.
+
+```
+POST /attributes/get_attribute_values
+request_payload: {"attribute_id": "DA_SPECIALISATION"}
+pagination_request: {"current_page": 1, "page_size": 500, "search_text": "", "sort_by": "", "filter_by": ""}
+```
+
+| Form field (saved as) | `attribute_id` |
+|---|---|
+| `prefix` | `PREFIX` |
+| `gender` | `GENDER` |
+| `marital_status` | `MARITAL_STATUS` |
+| `education_level` (qualification) | `DA_EDUCATION_LEVEL` |
+| `specialisation` | `DA_SPECIALISATION` |
+| `position` | `DA_POSITION` |
+| `source` | `DA_SOURCE` |
+
+Each item has `value_id` (what you save), `value_display` (what you show) and
+`sort_order`. Fetch the lists once per session; they change only through a
+Master Data change request.
+
 ### 2.3 Save each section
 
 ```

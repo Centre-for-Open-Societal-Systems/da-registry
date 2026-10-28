@@ -1,19 +1,33 @@
 #!/usr/bin/env python3
-"""Load synthetic Development Agents into the DA register (local dev only).
+"""Load the sample Development Agents from openg2p-data into the DA register.
 
-Run by the db-seed image when LOAD_SAMPLE_DATA=true. Writes N synthetic DAs
-straight into g2p_register_das. Each DA is posted to a real kebele read from
-Master Data (MD_PG* env), so the geo hierarchy and the flattened
-region/zone/woreda/kebele names match what the portal shows.
+Run by the db-seed image when LOAD_SAMPLE_DATA=true (the platform entrypoint
+owns the hook, this file is the DA variant's loader). All sample data lives in
+the openg2p-data pack, nothing is generated here:
 
-Deterministic: the same N rows are produced on every run, and the insert is
-ON CONFLICT DO NOTHING, so re-running the seed never duplicates anything.
-No real people: names are drawn from common Ethiopian given names and every
-Fayda FAN / phone number is synthetic.
+  packs/<PACK>/samples/development_agents.json  the DAs: DA-ID, Fayda FAN,
+                                                qualification, specialisation,
+                                                position, posting (geo_pcode)
+  packs/<PACK>/samples/individuals.json         the people they are: names,
+                                                gender, marital status, phone
+                                                (the same individuals every OAN
+                                                registry seeds from)
+  packs/<PACK>/migration/id_map.csv             pack id -> the id a Master Data
+                                                seeded before the pack still
+                                                carries (e.g. kebele-ET0101...)
+
+The posting is resolved against Master Data (MD_PG* env): the pack's P-code
+first, then the pre-pack id from id_map.csv, so the same fixture loads on a
+Master Data seeded either way. A DA whose kebele is in neither is loaded
+without a posting and reported.
+
+Deterministic and idempotent: internal ids derive from the DA-ID, the insert is
+ON CONFLICT DO NOTHING, so re-running never duplicates anything.
 """
 
+import csv
+import json
 import os
-import random
 import sys
 import uuid
 
@@ -23,25 +37,11 @@ from psycopg2.extras import Json
 
 SEEDER = "seeder"
 CREATED_AT = "2026-10-01 00:00:00"
-COUNT = int(os.environ.get("DA_SAMPLE_COUNT", "50"))
 NAMESPACE = uuid.UUID("6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3f90")  # DA register id
-
-MALE = ["Abebe", "Tadesse", "Kebede", "Dawit", "Yohannes", "Mulugeta", "Getachew", "Solomon",
-        "Tesfaye", "Bekele", "Alemayehu", "Girma", "Haile", "Mesfin", "Fikru", "Lemma"]
-FEMALE = ["Hana", "Meseret", "Selamawit", "Tigist", "Rahel", "Almaz", "Birtukan", "Genet",
-          "Hiwot", "Mahlet", "Tsion", "Frehiwot", "Aster", "Senait", "Yeshi", "Zewditu"]
-FATHER = ["Alemu", "Girma", "Bekele", "Tesfaye", "Assefa", "Wolde", "Mulugeta", "Negash",
-          "Haile", "Desta", "Kassa", "Tadesse", "Abebe", "Lemma", "Gebre", "Worku"]
-SALUTATION = ["MR", "MRS", "DR", None]
-MARITAL = ["SINGLE", "MARRIED", "MARRIED", "DIVORCED", "WIDOWED"]
-EDUCATION_LEVEL = ["CERTIFICATE", "DIPLOMA", "DIPLOMA", "DEGREE", "DEGREE", "MASTERS"]
-POSITION = ["DEVELOPMENT_AGENT", "DEVELOPMENT_AGENT", "DEVELOPMENT_AGENT", "SENIOR_DA"]
-SPECIALISATION = ["CROP_PRODUCTION", "LIVESTOCK", "NATURAL_RESOURCES", "AGRONOMY", "HORTICULTURE"]
-SOURCE = "CSV_IMPORT"
 
 
 def log(msg: str) -> None:
-    print(f"[load-sample-data] {msg}")
+    print(f"[load-sample-data] {msg}", flush=True)
 
 
 def env(name: str) -> str:
@@ -52,13 +52,30 @@ def env(name: str) -> str:
     return value
 
 
-def load_kebeles() -> list:
-    """Return [(lowest_id, [chain root->leaf of (level_mnemonic, name, id)])]
-    for units at the lowest geo level in Master Data, or [] if unavailable."""
+def read_json(path: str):
+    with open(path, encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def load_fixture(pack_dir: str) -> tuple:
+    das_doc = read_json(os.path.join(pack_dir, "samples", "development_agents.json"))
+    das = das_doc.get("development_agents") if isinstance(das_doc, dict) else das_doc
+    individuals = {i["individual_id"]: i for i in read_json(os.path.join(pack_dir, "samples", "individuals.json"))}
+    id_map = {}
+    path = os.path.join(pack_dir, "migration", "id_map.csv")
+    if os.path.exists(path):
+        with open(path, encoding="utf-8", newline="") as fh:
+            for row in csv.DictReader(fh):
+                id_map.setdefault(row["pack_id"], row["source_id"])
+    return das or [], individuals, id_map
+
+
+def load_geo() -> dict:
+    """{level_value_id: (level mnemonic, name, parent id)} from Master Data, or {}."""
     host, dbname = os.environ.get("MD_PGHOST"), os.environ.get("MD_PGDATABASE")
     if not host or not dbname:
         log("MD_PG* not set: DAs are loaded without a posting.")
-        return []
+        return {}
     try:
         conn = psycopg2.connect(
             host=host, port=os.environ.get("MD_PGPORT", "5432"), dbname=dbname,
@@ -66,7 +83,7 @@ def load_kebeles() -> list:
         )
     except Exception as exc:  # noqa: BLE001
         log(f"could not reach master data ({exc}): DAs are loaded without a posting.")
-        return []
+        return {}
     try:
         with conn.cursor() as cur:
             cur.execute("select level_id, level_mnemonic from g2p_geo_levels")
@@ -76,29 +93,22 @@ def load_kebeles() -> list:
             rows = cur.fetchall()
     except Exception as exc:  # noqa: BLE001
         log(f"could not read master-data geo ({exc}): DAs are loaded without a posting.")
-        return []
+        return {}
     finally:
         conn.close()
+    return {vid: (str(level_name.get(lid, lid) or "").lower(), name, parent) for vid, lid, name, parent in rows}
 
-    by_id = {vid: (level_name.get(lid, lid), name, parent) for vid, lid, name, parent in rows}
-    # Post DAs to kebeles only. Some woredas have no kebeles in the pack, so
-    # "units without children" would also pick those woredas.
-    leaves = sorted(vid for vid, (level, _, _) in by_id.items() if str(level or "").lower() == "kebele")
-    if not leaves:
-        parents = {parent for _, _, _, parent in rows if parent}
-        leaves = sorted(vid for vid in by_id if vid not in parents)
-    out = []
-    for leaf in leaves:
-        chain, seen, cur = [], set(), leaf
-        while cur and cur in by_id and cur not in seen:
-            seen.add(cur)
-            level, name, parent = by_id[cur]
-            chain.append((str(level or "").lower(), name, cur))
-            cur = parent
-        chain.reverse()
-        out.append((leaf, chain))
-    log(f"master-data geo: {len(out)} lowest-level units available.")
-    return out
+
+def chain_for(geo: dict, leaf: str) -> list:
+    """[(level, name, id)] root -> leaf."""
+    chain, seen, cur = [], set(), leaf
+    while cur and cur in geo and cur not in seen:
+        seen.add(cur)
+        level, name, parent = geo[cur]
+        chain.append((level, name, cur))
+        cur = parent
+    chain.reverse()
+    return chain
 
 
 def display(name) -> str:
@@ -116,73 +126,66 @@ def flat_names(chain: list) -> dict:
     return names
 
 
-def build_rows(kebeles: list) -> list:
-    rnd = random.Random(20261001)
-    used_fin, rows = set(), []
-    for i in range(COUNT):
-        female = i % 2 == 1
-        first = rnd.choice(FEMALE if female else MALE)
-        father = rnd.choice(FATHER)
-        grandfather = rnd.choice(FATHER)
-        while True:
-            fin = str(rnd.randint(2000000000000000, 9999999999999999))  # 16-digit Fayda FAN
-            if fin not in used_fin:
-                used_fin.add(fin)
-                break
-        # Ethiopian calendar: 1964-1992 EC is roughly 1972-2000 GC.
-        birth_year_ec = rnd.randint(1964, 1992)
-        birth_month_ec = rnd.randint(1, 13)
-        joined_date = f"{rnd.randint(max(birth_year_ec + 28, 2005), 2026)}-{rnd.randint(1, 9):02d}-{rnd.randint(1, 28):02d}"
-        mobile = "09" + str(rnd.randint(10000000, 99999999))
-        alternate = "07" + str(rnd.randint(10000000, 99999999)) if i % 3 == 0 else None
-        email = f"{first.lower()}.{father.lower()}{i + 1}@example.org"
-        salutation = "MRS" if female and i % 4 == 1 else rnd.choice(["MR", "DR", None]) if not female else None
-        marital = rnd.choice(MARITAL)
-        education = rnd.choice(EDUCATION_LEVEL)
-        spec = rnd.choice(SPECIALISATION)
-        position = rnd.choice(POSITION)
-        da_id = f"DA-{3500000001 + i}"
-        internal_id = str(uuid.uuid5(NAMESPACE, f"sample-da-{i}"))
-
-        geo_id, hierarchy, names, codes = None, None, flat_names([]), flat_codes([])
-        if kebeles:
-            leaf, chain = kebeles[rnd.randrange(len(kebeles))]
-            geo_id = leaf
-            hierarchy = {"hierarchy": [{"level_mnemonic": lvl, "level_value_mnemonic": nm,
-                                        "level_value_id": vid} for lvl, nm, vid in chain]}
-            names = flat_names(chain)
-            codes = flat_codes(chain)
-
-        record_name = " ".join([first, father, grandfather])
-        search_text = " ".join(x for x in [
-            da_id, fin, first, father, grandfather, mobile, alternate, email, education, spec, position,
-            names["region"], names["zone"], names["woreda"], names["kebele"],
-        ] if x)
-
-        rows.append((
-            internal_id, da_id, None, None, record_name, None,
-            SEEDER, CREATED_AT, CREATED_AT, SEEDER, search_text, "ACTIVE", None,
-            fin, salutation, first, father, grandfather, "FEMALE" if female else "MALE", marital,
-            # phone_numbers (platform JSON) is left empty; the flat
-            # mobile_number column below is what the DA register uses.
-            None, CREATED_AT[:10],
-            geo_id, Json(hierarchy) if hierarchy else None,
-            birth_month_ec, birth_year_ec, mobile, mobile, alternate, email,
-            education, spec, position, joined_date, SOURCE,
-            names["region"], names["zone"], names["woreda"], names["kebele"],
-            codes["region"], codes["zone"], codes["woreda"],
-        ))
-    return rows
-
-
 def flat_codes(chain: list) -> dict:
-    """Master Data codes (OCHA P-codes) of region, zone and woreda: the part of
-    each level's id after its type, e.g. "woreda-ET040301" -> "ET040301"."""
+    """Master Data codes (P-codes) of region, zone and woreda: the id without a
+    level prefix, so "woreda-ET040301" and "ET040301" both give ET040301."""
     codes = {"region": None, "zone": None, "woreda": None}
     for level, _, value_id in chain:
         if level in codes and value_id:
             codes[level] = str(value_id).split("-", 1)[-1]
     return codes
+
+
+def resolve_posting(geo: dict, id_map: dict, pcode: str):
+    """The Master Data id for a pack P-code: itself, or its pre-pack id."""
+    for candidate in (pcode, id_map.get(pcode)):
+        if candidate and candidate in geo:
+            return candidate
+    return None
+
+
+def build_rows(das: list, individuals: dict, geo: dict, id_map: dict) -> list:
+    rows, unposted = [], []
+    for da in das:
+        person = individuals.get(da.get("individual_id")) or {}
+        first = person.get("given_name") or da.get("first_name")
+        middle = person.get("fathers_name") or da.get("middle_name")
+        last = da.get("last_name")
+        gender = da.get("gender") or person.get("gender")
+        marital = da.get("marital_status") or person.get("marital_status")
+        phone = person.get("phone") or ""
+        mobile = da.get("mobile_number") or ("0" + phone[4:] if phone.startswith("+251") else phone or None)
+        da_id = da["da_id"]
+        fan = da["fayda_fan"]
+        posting = resolve_posting(geo, id_map, da.get("geo_pcode")) if geo else None
+        chain = chain_for(geo, posting) if posting else []
+        if da.get("geo_pcode") and not posting:
+            unposted.append(da_id)
+        names, codes = flat_names(chain), flat_codes(chain)
+        hierarchy = {"hierarchy": [{"level_mnemonic": lvl, "level_value_mnemonic": nm, "level_value_id": vid}
+                                   for lvl, nm, vid in chain]} if chain else None
+        record_name = " ".join(x for x in [first, middle, last] if x)
+        search_text = " ".join(x for x in [
+            da_id, fan, first, middle, last, mobile, da.get("alternate_number"), da.get("email"),
+            da.get("education_level"), da.get("specialisation"), da.get("position"),
+            names["region"], names["zone"], names["woreda"], names["kebele"],
+        ] if x)
+        rows.append((
+            str(uuid.uuid5(NAMESPACE, f"sample-{da_id}")), da_id, None, None, record_name, None,
+            SEEDER, CREATED_AT, CREATED_AT, SEEDER, search_text, "ACTIVE", None,
+            fan, da.get("prefix"), first, middle, last, gender, marital,
+            None, CREATED_AT[:10],
+            posting, Json(hierarchy) if hierarchy else None,
+            da.get("birth_month_ec"), da.get("birth_year_ec"), mobile, da.get("telegram_number"),
+            da.get("alternate_number"), da.get("email"),
+            da.get("education_level"), da.get("specialisation"), da.get("position"), da.get("joined_date"),
+            da.get("source") or "CSV_IMPORT",
+            names["region"], names["zone"], names["woreda"], names["kebele"],
+            codes["region"], codes["zone"], codes["woreda"],
+        ))
+    if unposted:
+        log(f"{len(unposted)} DA(s) whose kebele is not in Master Data, loaded without a posting: {', '.join(unposted)}")
+    return rows
 
 
 COLUMNS = [
@@ -201,7 +204,18 @@ COLUMNS = [
 
 
 def main() -> None:
-    rows = build_rows(load_kebeles())
+    data_dir = os.environ.get("OPENG2P_DATA_DIR", "/openg2p-data")
+    pack = os.environ.get("PACK", "ETH-OAN")
+    pack_dir = os.path.join(data_dir, "packs", pack)
+    fixture = os.path.join(pack_dir, "samples", "development_agents.json")
+    if not os.path.exists(fixture):
+        log(f"no sample DAs in this openg2p-data checkout ({fixture}): nothing loaded.")
+        return
+    das, individuals, id_map = load_fixture(pack_dir)
+    geo = load_geo()
+    if geo:
+        log(f"master-data geo: {len(geo)} units; pack id map: {len(id_map)} entries.")
+    rows = build_rows(das, individuals, geo, id_map)
     conn = psycopg2.connect(
         host=env("PGHOST"), port=os.environ.get("PGPORT", "5432"), dbname=env("PGDATABASE"),
         user=env("PGUSER"), password=env("PGPASSWORD"),
@@ -212,7 +226,7 @@ def main() -> None:
                    + ", ".join(f'"{c}"' for c in COLUMNS)
                    + ') VALUES %s ON CONFLICT DO NOTHING')
             psycopg2.extras.execute_values(cur, sql, rows, page_size=200)
-            log(f"-> g2p_register_das: {len(rows)} synthetic DAs offered ({cur.rowcount} new)")
+            log(f"-> g2p_register_das: {len(rows)} sample DAs from pack {pack} ({cur.rowcount} new)")
     finally:
         conn.close()
 

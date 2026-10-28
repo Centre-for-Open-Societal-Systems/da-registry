@@ -1802,7 +1802,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"signature\": \"local-dev\",\n  \"header\": {\n    \"version\": \"1.0.0\",\n    \"message_id\": \"{{$guid}}\",\n    \"message_ts\": \"{{$isoTimestamp}}\",\n    \"action\": \"search\",\n    \"sender_id\": \"da-services\",\n    \"receiver_id\": \"da-registry\"\n  },\n  \"message\": {\n    \"transaction_id\": \"{{$guid}}\",\n    \"search_request\": [\n      {\n        \"reference_id\": \"q1\",\n        \"timestamp\": \"{{$isoTimestamp}}\",\n        \"locale\": \"eng\",\n        \"search_criteria\": {\n          \"version\": \"1.0.0\",\n          \"reg_type\": \"DA\",\n          \"reg_record_type\": \"DA\",\n          \"query_type\": \"expression\",\n          \"query\": {\n            \"type\": \"expression\",\n            \"value\": {\n              \"expression\": {\n                \"query\": {\n                  \"search_text\": {\n                    \"$eq\": \"DA-3500000001\"\n                  }\n                }\n              }\n            }\n          }\n        }\n      }\n    ]\n  }\n}"
+              "raw": "{\n  \"signature\": \"local-dev\",\n  \"header\": {\n    \"version\": \"1.0.0\",\n    \"message_id\": \"{{$guid}}\",\n    \"message_ts\": \"{{$isoTimestamp}}\",\n    \"action\": \"search\",\n    \"sender_id\": \"da-services\",\n    \"receiver_id\": \"da-registry\"\n  },\n  \"message\": {\n    \"transaction_id\": \"{{$guid}}\",\n    \"search_request\": [\n      {\n        \"reference_id\": \"q1\",\n        \"timestamp\": \"{{$isoTimestamp}}\",\n        \"locale\": \"eng\",\n        \"search_criteria\": {\n          \"version\": \"1.0.0\",\n          \"reg_type\": \"DA\",\n          \"reg_record_type\": \"DA\",\n          \"query_type\": \"expression\",\n          \"query\": {\n            \"type\": \"expression\",\n            \"value\": {\n              \"expression\": {\n                \"query\": {\n                  \"search_text\": {\n                    \"$eq\": \"DA-3700000001\"\n                  }\n                }\n              }\n            }\n          }\n        }\n      }\n    ]\n  }\n}"
             }
           }
         },
@@ -1831,7 +1831,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"signature\": \"local-dev\",\n  \"header\": {\n    \"version\": \"1.0.0\",\n    \"message_id\": \"{{$guid}}\",\n    \"message_ts\": \"{{$isoTimestamp}}\",\n    \"action\": \"search\",\n    \"sender_id\": \"da-services\",\n    \"receiver_id\": \"da-registry\"\n  },\n  \"message\": {\n    \"transaction_id\": \"{{$guid}}\",\n    \"search_request\": [\n      {\n        \"reference_id\": \"q1\",\n        \"timestamp\": \"{{$isoTimestamp}}\",\n        \"locale\": \"eng\",\n        \"search_criteria\": {\n          \"version\": \"1.0.0\",\n          \"reg_type\": \"DA\",\n          \"reg_record_type\": \"DA\",\n          \"query_type\": \"expression\",\n          \"query\": {\n            \"type\": \"expression\",\n            \"value\": {\n              \"expression\": {\n                \"query\": {\n                  \"search_text\": {\n                    \"$eq\": \"783433844718\"\n                  }\n                }\n              }\n            }\n          }\n        }\n      }\n    ]\n  }\n}"
+              "raw": "{\n  \"signature\": \"local-dev\",\n  \"header\": {\n    \"version\": \"1.0.0\",\n    \"message_id\": \"{{$guid}}\",\n    \"message_ts\": \"{{$isoTimestamp}}\",\n    \"action\": \"search\",\n    \"sender_id\": \"da-services\",\n    \"receiver_id\": \"da-registry\"\n  },\n  \"message\": {\n    \"transaction_id\": \"{{$guid}}\",\n    \"search_request\": [\n      {\n        \"reference_id\": \"q1\",\n        \"timestamp\": \"{{$isoTimestamp}}\",\n        \"locale\": \"eng\",\n        \"search_criteria\": {\n          \"version\": \"1.0.0\",\n          \"reg_type\": \"DA\",\n          \"reg_record_type\": \"DA\",\n          \"query_type\": \"expression\",\n          \"query\": {\n            \"type\": \"expression\",\n            \"value\": {\n              \"expression\": {\n                \"query\": {\n                  \"search_text\": {\n                    \"$eq\": \"9311502628318720\"\n                  }\n                }\n              }\n            }\n          }\n        }\n      }\n    ]\n  }\n}"
             }
           }
         },
@@ -2031,6 +2031,45 @@
             "body": {
               "mode": "raw",
               "raw": "{\n  \"request_header\": {\n    \"request_id\": \"{{$guid}}\",\n    \"request_timestamp\": \"{{$isoTimestamp}}\",\n    \"sender_app_mnemonic\": \"da-services\",\n    \"sender_app_url\": \"http://localhost\"\n  },\n  \"request_body\": {\n    \"request_payload\": {\n      \"level_id\": \"level-region\",\n      \"parent_level_value_id\": \"\"\n    },\n    \"pagination_request\": {\n      \"current_page\": 1,\n      \"page_size\": 20,\n      \"search_text\": \"\",\n      \"sort_by\": \"\",\n      \"filter_by\": \"\"\n    }\n  }\n}"
+            }
+          }
+        },
+        {
+          "name": "24. Code list values (dropdowns: specialisation, position, qualification, prefix, gender, marital status, source)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "X-CSRF-Token",
+                "value": "{{csrf}}"
+              },
+              {
+                "key": "Cookie",
+                "value": "X-CSRF-Token={{csrf}}"
+              }
+            ],
+            "description": "Every DA dropdown reads its values from Master Data (the openg2p-data pack ETH-OAN). Same token as the staff API. attribute_id: DA_SPECIALISATION, DA_POSITION, DA_EDUCATION_LEVEL (qualification), DA_SOURCE, PREFIX, GENDER, MARITAL_STATUS. Save value_id on the DA (education_level, specialisation, position, prefix, gender, marital_status); show value_display. Do not hardcode the lists.",
+            "url": {
+              "raw": "{{master_data}}/attributes/get_attribute_values",
+              "host": [
+                "{{master_data}}"
+              ],
+              "path": [
+                "attributes",
+                "get_attribute_values"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_header\": {\n    \"request_id\": \"{{$guid}}\",\n    \"request_timestamp\": \"{{$isoTimestamp}}\",\n    \"sender_app_mnemonic\": \"da-services\",\n    \"sender_app_url\": \"http://localhost\"\n  },\n  \"request_body\": {\n    \"request_payload\": {\n      \"attribute_id\": \"DA_SPECIALISATION\"\n    },\n    \"pagination_request\": {\n      \"current_page\": 1,\n      \"page_size\": 500,\n      \"search_text\": \"\",\n      \"sort_by\": \"\",\n      \"filter_by\": \"\"\n    }\n  }\n}"
             }
           }
         }
