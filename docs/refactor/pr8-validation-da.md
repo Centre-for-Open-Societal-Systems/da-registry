@@ -1,0 +1,67 @@
+# DA Registry – refactor PR #8 validation
+
+Yash Sontakke · 27–28 October 2026 · tested @ aa64492 of `asmitonweb:develop-refactor` (PR https://github.com/Centre-for-Open-Societal-Systems/da-registry/pull/8, registry-platform 1.2.2-rc.557)
+
+> **Status 28 Oct:** PR #8 is open (2 commits, 23 files, "wip" per Asmit). It is the first refactor step for DA: per-component Dockerfiles, platform rc.544 → rc.557, `ui/staff-ui` override scaffold. The DA extension, seeds, Keycloak/IAM init, Helm values and `deploy/dev` are unchanged by the PR, so everything below that works does so because the extension survived the platform bump, not because it was refactored yet. Section 4 lists what the refactor still has to move.
+
+The PR was run unchanged on a laptop with docker compose (project `da-pr8`, fresh DB volume): the five DA images built from the PR on the public rc.557 base images, develop's compose for Keycloak / IAM / Master Data (MDM) / AWE / ID generator. No PR code was modified; one compose override was used only to verify the DCI fix (B1). Test assets: the Postman collection replayed by script (39 API checks), a UI session script (12 checks), the extension's unit tests inside the built image (62), the 6-row Excel import file, DB and log inspection. This file is the "what we had / what is missing / what comes next" list asked for on 27 October and will be updated as items are fixed.
+
+## 1. What we had before the refactor (develop, deployed on dev)
+
+- One register `DA` with a 4-section web intake form (identity with Fayda FIN, contact, service, location by Master Data Region/Zone/Woreda/Kebele), DA-ID `DA-` + 10 digits from the ID generator, Ethiopian-calendar birth month/year, 18-year rule, one DA per Fayda ID (save-time check + unique index).
+- Approval through AWE: one stage, approvers by Keycloak role (Operations Administrator; Intake Validator for intake, Data Validator for change requests) – PR #6. Change requests on approved records with history. Deduplication results on the approval screen, record photo URL on the approval screen (runtime hook).
+- Bulk import: Excel/CSV file import (template, DA enricher resolving Kebele by id or names, per-row validation with readable reasons) and DA Services push on the partner API (`/partner/ingest_data`, DA_SERVICES data model, same enricher). Imports auto-approved when unique (`DA_AUTO_APPROVE_IMPORTS=true`), duplicates left PENDING with the reason. `GET /partner/da/status` and `GET /partner/da/exceptions` for DA Services (DA extension controllers).
+- DCI search for external systems with DA location codes (`woreda_code`, `zone_code`, `region_code`) and `last_approved_at` (PR #3). Staff-API ingest (`/input-mechanism-data/ingest-data`, DA_SERVICES body) as the user-token alternative.
+- RBAC: IAM catalog with the DA roles (Intake Officer, Intake Validator, Data Editor, Data Validator, Data Supervisor, Operations Administrator, …) and Woreda/Region data policies (`DP_DA_WOREDA_<code>`), mapped to the DA Services roles (DA-165).
+- Local docker-compose stack with Keycloak init (clients, roles, users), geo seed (Ethiopia hierarchy into MDM), db-seed (metadata, AWE policies, templates, 50 sample DAs), IAM app registration.
+- Implemented through: `docker/patches/patch_platform.py` (3 platform files text-patched at build: partner-API datetime response, IAM permission lookup, worker NullPool engine) and runtime hooks that wrap platform methods (FilterBuilder booleans, photo URL, auto-approve). No UI patches.
+- Built locally since develop, not merged (branch `feature/two-level-approval`): two-level approval seed, manual approval of imports with a worker service token, "a DA sees/edits only their own record" (token claim `da_id`), `register:export` permission for DA roles, demo users. Tested locally on rc.544; to be re-placed by the refactor (section 7).
+
+## 2. New in the refactor (working, verified locally)
+
+- Five native component images (`docker/{staff-api,partner-api,celery,db-seed,staff-ui}/Dockerfile`), each `FROM openg2p/openg2p-registry-<component>:1.2.2-rc.557` + `pip install da-extension`; Jenkinsfile and compose build them. The old root `Dockerfile` with build targets is gone (the per-component files carry the same content).
+- Platform rc.557: all six `patch_platform.py` patches still match (build fails loudly otherwise). `REGISTRY_EXTENSION_MODULE` still selects the DA extension.
+- `ui/staff-ui/`: upstream staff-ui pinned by commit (`deps.json`), `overrides/` (empty), scripts and Docker build; the built UI serves the DA register, intake form (4 DA sections), geo dropdowns and stats routes.
+- Verified end to end on the PR stack: Keycloak/IAM login (API and UI session) → DA form (render, 4 saves, finalize) → AWE task → claim → approve → DA-ID in the register (37 s) → events; search (free text, `woreda_code` filter, boolean filter as string), record, tab records; change request (phone) → approve → record updated; Master Data geo levels/values; partner push → auto-approve → DA-ID, `/partner/da/status`, `/partner/da/exceptions`; staff-API ingest (S16) → PROCESSED → registered, `search_in_ingestion_data`; Excel import: 5 valid rows registered in 128 s, the bad-Kebele row rejected with its reason and listed as INVALID_FIELD; DCI search by DA-ID and Fayda ID on the new path. Seeds: 20,890 geo values, 50 sample DAs, AWE policies/stages/callback secret, 2 incoming templates, IAM app (73 permissions, 11 roles). Unit tests 62/62. Start-up logs clean.
+
+## 3. Broken (bugs)
+
+| # | Finding | Where | Impact |
+|---|---|---|---|
+| B1 | rc.557 renamed the DCI allow-list setting: it reads `REGISTRY_PARTNER_API_DCI_ALLOWED_SEARCH_FIELDS` (`dci_allowed_search_fields`); our `REGISTRY_PARTNER_API_DCI_EXPRESSION_ALLOWED_FIELDS` is ignored, so every DA filter field answers `rjct.search_criteria.invalid: Field 'woreda_code' is not searchable` (verified: renaming the variable, same value, makes Woreda/Region/changed-since/combined searches pass) | `docker-compose.yml`, `helm/openg2p-da-registry/values.yaml`, `deploy/dev/values-da.yaml`, oan-helm dev chart | DA Services / external DCI filtering by location and changes-since is dead until renamed |
+| B2 | DCI search path changed: `POST /dci/registry/sync/search` (rc.544) → `POST /dci/sync/search`; `/dci/async/search` is new | platform rc.557 | Callers, Postman collection and API reference must change the path |
+| B3 | Worker: `RuntimeError: Task … attached to a different loop` (asyncpg) during ingestion persists on rc.557 even with the NullPool patch; rows are retried and all completed (5/5 Excel, S16, push) | platform / `ingest_data_worker` | Noise and slower imports; pre-existing on rc.544, not introduced by the PR; report upstream |
+
+No other regression found: form, approval, search, change request, master data, partner push/status/exceptions, staff-API ingest, file import, UI and the extension's runtime hooks behave as on develop.
+
+## 4. Missing (not yet refactored – still the old way, against the 27 Oct standards)
+
+- `docker/patches/patch_platform.py` still text-patches the base images: 3 fixes (6 entries) for platform bugs – (1) partner-API ingest response `datetime` → HTTP 500 on every `/partner/ingest_data`, (2) IAM `resolve_permissions` matching roles by name across all registries, (3) celery worker engine NullPool (asyncpg "attached to a different loop"). All three are still needed on rc.557 (the datetime 500 came back in livestock when its patch was dropped; the loop error is still seen here). **All three can be moved into the extension as start-up overrides** (wrap the partner response helper, the `ResolvePermissionMiddleware` method and the worker engine factory – the same style as the existing hooks), about one day of work, after which the script and the Dockerfile patch lines go and the images are plain `pip install da-extension`. Needs Asmit's OK that this override style is acceptable; the proper end state is the fixes landing upstream in OpenG2P.
+- Runtime hooks that wrap platform methods (`app.py` FilterBuilder booleans, `g2p_intake_form_data_service.py` photo URL, `auto_approve.py` import approval; plus the local own-record guard) already live in the extension and touch no image; they are not yet on the `component_registry` service-subclass pattern where one applies (FilterBuilder, intake read, approval start). Middleware and engine overrides have no subclass hook and stay as wraps.
+- `awe_meta_data/*.sql` (policies, stages, approver rules) still ship in the db-seed image; AWE is configuration – stages and approvers should come from configuration / openg2p-data seeding.
+- Seed data still in the registry repo instead of the COSS `openg2p-data` fork: Keycloak clients/roles/users (`docker/local-dev/keycloak-init.sh`), IAM catalog (`da-registry-iam-catalog.json`), Ethiopia geo hierarchy (`docker/db-seed/seed-data/geo`), sample DAs, import/outgoing templates.
+- `ui/staff-ui/overrides` is empty; DA has no UI overrides today (none were needed), labels come from register metadata.
+- Compose still carries settings rc.557 does not define (`*_MASTER_DATA_READ_MODE`, `*_MASTER_DATA_DB_*` – read by the DA import enricher, `*_MINIO_BUCKET_NAME`, `*_TEMPLATE_BUCKET_NAME`); harmless, to be cleaned.
+
+## 5. Dependencies / environment (not code bugs, but blockers)
+
+- Dev deploy on rc.557 needs the B1 rename in the oan-helm chart values (DevOps) and the Helm chart dependency bump the PR makes (`Chart.yaml` rc.557).
+- Dev today: staff-API ingest (S16) answers `REGP-ERR-001 PARTNER_NOT_REGISTERED` until `da-services` is registered in Partner Management; DCI signature/consent validation is on (partner API on hold for phase 1).
+- For the unmerged features (section 7): Keycloak client `da-registry-backend` with service accounts + its secret for the worker; client scope `da-self-service` (user attribute `da_id` → token claim) and "unmanaged attributes: admin can edit" on the realm; test users with DA roles – all meant to come from openg2p-data / DevOps, not hand-made.
+- Master Data: DA works with the current MDM paths on rc.557 (geo levels/values via the staff API and the UI route verified); no attributes API needed by DA.
+- Requirement gaps found by the tester on dev (not in the FSD, our own choices): Fayda ID validated as the 12-digit FIN while farmer/livestock validate the 16-digit FAN – one format is needed for DA ↔ farmer linkage; "18 years or older" (server) plus a UI cap "Year of Birth (EC) ≤ 2010" – the cap is wrong (2010 EC is 9 years old) and should be removed, the 18-year rule needs confirmation.
+
+## 6. Not tested locally
+
+Record photo upload and its URL on the approval screen; DA Services push with a real signature (local has no signature validation); Woreda/Region-scoped users and data policies on this branch (not seeded); DCI async search (new); Helm deployment; DA Services (Frappe) calls.
+
+## 7. Next (to agree with Asmit; order = priority)
+
+1. B1/B2 in PR #8 or the next one: rename the DCI allow-list setting everywhere, update docs/Postman for `/dci/sync/search`; then PR #8 can merge.
+2. Remove `patch_platform.py`: convert the three fixes to extension start-up overrides (~1 day, see section 4) and raise them with OpenG2P (Shibu) so the overrides can go too.
+3. Move the runtime hooks (FilterBuilder, photo URL, import approval) to registered service subclasses.
+4. Approval as configuration: two-level approval (Faiz: platform default via seeding), role-based approvers, and manual approval of imports with a worker service token – align with the farmer extension's `awe_worker_token.py` / `REGISTRY_CELERY_WORKERS_AWE_*` names.
+5. "DA sees only their own record" (token claim `da_id` + synthetic data policy + change-request guard) as a registered override; Keycloak scope/attribute via openg2p-data.
+6. Seeds into the openg2p-data fork: geo, IAM catalog (incl. `register:export` for DA roles), users/roles/data policies, templates, sample DAs.
+7. Decide the Fayda format (FIN 12 vs FAN 16) and the age rule; remove the 2010 UI cap.
+8. Re-run this validation on the PR head after the above, then on dev after DevOps moves to rc.557 (partner registration, DCI setting rename, Keycloak items).

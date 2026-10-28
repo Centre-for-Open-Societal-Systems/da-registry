@@ -31,6 +31,7 @@ needs:
 | `intake-form-data/save_intake_form_submission`, `finalize_...`, `search_in_intake_form_submissions` | `intakeSubmission:edit` |
 | `change-requests/create_change_request` | `changeRequest:create` |
 | `change-requests/search_in_change_request` | `changeRequest:view` |
+| `register-data/get_export_queue_records` (the register list screen polls it) | `register:export` |
 
 ### Who approves a DA
 
@@ -49,9 +50,14 @@ account needs `view-users` and `view-clients`) or with named users. Routing a
 Woreda's submissions to its own supervisor (DA-33) is the same kind of
 configuration once the approver roles exist per Woreda.
 
-Bulk import and the DA Services push are approved automatically today
-(`DA_AUTO_APPROVE_IMPORTS=true`); the decision of 23 Oct 2026 is that they
-must be approved manually too, which is pending in this branch.
+Bulk import (file) and the DA Services push go through the same two stages.
+The worker has no user token, so it opens the approval request with a Keycloak
+client-credentials token (`DA_AWE_TOKEN_URL`, `DA_AWE_CLIENT_ID`,
+`DA_AWE_CLIENT_SECRET`; by default the process's Master Data client
+`da-registry-backend`), see `register_domain/services/awe_service_token.py`.
+`DA_AUTO_APPROVE_IMPORTS=true` is the earlier mode (unique imports approved
+without any task), kept for a one-time back-end load. Decision (23 Oct 2026,
+Faiz and Shikha): imports are approved manually.
 
 ## 3. Local test result (16 Oct 2026)
 
@@ -68,12 +74,49 @@ was scoped to Woreda ET010101 and the Executive to Region ET04.
 
 ## 4. Limits and open points
 
-- **A Development Agent can read every DA, not only their own.** The registry
-  has no "own record" rule. The DA app must use the DA's own ID; otherwise the
-  DA can be given a narrow (for example Kebele-level) policy.
+- **A Development Agent sees only their own record** when their token carries
+  the claim `da_id` (section 5). Without that claim a Development Agent can
+  read every DA; use the claim, or a narrow data policy.
 - **Login:** these roles work with a staff Keycloak token. How DA Services
   users sign in (OAN auth service or Keycloak) is still open (DA-167).
 - **Approver routing:** who approves a Woreda's submissions is the approval
   workflow's job (DA-33), not the data policies'.
 - A Woreda code is unique, but Woreda names are not (23 names repeat). Always
   scope by code.
+
+## 5. A Development Agent's own record (self-service)
+
+A DA signs in to DA Services (or the registry portal) with their own Keycloak
+user and may read and change only their own DA record. This is enforced in the
+registry's staff API (`register_domain/services/da_own_record.py`), so it holds
+for DA Services, the registry portal and any direct API call alike:
+
+- The Keycloak user carries the attribute `da_id` = the DA's DA-ID
+  (for example `DA-4374521939`). The client scope `da-self-service` maps it
+  into the access token as the claim `da_id` (local: `keycloak-init.sh`; on a
+  shared Keycloak: create the scope with a *User Attribute* mapper
+  `da_id -> da_id`, make it a default scope of the clients a DA signs in with,
+  and set the realm's user profile *unmanaged attributes* to `Admin can edit`).
+- When the token has `da_id` and the user's only roles on
+  `da-registry-staff-portal` are the Development Agent ones (`Data Editor`,
+  plus any `DP_` data-policy role), the request's data policies are replaced
+  by one ALLOW policy `functional_record_id = <da_id>` on the DA register.
+  DA search, DA details, tab records and change-request reads then return
+  only that record; any other record answers `REG-ERR-012 RECORD_ACCESS_DENIED`.
+- `create_change_request` is checked separately (the platform does not put it
+  under data policies): the change must target the DA's own record and one
+  of the sections contact (`da_contact_section_04`), service
+  (`da_service_section_02`) or location (`da_location_section_03`). The
+  identity section (name, Fayda ID) answers `REG-ERR-012`.
+- The DA's change request goes through the same two-level approval as any
+  other; the DA cannot approve it.
+- A user with any wider role (Intake Officer, Validator, Supervisor,
+  Operations Administrator, ...) is not restricted by this rule, whatever
+  claims the token has.
+
+Local test (26 Oct 2026): user `da.test` (Data Editor, `da_id` DA-4374521939)
+saw 1 of 50 DAs, read and changed only its own contact section, was refused
+on another record and on its identity section; `admin` was unchanged.
+
+Settings: `DA_SELF_SERVICE_CLAIM` (default `da_id`),
+`DA_SELF_SERVICE_CLIENT_ID` (default `da-registry-staff-portal`).

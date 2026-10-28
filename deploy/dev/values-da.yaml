@@ -15,6 +15,19 @@ global:
 registry:
   staffApi:
     enabled: true
+    envVars:
+      # Imports are approved manually (two-level); the approval request is
+      # opened with this client's service token (see helm values.yaml).
+      DA_AUTO_APPROVE_IMPORTS: "false"
+      DA_AWE_TOKEN_URL: https://keycloak.development.oanstaging.com/realms/staff/protocol/openid-connect/token
+      DA_AWE_CLIENT_ID: da-registry-backend
+    envVarsFrom:
+      DA_AWE_CLIENT_SECRET:
+        secretKeyRef:
+          # TODO(devops): the secret of the Keycloak client da-registry-backend
+          # in realm staff (create the client with service accounts enabled).
+          name: da-registry-backend-keycloak
+          key: client-secret
     image:
       repository: 379220350808.dkr.ecr.ap-south-1.amazonaws.com/openg2p/da-registry
       tag: staff-api-develop
@@ -23,13 +36,46 @@ registry:
     image:
       repository: 379220350808.dkr.ecr.ap-south-1.amazonaws.com/openg2p/da-registry
       tag: partner-api-develop
+    envVarsFrom:
+      DA_AWE_CLIENT_SECRET:
+        secretKeyRef:
+          name: da-registry-backend-keycloak
+          key: client-secret
     envVars:
+      DA_AUTO_APPROVE_IMPORTS: "false"
+      DA_AWE_TOKEN_URL: https://keycloak.development.oanstaging.com/realms/staff/protocol/openid-connect/token
+      DA_AWE_CLIENT_ID: da-registry-backend
+      # Imports open their approval request from this process, so it needs the
+      # AWE settings the chart gives only the staff API.
+      REGISTRY_PARTNER_API_AWE_ENABLED: "true"
+      REGISTRY_PARTNER_API_AWE_BASE_URL: http://commons-services-awe.commons.svc.cluster.local
+      REGISTRY_PARTNER_API_AWE_DEFAULT_CALLBACK_URL: http://{{ .Release.Name }}-staff-portal-api.{{ .Release.Namespace }}.svc.cluster.local/awe/webhooks/decision
+      REGISTRY_PARTNER_API_AWE_CALLBACK_SECRET_ID: '{{ tpl .Values.global.aweCallbackSecretId $ }}'
       # Same list as docker-compose.yml: DA location (names and codes), position
       # and last_approved_at, so DA Services can filter by Woreda / Kebele.
       # registry-platform 1.2.2-rc.557 reads DCI_ALLOWED_SEARCH_FIELDS (rc.544: DCI_EXPRESSION_ALLOWED_FIELDS); the old name is ignored and every DA filter field is then "not searchable".
       REGISTRY_PARTNER_API_DCI_ALLOWED_SEARCH_FIELDS: '["functional_record_id","first_name","middle_name","last_name","given_name","gender","birth_date","foundational_id","record_name","record_status","search_text","marital_status","income_level","education_level","residency_status","disability_status","displacement_status","region_name","zone_name","woreda_name","kebele_name","geo_lowest_level_value_id","position","specialisation","upstream_reference","region_code","zone_code","woreda_code","last_approved_at"]'
   celeryWorker:
     enabled: true
+    envVars:
+      # Imports are approved manually (two-level); the approval request is
+      # opened with this client's service token (see helm values.yaml).
+      DA_AUTO_APPROVE_IMPORTS: "false"
+      DA_AWE_TOKEN_URL: https://keycloak.development.oanstaging.com/realms/staff/protocol/openid-connect/token
+      DA_AWE_CLIENT_ID: da-registry-backend
+      # Imports open their approval request from this process, so it needs the
+      # AWE settings the chart gives only the staff API.
+      REGISTRY_CELERY_WORKERS_AWE_ENABLED: "true"
+      REGISTRY_CELERY_WORKERS_AWE_BASE_URL: http://commons-services-awe.commons.svc.cluster.local
+      REGISTRY_CELERY_WORKERS_AWE_DEFAULT_CALLBACK_URL: http://{{ .Release.Name }}-staff-portal-api.{{ .Release.Namespace }}.svc.cluster.local/awe/webhooks/decision
+      REGISTRY_CELERY_WORKERS_AWE_CALLBACK_SECRET_ID: '{{ tpl .Values.global.aweCallbackSecretId $ }}'
+    envVarsFrom:
+      DA_AWE_CLIENT_SECRET:
+        secretKeyRef:
+          # TODO(devops): the secret of the Keycloak client da-registry-backend
+          # in realm staff (create the client with service accounts enabled).
+          name: da-registry-backend-keycloak
+          key: client-secret
     image:
       repository: 379220350808.dkr.ecr.ap-south-1.amazonaws.com/openg2p/da-registry
       tag: celery-develop

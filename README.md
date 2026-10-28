@@ -55,20 +55,32 @@ A row that cannot be used is rejected with a readable reason, recorded in
 `incoming_classified_data` (`transformation_latest_error_code` /
 `ingestion_latest_error_code`); the other rows carry on.
 
-Auto-approve (`register_domain/services/auto_approve.py`, switch
-`DA_AUTO_APPROVE_IMPORTS`, default `true`): a submission created without a
-signed-in user (file import, partner ingestion) skips the AWE workflow and is
-approved straight away, so the DA reaches the register and gets a DA-ID. Web
-intake is unchanged: an approver decides it in Tasks.
+Approval of imports (`register_domain/services/auto_approve.py` and
+`awe_service_token.py`): a submission created without a signed-in user (file
+import, partner ingestion) is sent to the approval workflow with a Keycloak
+client-credentials token (`DA_AWE_TOKEN_URL` / `DA_AWE_CLIENT_ID` /
+`DA_AWE_CLIENT_SECRET`, falling back to the process's Master Data client), so it
+gets the same two-level approval as a web-form submission (stage 1, then stage
+2, see `docs/rbac-registry-roles.md`). Only after the second approval does the
+DA reach the register and get a DA-ID. `DA_AUTO_APPROVE_IMPORTS=true` restores
+the earlier behaviour for a one-time back-end load: the workflow is skipped and
+unique imports are approved straight away.
+
+A Development Agent's own record (`register_domain/services/da_own_record.py`):
+a token with the claim `da_id` (Keycloak user attribute, client scope
+`da-self-service`) whose only registry roles are the Development Agent ones is
+limited to that one DA record: search, details, tab records and change-request
+reads see only it, and a change request may target only it and only the
+contact, service and location sections. See `docs/rbac-registry-roles.md` §5.
 
 One DA per Fayda ID (`register_domain/services/fayda_uniqueness.py`): every save
 of a DA record (web form, file import, DA Services push, change request) is
 refused when its Fayda ID already belongs to an active DA or to another live
 submission, with the reason ("Fayda ID … is already registered as DA-…"). The
 record's own id is left out, so re-saving a section is not a duplicate. Rows of
-one file that race each other are still caught at approval by auto-approve,
-which leaves the later one PENDING with the reason in `remarks`, and finally by
-the unique index on active register rows.
+one file that race each other are caught again at approval (the approver sees
+the duplicate in the submission's deduplication results) and finally by the
+unique index on active register rows.
 
 ## DA Services (Frappe) → registry
 
@@ -76,7 +88,7 @@ DA Services pushes each DA it has approved to the partner API
 (`POST /partner/ingest_data?data_model=DA_SERVICES&...`); `DAServicesEnricherService`
 maps its JSON to DA fields (location by Master Data `kebele_id` or names), and
 the record goes through the same template, validation, duplicate guard and
-auto-approve as a file import. The DA Services approver and record id are kept
+two-level approval as a file import. The DA Services approver and record id are kept
 (`upstream_approved_by`, `upstream_reference`). DA Services reads DAs back with
 DCI search. Request format, field rules and open items:
 [docs/da-services-api-contract.md](docs/da-services-api-contract.md).

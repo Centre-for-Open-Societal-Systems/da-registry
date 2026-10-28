@@ -12,7 +12,7 @@ The partner API (bulk import and push status) is in
 | Who calls | The DA Services system | A person, through the Frappe backend |
 | Auth | Partner signature | The person's Keycloak token |
 | Used for | Bulk import, push status, DCI search | Single DA form, approval, search and view |
-| Approval | Imports are approved automatically | A Woreda approver approves in the registry |
+| Approval | Two-level approval in the registry (stage 1, stage 2), same as the form | Two-level approval in the registry |
 | Recorded as | `system` / partner | The person's name |
 
 Every call below was run end to end against the local stack on

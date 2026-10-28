@@ -17,6 +17,7 @@ from .register_domain.models import G2PIntakeFormDA, G2PRegisterDA, G2PRegisterH
 from .register_domain.services import (
     G2PRegisterDomainServiceDA,
     install_da_auto_approve,
+    install_da_own_record_guard,
     install_record_image_url_resolution,
 )
 
@@ -51,6 +52,10 @@ class Initializer(BaseInitializer):
         # File import / partner ingestion: approve unique DAs without a user
         # token. See register_domain/services/auto_approve.py.
         install_da_auto_approve()
+
+        # A Development Agent (token claim da_id, role Data Editor only) sees
+        # and edits only their own record. See services/da_own_record.py.
+        install_da_own_record_guard()
 
         G2PRegisterDomainFactory()
         G2PRegisterDomainServiceDA()

@@ -64,11 +64,17 @@ registry:
   # CI or the deploy step sets the tag.
   # *_APPLICATION_REFERENCE_FORMAT: four random digits instead of the platform's one,
   # so records arriving in the same second do not collide during bulk import.
-  # DA_AUTO_APPROVE_IMPORTS: approve unique DAs from file import / partner
-  # ingestion without a user token (da-extension services/auto_approve.py).
+  # DA_AUTO_APPROVE_IMPORTS "false": DAs from file import / partner ingestion
+  # get the same two-level approval as a web-form submission. The worker opens
+  # the approval request with a Keycloak client-credentials token: set
+  # DA_AWE_TOKEN_URL, DA_AWE_CLIENT_ID and DA_AWE_CLIENT_SECRET (a confidential
+  # client with service accounts enabled, e.g. da-registry-backend) on the
+  # celery worker, the staff API and the partner API; put the secret in
+  # envVarsFrom. "true" approves unique imports without any token (one-time
+  # back-end load). See da-extension services/auto_approve.py.
   staffApi:
     envVars:
-      DA_AUTO_APPROVE_IMPORTS: "true"
+      DA_AUTO_APPROVE_IMPORTS: "false"
       REGISTRY_STAFF_PORTAL_API_APPLICATION_REFERENCE_FORMAT: "{DATE:%Y%b%d|upper}-{SECONDS:5}-{RAND:4}"
     image:
       repository: openg2p/da-registry
@@ -79,7 +85,13 @@ registry:
       tag: staff-ui-develop
   partnerApi:
     envVars:
-      DA_AUTO_APPROVE_IMPORTS: "true"
+      DA_AUTO_APPROVE_IMPORTS: "false"
+      # Imports open their approval request from this process (service token),
+      # so it needs the AWE settings the platform chart gives only the staff API.
+      REGISTRY_PARTNER_API_AWE_ENABLED: '{{ .Values.global.aweEnabled }}'
+      REGISTRY_PARTNER_API_AWE_BASE_URL: '{{ tpl .Values.global.aweBaseUrl $ }}'
+      REGISTRY_PARTNER_API_AWE_DEFAULT_CALLBACK_URL: '{{ tpl .Values.global.aweDefaultCallbackUrl $ }}'
+      REGISTRY_PARTNER_API_AWE_CALLBACK_SECRET_ID: '{{ tpl .Values.global.aweCallbackSecretId $ }}'
       REGISTRY_PARTNER_API_APPLICATION_REFERENCE_FORMAT: "{DATE:%Y%b%d|upper}-{SECONDS:5}-{RAND:4}"
       # DCI expression search: the platform's default fields plus the DA location (names and codes), position and last_approved_at (changes since), so DA Services can filter exactly by Woreda / Kebele.
       # registry-platform 1.2.2-rc.557 reads DCI_ALLOWED_SEARCH_FIELDS (rc.544: DCI_EXPRESSION_ALLOWED_FIELDS); the old name is ignored and every DA filter field is then "not searchable".
@@ -89,7 +101,13 @@ registry:
       tag: partner-api-develop
   celeryWorker:
     envVars:
-      DA_AUTO_APPROVE_IMPORTS: "true"
+      DA_AUTO_APPROVE_IMPORTS: "false"
+      # Imports open their approval request from this process (service token),
+      # so it needs the AWE settings the platform chart gives only the staff API.
+      REGISTRY_CELERY_WORKERS_AWE_ENABLED: '{{ .Values.global.aweEnabled }}'
+      REGISTRY_CELERY_WORKERS_AWE_BASE_URL: '{{ tpl .Values.global.aweBaseUrl $ }}'
+      REGISTRY_CELERY_WORKERS_AWE_DEFAULT_CALLBACK_URL: '{{ tpl .Values.global.aweDefaultCallbackUrl $ }}'
+      REGISTRY_CELERY_WORKERS_AWE_CALLBACK_SECRET_ID: '{{ tpl .Values.global.aweCallbackSecretId $ }}'
       REGISTRY_CELERY_WORKERS_APPLICATION_REFERENCE_FORMAT: "{DATE:%Y%b%d|upper}-{SECONDS:5}-{RAND:4}"
       # Master Data database, read by the DA import enricher (see global above).
       REGISTRY_CELERY_WORKERS_MASTER_DATA_DB_HOSTNAME: '{{ tpl .Values.global.postgresqlHost $ }}'

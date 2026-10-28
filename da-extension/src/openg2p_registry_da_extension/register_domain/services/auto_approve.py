@@ -1,25 +1,31 @@
-"""Auto-approve DA submissions that arrive without a signed-in user.
+"""Approval of DA submissions that arrive without a signed-in user.
 
-File import (CSV / XLSX) and partner ingestion (DA Services pushing a record
-it has already had approved) create intake submissions from a celery worker.
-The platform then starts the AWE approval workflow with the caller's bearer
-token, which a worker does not have: with AWE on the submission fails with
-AWE_BEARER_TOKEN_REQUIRED, with AWE off it stays PENDING with no approval task
-anyone can act on. Either way the DA never reaches the register.
+File import (CSV / XLSX) and partner ingestion (DA Services pushing a record)
+create intake submissions from a celery worker. The platform then starts the
+AWE approval workflow with the caller's bearer token, which a worker does not
+have: the submission fails with AWE_BEARER_TOKEN_REQUIRED and the DA never
+reaches the register.
 
-For DA submissions from those paths this module:
-- skips the AWE workflow (the approval happened upstream, or the import is the
-  approval: the one-time onboarding Dinesh described is a back-end load), and
-- approves the submission straight after it is finalised, unless its Fayda ID
-  is already registered or already in another live submission. Those stay
-  PENDING with the reason in `remarks`, for someone to resolve.
+Default (DA_AUTO_APPROVE_IMPORTS=false, decision of 23 Oct 2026, Faiz and
+Shikha: imports are approved manually like every other record): the workflow
+is started with a service token (awe_service_token.py), so each imported DA
+gets the same approval tasks as a web-form submission and is approved by the
+seeded approvers, stage by stage. If the service token cannot be obtained the
+finalisation fails with a clear message, so the row shows up as failed in the
+import outcome / exceptions list instead of silently staying PENDING.
 
-Web intake (a staff user with a token) is untouched and keeps its approval.
+DA_AUTO_APPROVE_IMPORTS=true (the earlier behaviour, kept for a one-time
+back-end load): the AWE workflow is skipped and the submission is approved
+straight after it is finalised, unless its Fayda ID is already registered or
+already in another live submission. Those stay PENDING with the reason in
+`remarks`, for someone to resolve.
 
-Switched by DA_AUTO_APPROVE_IMPORTS (default "true"). Installed by wrapping
-the platform service's methods, the same way as the record-image fix next to
-it; it applies to whichever service instance the process registers, in the
-staff API, the partner API and the celery worker alike.
+Web intake (a staff user with a token) is untouched in both modes.
+
+Installed by wrapping the platform service's methods, the same way as the
+record-image fix next to it; it applies to whichever service instance the
+process registers, in the staff API, the partner API and the celery worker
+alike.
 """
 
 import functools
@@ -27,6 +33,8 @@ import logging
 import os
 
 from sqlalchemy import text
+
+from .awe_service_token import ServiceTokenUnavailable, get_service_token
 
 _logger = logging.getLogger("da-auto-approve")
 
@@ -37,7 +45,7 @@ _INSTALLED_MARKER = "_da_auto_approves_imports"
 
 
 def auto_approve_enabled() -> bool:
-    return os.environ.get("DA_AUTO_APPROVE_IMPORTS", "true").strip().lower() in ("1", "true", "yes", "on")
+    return os.environ.get("DA_AUTO_APPROVE_IMPORTS", "false").strip().lower() in ("1", "true", "yes", "on")
 
 
 def is_unattended(submission, bearer_token) -> bool:
@@ -144,14 +152,24 @@ def _wrap_finalize(finalize):
 def _wrap_start_workflow(start_workflow):
     @functools.wraps(start_workflow)
     async def wrapper(self, session, submission, *args, **kwargs):
-        if (
-            auto_approve_enabled()
-            and is_unattended(submission, kwargs.get("bearer_token"))
-            and await _is_da_register(session, submission.register_id)
+        if is_unattended(submission, kwargs.get("bearer_token")) and await _is_da_register(
+            session, submission.register_id
         ):
-            # Approved upstream or by this module; there is no user token to
-            # open an AWE request with.
-            return None
+            if auto_approve_enabled():
+                # Approved by this module right after finalisation; there is
+                # no user token to open an AWE request with.
+                return None
+            # Manual approval: open the AWE request with a service token so the
+            # seeded approvers get the same tasks as for a web-form submission.
+            try:
+                kwargs["bearer_token"] = await get_service_token()
+            except ServiceTokenUnavailable as exc:
+                _logger.error("DA submission %s: %s", submission.submission_id, exc)
+                raise RuntimeError(f"DA approval could not be started: {exc}") from exc
+            _logger.info(
+                "DA submission %s (%s) sent for approval with the service token",
+                submission.submission_id, getattr(submission, "submission_source", ""),
+            )
         return await start_workflow(self, session, submission, *args, **kwargs)
 
     setattr(wrapper, _INSTALLED_MARKER, True)
