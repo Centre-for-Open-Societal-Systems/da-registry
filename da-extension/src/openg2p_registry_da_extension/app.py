@@ -37,6 +37,12 @@ class Initializer(BaseInitializer):
 
         self._patch_filter_builder()
 
+        # Three platform bugs fixed in-process instead of patching the image;
+        # see platform_overrides.py.
+        from .platform_overrides import install_platform_overrides
+
+        install_platform_overrides()
+
         # Intake reads return record_image_document_id but not the presigned
         # URL the register reads add; resolve it so a record photo shows on
         # the approval screen. See the function for details.

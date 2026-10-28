@@ -7,5 +7,3 @@ ENV REGISTRY_EXTENSION_MODULE=openg2p_registry_da_extension
 COPY da-extension/ /app/da-extension/
 RUN pip install --no-cache-dir /app/da-extension
 
-COPY docker/patches/patch_platform.py /tmp/patch_platform.py
-RUN python3 /tmp/patch_platform.py && rm /tmp/patch_platform.py

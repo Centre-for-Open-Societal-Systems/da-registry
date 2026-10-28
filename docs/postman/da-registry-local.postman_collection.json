@@ -648,7 +648,7 @@
                 "value": "X-CSRF-Token={{csrf}}"
               }
             ],
-            "description": "Wait 15-30 s after the approval; the DA-ID may show as TEMP-\u2026 for a few seconds.",
+            "description": "Wait 15-30 s after the approval; the DA-ID may show as TEMP-… for a few seconds.",
             "url": {
               "raw": "{{staff_api}}/register-data/get_subject_record",
               "host": [
@@ -913,7 +913,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"header\": {\n    \"version\": \"1.0.0\",\n    \"message_id\": \"{{$guid}}\",\n    \"message_ts\": \"{{$isoTimestamp}}\",\n    \"sender_id\": \"da-services\",\n    \"data_model\": \"DA_SERVICES\"\n  },\n  \"signature\": \"local-dev\",\n  \"message\": {\n    \"reference_id\": \"FR-DA-0001\",\n    \"source\": \"CSV_IMPORT\",\n    \"approved_by\": \"Admin\",\n    \"da\": {\n      \"first_name\": \"Frehiwot\",\n      \"father_name\": \"Assefa\",\n      \"grandfather_name\": \"Bekele\",\n      \"fayda_id\": \"804512345699\",\n      \"gender\": \"Female\",\n      \"phone_number\": \"0911556677\",\n      \"education_level\": \"Masters\",\n      \"specialisation\": \"Agronomy\",\n      \"position\": \"Senior DA\",\n      \"kebele_id\": \"kebele-ET010101101001\"\n    }\n  }\n}"
+              "raw": "{\n  \"header\": {\n    \"version\": \"1.0.0\",\n    \"message_id\": \"{{$guid}}\",\n    \"message_ts\": \"{{$isoTimestamp}}\",\n    \"sender_id\": \"da-services\",\n    \"data_model\": \"DA_SERVICES\"\n  },\n  \"signature\": \"local-dev\",\n  \"message\": {\n    \"reference_id\": \"FR-DA-0001\",\n    \"source\": \"CSV_IMPORT\",\n    \"approved_by\": \"Admin\",\n    \"da\": {\n      \"first_name\": \"Frehiwot\",\n      \"father_name\": \"Assefa\",\n      \"grandfather_name\": \"Bekele\",\n      \"fayda_id\": \"8045123456990001\",\n      \"gender\": \"Female\",\n      \"phone_number\": \"0911556677\",\n      \"education_level\": \"Masters\",\n      \"specialisation\": \"Agronomy\",\n      \"position\": \"Senior DA\",\n      \"kebele_id\": \"kebele-ET010101101001\"\n    }\n  }\n}"
             }
           }
         },

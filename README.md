@@ -16,7 +16,6 @@ follows the same build model as the farmer registry.
 | `da-extension/` | Python extension: DA model, domain rules, ID prefix, file-import enricher, seed metadata, Jinja templates |
 | `docker/*/Dockerfile` | Thin native registry-platform images for the DA APIs, worker/beat, UI and seed job |
 | `ui/staff-ui/` | Pinned upstream Staff UI materialization with an empty DA override layer for future UI additions |
-| `docker/patches/` | Fixes applied to the pinned platform images at build time |
 | `docker/db-seed/` | Synthetic DA loader (local only) |
 | `docker/local-dev/` | Config for the local stack (Keycloak, IAM, AWE, ID generator, Postgres, geo seed) |
 | `import-templates/` | Blank CSV and Excel templates for bulk import |
@@ -153,16 +152,7 @@ registries. Keep the component Dockerfiles and chart dependency in step:
 
 When the version moves, re-check:
 
-- `docker/patches/patch_platform.py`: compatibility fixes retained from the
-  existing DA build are applied to the API/worker images and fail loudly when
-  the pinned platform changes. Remove each entry only after its upstream fix is
-  verified in the selected platform image.
-- `*_APPLICATION_REFERENCE_FORMAT` (compose and Helm): four random digits instead of the
-  platform's one, so records arriving in the same second do not collide on the unique index.
-- Celery beat picks `NO_OF_TASKS_TO_PROCESS` (4) records per tick (20 s) per stage, about
-  12 records a minute. Raise these before a large import.
-- `register_domain/factory/g2p_register_domain_factory.py`: registers platform
-  services the celery worker does not; drop names the worker starts registering.
-  From 1.2 the worker builds core's factory itself, so the extension package
-  (`__init__.py`) builds ours in each worker process; without that, imports and
-  DA Services pushes stay PENDING because auto-approve is never installed there.
+- `da-extension/.../platform_overrides.py`: three platform bugs (partner ingest
+  response datetime, IAM permission lookup across registries, worker NullPool)
+  fixed in-process at start-up; the platform image is not modified. Drop an
+  installer once the fix is in the pinned platform image.
