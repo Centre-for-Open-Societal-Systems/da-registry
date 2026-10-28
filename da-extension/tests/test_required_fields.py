@@ -60,8 +60,10 @@ class TestGuard(unittest.IsolatedAsyncioTestCase):
         section = mock.Mock(section_ui_schema=SCHEMA, section_id="s1", is_list=False)
         svc._get_section_or_error = mock.AsyncMock(return_value=section)
         svc._records_for_validation = staticmethod(lambda records: [r for r in (records or []) if (r or {}).get("edit_action") != "DELETE"])
-        svc._get_submission_or_error = mock.AsyncMock(return_value=mock.Mock(form_id="f1"))
+        svc._get_submission_or_error = mock.AsyncMock(return_value=mock.Mock(form_id="f1", submission_id="sub"))
         svc._get_form_sections = mock.AsyncMock(return_value=[section])
+        svc._resolve_intake_form_class = mock.AsyncMock(return_value=object)
+        svc._get_intake_rows = mock.AsyncMock(return_value={"rec-1": mock.Mock(internal_record_id="rec-1")})
         return svc
 
     async def test_save_new_record_without_required_fields_is_refused(self):
@@ -78,8 +80,19 @@ class TestGuard(unittest.IsolatedAsyncioTestCase):
         with mock.patch.object(self.guard.G2PIntakeFormDataService, "save_intake_form_submission_with_session", new=mock.AsyncMock(return_value="saved")) as sup:
             full = {"edit_action": "ADD", "first_name": "Abebe", "geo_lowest_level_value_id": "k1", "geo_code_hierarchy_json": {"hierarchy": []}}
             self.assertEqual(await svc.save_intake_form_submission_with_session(None, "s1", [full], REG, "f1", REG, "u", None), "saved")
-            self.assertEqual(await svc.save_intake_form_submission_with_session("sub", "s1", [{"edit_action": "UPDATE", "last_name": "X"}], REG, "f1", REG, "u", None), "saved")
+            self.assertEqual(await svc.save_intake_form_submission_with_session("sub", "s1", [{"edit_action": "UPDATE", "internal_record_id": "rec-1", "last_name": "X"}], REG, "f1", REG, "u", None), "saved")
             self.assertEqual(sup.await_count, 2)
+
+    async def test_update_on_a_record_the_submission_does_not_hold_is_a_new_record(self):
+        from openg2p_registry_core.errors import G2PRegistryException
+        svc = self._service()
+        with mock.patch.object(self.guard.G2PIntakeFormDataService, "save_intake_form_submission_with_session", new=mock.AsyncMock(return_value="saved")) as sup:
+            for sid, rec in ((None, {"edit_action": "UPDATE", "internal_record_id": "", "first_name": "Abebe"}),
+                             ("sub", {"edit_action": "UPDATE", "internal_record_id": "rec-9", "first_name": "Abebe"})):
+                with self.assertRaises(G2PRegistryException) as ctx:
+                    await svc.save_intake_form_submission_with_session(sid, "s1", [rec], REG, "f1", REG, "u", None)
+                self.assertIn("Required: Region / Zone / Woreda / Kebele", str(ctx.exception))
+            sup.assert_not_called()
 
     async def test_import_records_are_not_checked(self):
         svc = self._service()
