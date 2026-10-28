@@ -91,7 +91,7 @@ All calls are `POST` with this body:
 
 Check `response_header.response_status`, not only the HTTP code: a rejected
 field comes back as HTTP 200 with `"response_status": "ERROR"` and the reason,
-for example `REQ-VAL-001 Fayda ID (FIN) must be exactly 12 digits`.
+for example `REQ-VAL-001 Fayda ID (FAN) must be exactly 16 digits`.
 
 ### Fixed ids
 
@@ -123,7 +123,7 @@ registry shows up without a Frappe change. Today the DA form has four sections:
 
 | `section_id` | Fields (required in **bold**) |
 |---|---|
-| `da_identity_section_01` | `prefix`, **`first_name`** (Name), **`middle_name`** (Father's name), `last_name` (Grandfather's name), **`foundational_id`** (Fayda FIN, 12 digits), **`gender`**, **`marital_status`**, **`birth_month_ec`** (1–13), **`birth_year_ec`** (EC, age 18+) |
+| `da_identity_section_01` | `prefix`, **`first_name`** (Name), **`middle_name`** (Father's name), `last_name` (Grandfather's name), **`foundational_id`** (Fayda FAN, 16 digits), **`gender`**, **`marital_status`**, **`birth_month_ec`** (1–13), **`birth_year_ec`** (EC, not in the future) |
 | `da_contact_section_04` | **`mobile_number`**, `telegram_number`, `alternate_number`, **`email`** |
 | `da_service_section_02` | **`education_level`**, **`specialisation`**, **`position`**, `joined_date` (`YYYY-MM-DD`), `source` (read-only) |
 | `da_location_section_03` | **`da_geo_hierarchy`**: Region / Zone / Woreda / Kebele, saved as `geo_lowest_level_value_id` + `geo_code_hierarchy_json` |

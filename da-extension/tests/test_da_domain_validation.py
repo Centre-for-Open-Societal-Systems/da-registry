@@ -16,7 +16,7 @@ def validate(record: dict) -> dict:
     """Run the synchronous checks in the order the service runs them."""
     Service._normalise_source(record)
     Service._validate_names(record)
-    Service._validate_fayda_fin(record)
+    Service._validate_fayda_fan(record)
     Service._validate_phones(record)
     Service._validate_email(record)
     Service._validate_birth_ec(record)
@@ -28,22 +28,22 @@ def validate(record: dict) -> dict:
 class TestFormats(unittest.TestCase):
     def test_values_are_cleaned(self):
         record = validate({
-            "foundational_id": "3234 5678-9014", "mobile_number": "0911 22 33 44",
+            "foundational_id": "3234 5678-9014 0001", "mobile_number": "0911 22 33 44",
             "email": "A@B.ORG", "birth_month_ec": "4", "birth_year_ec": "1985",
         })
-        self.assertEqual(record["foundational_id"], "323456789014")
+        self.assertEqual(record["foundational_id"], "3234567890140001")
         self.assertEqual(record["mobile_number"], "0911223344")
         self.assertEqual(record["email"], "a@b.org")
         self.assertEqual((record["birth_month_ec"], record["birth_year_ec"]), (4, 1985))
 
     def test_rejections_name_the_field(self):
         cases = [
-            ({"foundational_id": "12345"}, "Fayda ID (FIN) must be exactly 12 digits"),
+            ({"foundational_id": "12345"}, "Fayda ID (FAN) must be exactly 16 digits"),
+            ({"foundational_id": "556556221254"}, "Fayda ID (FAN) must be exactly 16 digits"),
             ({"telegram_number": "12345"}, "Telegram Number must be an Ethiopian phone number"),
             ({"email": "x@y"}, "Email is not a valid email address"),
             ({"first_name": "Abc123"}, "Name may contain only letters"),
             ({"birth_month_ec": 14, "birth_year_ec": 1985}, "Month of Birth (EC) must be from 1 to 13"),
-            ({"birth_month_ec": 1, "birth_year_ec": 2015}, "A DA must be at least 18 years old"),
         ]
         for record, message in cases:
             with self.subTest(record=record):

@@ -43,7 +43,7 @@ COLUMN_ALIASES = {
     "first_name": ("name", "first name", "given name"),
     "middle_name": ("father name", "father's name", "fathers name"),
     "last_name": ("grandfather name", "grandfather's name", "grandfathers name", "grand father name"),
-    "foundational_id": ("fayda id", "fayda id (fin)", "fayda fin", "fin", "fayda"),
+    "foundational_id": ("fayda id", "fayda id (fan)", "fayda fan", "fan", "fayda id (fin)", "fayda fin", "fin", "fayda"),
     "gender": ("gender", "sex"),
     "marital_status": ("marital status",),
     "birth_month_ec": ("month of birth (ec)", "birth month (ec)", "month of birth", "birth month"),

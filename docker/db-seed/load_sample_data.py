@@ -9,7 +9,7 @@ region/zone/woreda/kebele names match what the portal shows.
 Deterministic: the same N rows are produced on every run, and the insert is
 ON CONFLICT DO NOTHING, so re-running the seed never duplicates anything.
 No real people: names are drawn from common Ethiopian given names and every
-Fayda FIN / phone number is synthetic.
+Fayda FAN / phone number is synthetic.
 """
 
 import os
@@ -125,7 +125,7 @@ def build_rows(kebeles: list) -> list:
         father = rnd.choice(FATHER)
         grandfather = rnd.choice(FATHER)
         while True:
-            fin = str(rnd.randint(200000000000, 999999999999))
+            fin = str(rnd.randint(2000000000000000, 9999999999999999))  # 16-digit Fayda FAN
             if fin not in used_fin:
                 used_fin.add(fin)
                 break

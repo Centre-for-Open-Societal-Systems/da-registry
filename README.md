@@ -32,7 +32,7 @@ follows the same build model as the farmer registry.
 | Register mnemonic | `DA` |
 | Tables | `g2p_register_das`, `g2p_register_history_das`, `g2p_intake_form_das` |
 | DA-ID | `functional_record_id`, `DA-` + 10 digits, from the ID generator pool `da`, on approval |
-| Fayda ID (FIN) | `foundational_id`, 12 digits, required |
+| Fayda ID (FAN) | `foundational_id`, 16 digits (the number on the Fayda card, as in the farmer registry), required |
 | Duplicate check | Fayda ID, exact match (shown to the approver) |
 | Data in | Web intake form (one DA); file import, CSV or `.xlsx` (many DAs) |
 | Data out | Partner API DCI search, each record under `da_details` (`templates/openg2p_da_to_dci.json.j2`) |

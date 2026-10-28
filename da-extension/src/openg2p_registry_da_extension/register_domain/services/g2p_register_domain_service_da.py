@@ -9,8 +9,7 @@ from .fayda_uniqueness import duplicate_message, find_fayda_owner
 from ...geo_codes import geo_codes
 from .validation_rules import (
     EMAIL_PATTERN,
-    FAYDA_FIN_PATTERN,
-    MIN_AGE_YEARS,
+    FAYDA_FAN_PATTERN,
     NAME_FIELD_LABELS,
     NAME_FIELDS,
     NAME_MAX_LENGTH,
@@ -37,7 +36,7 @@ class G2PRegisterDomainServiceDA(G2PRegisterDomainService):
         for record in records:
             self._normalise_source(record)
             self._validate_names(record)
-            self._validate_fayda_fin(record)
+            self._validate_fayda_fan(record)
             self._validate_phones(record)
             self._validate_email(record)
             self._validate_birth_ec(record)
@@ -75,7 +74,7 @@ class G2PRegisterDomainServiceDA(G2PRegisterDomainService):
             record[field] = text
 
     @staticmethod
-    def _validate_fayda_fin(record: dict) -> None:
+    def _validate_fayda_fan(record: dict) -> None:
         if "foundational_id" not in record:
             return
         value = record.get("foundational_id")
@@ -83,8 +82,8 @@ class G2PRegisterDomainServiceDA(G2PRegisterDomainService):
         if not text:
             record["foundational_id"] = None
             return
-        if not matches(FAYDA_FIN_PATTERN, text):
-            validation_error("Fayda ID (FIN) must be exactly 12 digits")
+        if not matches(FAYDA_FAN_PATTERN, text):
+            validation_error("Fayda ID (FAN) must be exactly 16 digits")
         record["foundational_id"] = text
 
     @staticmethod
@@ -116,8 +115,9 @@ class G2PRegisterDomainServiceDA(G2PRegisterDomainService):
 
     @staticmethod
     def _validate_birth_ec(record: dict) -> None:
-        """Month / Year of Birth in the Ethiopian calendar; the DA must be at
-        least MIN_AGE_YEARS old."""
+        """Month / Year of Birth in the Ethiopian calendar: a real month, a
+        4-digit year, not in the future and not more than 100 years back. No
+        minimum age: the FSD sets none (decision of 28 Oct 2026)."""
         if "birth_month_ec" not in record and "birth_year_ec" not in record:
             return
         month = as_int(record.get("birth_month_ec")) if "birth_month_ec" in record else None
@@ -137,13 +137,10 @@ class G2PRegisterDomainServiceDA(G2PRegisterDomainService):
         today_y, today_m, _ = gregorian_to_ethiopic(date.today())
         if year < today_y - 100:
             validation_error("Year of Birth (EC) is too far in the past")
-        # Age in months on the 13-month Ethiopian year; an unknown month counts
-        # as the last one so the check never rejects someone who might be 18.
-        age_months = (today_y * 13 + today_m) - (year * 13 + (month or 13))
-        if age_months < 0:
+        # Months on the 13-month Ethiopian year; an unknown month counts as the
+        # first one so a current-year birth is not refused as "future".
+        if (today_y * 13 + today_m) - (year * 13 + (month or 1)) < 0:
             validation_error("Month / Year of Birth (EC) cannot be in the future")
-        if age_months < MIN_AGE_YEARS * 13:
-            validation_error(f"A DA must be at least {MIN_AGE_YEARS} years old")
 
     @staticmethod
     def _validate_joined_date(record: dict) -> None:

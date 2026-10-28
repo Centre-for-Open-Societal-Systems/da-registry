@@ -12,8 +12,10 @@ import re
 NAME_PATTERN = r"^[A-Za-zሀ-፿][A-Za-zሀ-፿\s'-]*$"
 NAME_MAX_LENGTH = 100
 
-# Fayda FIN: 12 digits.
-FAYDA_FIN_PATTERN = r"^[0-9]{12}$"
+# Fayda FAN (Fayda Alias Number, the 16-digit number printed on the card),
+# the same number the farmer and livestock registries record. Decision of
+# 28 Oct 2026 (Yash/Shikha): one Fayda format across the OAN registries.
+FAYDA_FAN_PATTERN = r"^[0-9]{16}$"
 
 # Ethiopian phone number: 9-digit national number, optionally prefixed with
 # the trunk 0 or the +251 country code. Used for phone, Telegram and alternate.
@@ -51,8 +53,6 @@ REQUIRED_FIELDS = {
     "position": "Position",
     "foundational_id": "Fayda ID",
 }
-
-MIN_AGE_YEARS = 18
 
 INTERACTIVE_SOURCES = {"WEB_INTAKE"}
 

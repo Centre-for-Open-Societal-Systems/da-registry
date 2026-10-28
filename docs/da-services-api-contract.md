@@ -98,11 +98,11 @@ does not matter.
 | `first_name` | **Yes** | Name. Letters (Latin or Ethiopic), spaces, `-`, `'`; max 100 |
 | `father_name` | **Yes** | Father's name. Same format |
 | `grandfather_name` | No | Grandfather's name. Same format |
-| `fayda_id` | **Yes** | Fayda FIN, 12 digits (spaces / dashes are removed). One DA per Fayda ID (also enforced by a unique index on active registered DAs) |
+| `fayda_id` | **Yes** | Fayda FAN, 16 digits (spaces / dashes are removed). One DA per Fayda ID (also enforced by a unique index on active registered DAs) |
 | `gender` | Yes* | `MALE`, `FEMALE` |
 | `marital_status` | Yes* | `SINGLE`, `MARRIED`, `DIVORCED`, `WIDOWED` |
 | `birth_month_ec` | Yes* | 1–13 (Ethiopian calendar) |
-| `birth_year_ec` | Yes* | 4-digit EC year; the DA must be 18 or older |
+| `birth_year_ec` | Yes* | 4-digit EC year, not in the future |
 | `phone_number` | Yes* | Ethiopian number: `0911234567` or `+251911234567` (a 9-digit number gets its leading 0 back) |
 | `telegram_number` | No | Phone number, same format |
 | `alternate_number` | No | Phone number, same format |
