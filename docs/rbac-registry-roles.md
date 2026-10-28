@@ -34,66 +34,24 @@ needs:
 
 ### Who approves a DA
 
-Decision (22 Oct 2026): DAs from the bulk import and from the DA Services
-push are approved automatically (`DA_AUTO_APPROVE_IMPORTS=true`); a DA entered
-on the web intake form is approved by an administrator.
+Every submitted DA and every change request goes through the platform's
+default two-level approval: Stage 1 Officers, then Stage 2 Officers. The
+repository seeds only the platform's example approvers for a fresh local
+stack (`awe_meta_data/`): Stage 1 = `alex.carter`, Stage 2 = `nina.patel`,
+both created by `docker/local-dev/keycloak-init.sh`.
 
-A submitted DA (web form) goes to AWE, which assigns the approval task by the
-seeded approver rules (`awe_meta_data/30_approver_rule.sql`). The rules are by
-role on the client `da-registry-staff-portal`, so they work in every
-environment without naming a user:
+Who approves in a real environment is configuration, not code (decision of
+27-28 Oct 2026, Faiz / Asmit): after deployment an administrator edits the
+two DA policies in the AWE admin portal and replaces the example users, for
+instance with a `role` rule (a Keycloak client role such as Operations
+Administrator or Intake Validator on `da-registry-staff-portal`; AWE's service
+account needs `view-users` and `view-clients`) or with named users. Routing a
+Woreda's submissions to its own supervisor (DA-33) is the same kind of
+configuration once the approver roles exist per Woreda.
 
-| Stage | Approvers: users holding either role |
-|---|---|
-| DA intake form | Operations Administrator, Intake Validator |
-| DA change request | Operations Administrator, Data Validator |
-
-AWE asks Keycloak for the users that hold the role **directly**. A role that
-comes through a group (the DA Services role groups above) is not seen by that
-lookup. So an approver must hold the role directly, or, once the DA Services
-groups exist in an environment, a `group` rule can be added for
-`DA Services - Supervisor` and `DA Services - OAN Administrator` (a group rule
-fails the whole resolution while the group is missing). AWE's resolver client
-needs `view-users` and `view-clients` in Keycloak. Routing a submission to its
-own Woreda's supervisor is DA-33.
-
-## 2. Scope by Woreda, Zone or Region (DA-166)
-
-DA records carry `woreda_code`, `zone_code` and `region_code` (Master Data
-P-codes, DA-225). A data policy filters on one of these. For example, the
-policy `DP_DA_WOREDA_ET010101` uses this filter:
-
-```json
-{"type":"GROUP","operator":"AND","children":[
-  {"type":"CONDITION","field_id":"woreda_code","operator":"eq","value":"ET010101"}]}
-```
-
-The policy has `policy_target` REGISTER_RECORD and `policy_type` ALLOW, and
-belongs to the application `da-registry-staff-portal`.
-
-A user who holds the policy's role sees only matching DAs. This applies to DA
-search, DA details, intake submissions and change requests. Opening a DA
-outside the scope returns `REG-ERR-012`. A user with no data policy sees every
-DA, so Development Agent and OAN Administrator are not scoped.
-
-**Local stack:**
-
-```bash
-scripts/da-scope-local.sh woreda ET010101 <username>   # Supervisor
-scripts/da-scope-local.sh region ET04 <username>       # Executive
-```
-
-The script does three things:
-
-1. Adds the policy row to the IAM database.
-2. Creates the Keycloak role.
-3. Gives the role to the user.
-
-The user must sign in again to get a new token.
-
-**Deployment:** an IAM administrator (`dataPolicy:create`) adds the policy
-through the IAM admin API or UI. That also creates the Keycloak role. After
-that, the role is given to each user, or to a per-Woreda group.
+Bulk import and the DA Services push are approved automatically today
+(`DA_AUTO_APPROVE_IMPORTS=true`); the decision of 23 Oct 2026 is that they
+must be approved manually too, which is pending in this branch.
 
 ## 3. Local test result (16 Oct 2026)
 
