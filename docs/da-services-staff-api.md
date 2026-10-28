@@ -396,8 +396,43 @@ pagination_request: {"current_page": 1, "page_size": 20, "search_text": "8890659
 `search_text` matches DA-ID, Fayda ID, names, phone and email; send `""` to
 list all. It must be present, even when empty. Each item has
 `internal_record_id`, `functional_record_id` (DA-ID), `foundational_id`,
-`record_name` and `display_fields` (DA-ID, Fayda ID, phone, position, Woreda,
-Kebele); open one with `get_subject_record` (§3.4).
+`record_name`, `last_approved_at` and `display_fields` (DA-ID, Fayda ID, phone,
+position, Woreda, Kebele); open one with `get_subject_record` (§3.4).
+
+### 4.1 Filters (list a Woreda's DAs, sync changes)
+
+`filter_by` is a JSON **string** of `{"<field>": {"<operator>": value}}`. Use
+codes, not names: 23 Woreda names and 790 Kebele names repeat.
+
+```
+"filter_by": "{\"woreda_code\": {\"eq\": \"ET010101\"}}"
+"filter_by": "{\"woreda_code\": {\"in\": [\"ET010101\", \"ET010102\"]}}"
+"filter_by": "{\"geo_lowest_level_value_id\": {\"eq\": \"kebele-ET010101101001\"}}"
+"filter_by": "{\"last_approved_at\": {\"gte\": \"2026-10-27\"}}"
+"filter_by": "{\"woreda_code\": {\"eq\": \"ET010101\"}, \"last_approved_at\": {\"gte\": \"2026-10-27\"}}"
+```
+
+| Field | Operators | Value |
+|---|---|---|
+| `region_code`, `zone_code`, `woreda_code` | `eq`, `in` | Master Data P-code (`ET01`, `ET0101`, `ET010101`) |
+| `geo_lowest_level_value_id` | `eq`, `in` | Kebele id from the Kebele picker (§2.2) |
+| `last_approved_at` | `gt`, `gte`, `lt`, `lte`, `between` | ISO date; **compared by day**, the time part is ignored |
+| `record_status` | `eq`, `in` | `ACTIVE` (default when absent), `INACTIVE`, `ARCHIVED` |
+| `first_name`, `foundational_id`, `mobile_number`, `region_name`, `woreda_name`, `kebele_name` | `eq`, `contains` | text |
+| `education_level`, `specialisation`, `position`, `source` | `eq`, `in` | the dropdown codes |
+
+Two platform behaviours to code for:
+
+- A field that is not in this list is **ignored, not rejected**: the call
+  answers 200 with the unfiltered list (and a WARNING in the registry log), so
+  a typo in a field name looks like "no filter". A value the platform cannot
+  parse (for example a bad date) answers HTTP 200 with
+  `response_header.response_status: "ERROR"`, `response_error_code: "REQ-VAL-000"`
+  and the reason in `response_error_message`; always check `response_status`.
+- `last_approved_at` is a day filter. For "changed since the last sync", pass
+  the date of the last run and skip, on your side, the records whose
+  `last_approved_at` (full timestamp in each item) you already have. Approval
+  and change-request approval both update `last_approved_at`.
 
 ---
 

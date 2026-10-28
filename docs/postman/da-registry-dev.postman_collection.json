@@ -840,6 +840,84 @@
               "raw": "{\n  \"request_header\": {\n    \"request_id\": \"{{$guid}}\",\n    \"request_timestamp\": \"{{$isoTimestamp}}\",\n    \"sender_app_mnemonic\": \"da-services\",\n    \"sender_app_url\": \"http://localhost\"\n  },\n  \"request_body\": {\n    \"request_payload\": {\n      \"register_id\": \"6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3f90\"\n    },\n    \"pagination_request\": {\n      \"current_page\": 1,\n      \"page_size\": 20,\n      \"search_text\": \"\",\n      \"sort_by\": \"\",\n      \"filter_by\": \"\"\n    }\n  }\n}"
             }
           }
+        },
+        {
+          "name": "13b. List a Woreda's DAs (filter_by woreda_code)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "X-CSRF-Token",
+                "value": "{{csrf}}"
+              },
+              {
+                "key": "Cookie",
+                "value": "X-CSRF-Token={{csrf}}"
+              }
+            ],
+            "description": "filter_by is a JSON string. Use codes, not names (23 Woreda names and 790 Kebele names repeat). Also: zone_code, region_code (eq/in), geo_lowest_level_value_id (Kebele id). Unknown fields are ignored by the platform, not rejected.",
+            "url": {
+              "raw": "{{staff_api}}/register-data/search_in_a_register",
+              "host": [
+                "{{staff_api}}"
+              ],
+              "path": [
+                "register-data",
+                "search_in_a_register"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_header\": {\n    \"request_id\": \"{{$guid}}\",\n    \"request_timestamp\": \"{{$isoTimestamp}}\",\n    \"sender_app_mnemonic\": \"da-services\",\n    \"sender_app_url\": \"http://localhost\"\n  },\n  \"request_body\": {\n    \"request_payload\": {\n      \"register_id\": \"6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3f90\"\n    },\n    \"pagination_request\": {\n      \"current_page\": 1,\n      \"page_size\": 20,\n      \"search_text\": \"\",\n      \"sort_by\": \"\",\n      \"filter_by\": \"{\\\"woreda_code\\\": {\\\"eq\\\": \\\"ET010101\\\"}}\"\n    }\n  }\n}"
+            }
+          }
+        },
+        {
+          "name": "13c. DAs approved since a date (sync changes)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "X-CSRF-Token",
+                "value": "{{csrf}}"
+              },
+              {
+                "key": "Cookie",
+                "value": "X-CSRF-Token={{csrf}}"
+              }
+            ],
+            "description": "last_approved_at is compared by DAY (the platform drops the time part). Pass the date of the last sync and skip, on your side, the items whose last_approved_at you already have. Combine with woreda_code to sync one Woreda.",
+            "url": {
+              "raw": "{{staff_api}}/register-data/search_in_a_register",
+              "host": [
+                "{{staff_api}}"
+              ],
+              "path": [
+                "register-data",
+                "search_in_a_register"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_header\": {\n    \"request_id\": \"{{$guid}}\",\n    \"request_timestamp\": \"{{$isoTimestamp}}\",\n    \"sender_app_mnemonic\": \"da-services\",\n    \"sender_app_url\": \"http://localhost\"\n  },\n  \"request_body\": {\n    \"request_payload\": {\n      \"register_id\": \"6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3f90\"\n    },\n    \"pagination_request\": {\n      \"current_page\": 1,\n      \"page_size\": 20,\n      \"search_text\": \"\",\n      \"sort_by\": \"\",\n      \"filter_by\": \"{\\\"woreda_code\\\": {\\\"eq\\\": \\\"ET010101\\\"}, \\\"last_approved_at\\\": {\\\"gte\\\": \\\"2026-10-01\\\"}}\"\n    }\n  }\n}"
+            }
+          }
         }
       ]
     },
