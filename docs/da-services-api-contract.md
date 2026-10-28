@@ -89,27 +89,34 @@ must be present (non-empty).
 
 ### `message.da`
 
-Codes may be sent as codes or labels (e.g. `SENIOR_DA` or `Senior DA`); case
-does not matter.
+Coded fields (salutation, gender, marital status, education level,
+specialisation, position) are resolved against the Master Data lists the DA
+form uses (openg2p-data pack `ETH-OAN`): send the code (`SENIOR_DA`), the
+display (`Senior DA`) or a translated display; case, spaces, `_`, `-` and `.`
+do not matter. Anything else is an EXCEPTION with the allowed displays
+(`Position 'Manager' is not one of: Development Agent, Senior DA`). A value
+added to the Master Data list is accepted from then on; the lists below are
+what is seeded today, read them live from Master Data
+(`POST /attributes/get_attribute_values`, see the staff API doc §2.2b).
 
 | Field | Required | Format / values |
 |---|---|---|
-| `salutation` | No | `MR`, `MRS`, `DR` (Mr, Mrs, Dr) |
+| `salutation` | No | `PREFIX` list: `MR`, `MRS`, `MISS`, `MS`, `DR` |
 | `first_name` | **Yes** | Name. Letters (Latin or Ethiopic), spaces, `-`, `'`; max 100 |
 | `father_name` | **Yes** | Father's name. Same format |
 | `grandfather_name` | No | Grandfather's name. Same format |
 | `fayda_id` | **Yes** | Fayda FAN, 16 digits (spaces / dashes are removed). One DA per Fayda ID (also enforced by a unique index on active registered DAs) |
-| `gender` | Yes* | `MALE`, `FEMALE` |
-| `marital_status` | Yes* | `SINGLE`, `MARRIED`, `DIVORCED`, `WIDOWED` |
+| `gender` | Yes* | `GENDER` list: `MALE`, `FEMALE`, `OTHER`, `UNKNOWN` |
+| `marital_status` | Yes* | `MARITAL_STATUS` list: `SINGLE`, `MARRIED`, `WIDOWED`, `DIVORCED`, `SEPARATED`, `UNKNOWN` |
 | `birth_month_ec` | Yes* | 1–13 (Ethiopian calendar) |
 | `birth_year_ec` | Yes* | 4-digit EC year, not in the future |
 | `phone_number` | Yes* | Ethiopian number: `0911234567` or `+251911234567` (a 9-digit number gets its leading 0 back) |
 | `telegram_number` | No | Phone number, same format |
 | `alternate_number` | No | Phone number, same format |
 | `email` | Yes* | Valid email; stored lower case |
-| `education_level` | Yes* | `CERTIFICATE`, `DIPLOMA`, `DEGREE`, `MASTERS` |
-| `specialisation` | Yes* | `CROP_PRODUCTION`, `LIVESTOCK`, `NATURAL_RESOURCES`, `AGRONOMY`, `HORTICULTURE`, `OTHER` |
-| `position` | Yes* | `DEVELOPMENT_AGENT`, `SENIOR_DA` |
+| `education_level` | Yes* | `DA_EDUCATION_LEVEL` list: `CERTIFICATE`, `DIPLOMA`, `DEGREE`, `MASTERS` |
+| `specialisation` | Yes* | `DA_SPECIALISATION` list: `CROP_PRODUCTION`, `LIVESTOCK`, `NATURAL_RESOURCES`, `AGRONOMY`, `HORTICULTURE`, `OTHER` |
+| `position` | Yes* | `DA_POSITION` list: `DEVELOPMENT_AGENT`, `SENIOR_DA` |
 | `joining_date` | No | `YYYY-MM-DD` (or `DD/MM/YYYY`); not in the future |
 | `kebele_id` | **Yes**, or the four names | Master Data kebele id, e.g. `kebele-ET010101101001` (preferred: names repeat across woredas) |
 | `region`, `zone`, `woreda`, `kebele` | Instead of `kebele_id` | Names as in Master Data; resolved region → kebele |
@@ -248,7 +255,7 @@ business names; the registry filters on these fields:
 | `woreda` | `woreda_code` | Woreda P-code, e.g. `ET040301` (not `ET04-W01`) |
 | `kebele` | `geo_lowest_level_value_id` | Kebele Master Data id, `kebele-` + kebele code, e.g. `kebele-ET040301888007` |
 | `active_status` | `record_status` | `ACTIVE` |
-| `education_tier` | `education_level` | `CERTIFICATE`, `DIPLOMA`, `DEGREE`, `MASTERS` |
+| `education_tier` | `education_level` | a `DA_EDUCATION_LEVEL` code (today `CERTIFICATE`, `DIPLOMA`, `DEGREE`, `MASTERS`) |
 | `search` | `search_text` | partial match on DA-ID, names, Fayda ID, phone, email |
 | `fayda_status` | none | see below |
 | page / page size | `search_criteria.pagination` | `page_number` from 1; keep `page_size` at 200 or less (no hard cap, but a 1000-row page dropped the connection on the local stack) |

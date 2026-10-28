@@ -11,7 +11,6 @@ from openg2p_registry_core.schemas import (
     G2PRegisterHistorySchema,
 )
 
-from ..models.enums import DAPositionEnum, DASourceEnum
 
 
 class G2PSchemaDA:
@@ -24,9 +23,9 @@ class G2PSchemaDA:
     email: Optional[str] = None
 
     specialisation: Optional[str] = None
-    position: Optional[DAPositionEnum] = None
+    position: Optional[str] = None  # a DA_POSITION code from Master Data
     joined_date: Optional[date] = None
-    source: Optional[DASourceEnum] = None
+    source: Optional[str] = None  # a DA_SOURCE code from Master Data
 
     upstream_reference: Optional[str] = None
     upstream_approved_by: Optional[str] = None

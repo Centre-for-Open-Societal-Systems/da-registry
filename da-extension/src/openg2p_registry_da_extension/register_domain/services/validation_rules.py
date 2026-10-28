@@ -36,23 +36,9 @@ PHONE_FIELD_LABELS = {
     "alternate_number": "Alternate Number",
 }
 
-# Required on the paths where a person fills in the form (agreed with the
-# team, Oct 2026). Imports and syncs are format-checked only, so one bad cell
-# does not reject an otherwise usable row.
-REQUIRED_FIELDS = {
-    "first_name": "Name",
-    "middle_name": "Father Name",
-    "gender": "Gender",
-    "marital_status": "Marital Status",
-    "birth_month_ec": "Month of Birth (EC)",
-    "birth_year_ec": "Year of Birth (EC)",
-    "mobile_number": "Phone Number",
-    "email": "Email",
-    "education_level": "Education Level",
-    "specialisation": "Specialisation",
-    "position": "Position",
-    "foundational_id": "Fayda ID",
-}
+# Required fields are not listed here: widget-required in the register metadata
+# is the single source (register_domain/services/required_fields.py).
+
 
 INTERACTIVE_SOURCES = {"WEB_INTAKE"}
 

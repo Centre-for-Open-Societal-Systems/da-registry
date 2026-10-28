@@ -11,7 +11,11 @@ from sqlalchemy import Date, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..services import G2PRegisterDomainServiceDA
-from .enums import DAPositionEnum, DASourceEnum
+
+
+# Coded values (prefix, gender, marital status, qualification, specialisation,
+# position, source) are Master Data codes; the lists live in the openg2p-data pack.
+SOURCE_WEB_INTAKE = "WEB_INTAKE"
 
 
 class G2PDA:
@@ -39,13 +43,13 @@ class G2PDA:
     email: Mapped[str] = mapped_column(String, nullable=True)
 
     specialisation: Mapped[str] = mapped_column(String, nullable=True)  # attribute lookup
-    position: Mapped[DAPositionEnum] = mapped_column(String, nullable=True)
+    position: Mapped[str] = mapped_column(String, nullable=True)  # DA_POSITION code (Master Data)
     joined_date: Mapped[str] = mapped_column(Date, nullable=True)  # optional for now
 
     # A record that arrives without a source came in through the web intake
     # form; CSV import always sets CSV_IMPORT explicitly.
-    source: Mapped[DASourceEnum] = mapped_column(
-        String, nullable=True, default=DASourceEnum.WEB_INTAKE.value, server_default=DASourceEnum.WEB_INTAKE.value
+    source: Mapped[str] = mapped_column(
+        String, nullable=True, default=SOURCE_WEB_INTAKE, server_default=SOURCE_WEB_INTAKE
     )
 
     # Record id and approver in DA Services, for records it sends after its own

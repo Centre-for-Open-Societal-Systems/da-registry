@@ -130,14 +130,21 @@ registry shows up without a Frappe change. Today the DA form has four sections:
 
 Drop-down codes (send the code, not the label):
 
-| Field | Codes |
-|---|---|
-| `prefix` | `MR`, `MRS`, `DR` |
-| `gender` | `MALE`, `FEMALE` |
-| `marital_status` | `SINGLE`, `MARRIED`, `DIVORCED`, `WIDOWED` |
-| `education_level` | `CERTIFICATE`, `DIPLOMA`, `DEGREE`, `MASTERS` |
-| `specialisation` | `CROP_PRODUCTION`, `LIVESTOCK`, `NATURAL_RESOURCES`, `AGRONOMY`, `HORTICULTURE`, `OTHER` |
-| `position` | `DEVELOPMENT_AGENT`, `SENIOR_DA` |
+The coded fields take a `value_id` of the Master Data list the widget
+declares (§2.2b); read the lists from Master Data rather than copying them.
+As seeded today:
+
+| Field | Master Data list | Values today |
+|---|---|---|
+| `prefix` | `PREFIX` | `MR`, `MRS`, `MISS`, `MS`, `DR` |
+| `gender` | `GENDER` | `MALE`, `FEMALE`, `OTHER`, `UNKNOWN` |
+| `marital_status` | `MARITAL_STATUS` | `SINGLE`, `MARRIED`, `WIDOWED`, `DIVORCED`, `SEPARATED`, `UNKNOWN` |
+| `education_level` | `DA_EDUCATION_LEVEL` | `CERTIFICATE`, `DIPLOMA`, `DEGREE`, `MASTERS` |
+| `specialisation` | `DA_SPECIALISATION` | `CROP_PRODUCTION`, `LIVESTOCK`, `NATURAL_RESOURCES`, `AGRONOMY`, `HORTICULTURE`, `OTHER` |
+| `position` | `DA_POSITION` | `DEVELOPMENT_AGENT`, `SENIOR_DA` |
+
+A value that is not in the list answers `response_status: ERROR` with
+`record 0: position='X' is not a value of DA_POSITION (permitted: ...)`.
 
 Phone numbers are Ethiopian (`0911234567` or `+251911234567`).
 
@@ -263,6 +270,18 @@ REQ-VAL-001  Fayda ID 412345678901 is already in submission 2026OCT05-091557.
 
 Saving the same submission again with its own Fayda ID is fine.
 
+What a save checks (all answer HTTP 200 with `response_status: ERROR` and the
+reason in `response_error_message`):
+
+- A **new** record (`edit_action: ADD`) must carry every required field of
+  that section; a required field left out or blank answers
+  `Required: Name, Father Name, ...` (the labels of the section's `*` fields,
+  from the form metadata). An `UPDATE` may carry only the fields that change;
+  a required field sent blank is still refused.
+- Formats: Fayda ID 16 digits and not already registered, Ethiopian phone
+  numbers, email, month 1–13, year not in the future.
+- Coded fields must hold a Master Data value (§2.2b).
+
 ### 2.4 Submit for approval
 
 ```
@@ -272,6 +291,11 @@ request_payload: {"submission_id": "385e2322-226d-49b4-8c11-e77ca017bcc8"}
 
 The submission becomes `draft_status: FINAL`, `approval_status: PENDING`, and
 the registry opens an approval request (`awe_request_id`). There is no DA-ID yet.
+
+A submission with a section missing, or a required field still empty in any
+section, is refused: `Cannot submit for approval. Required: Phone Number,
+Email, Education Level, Specialisation, Position, Region / Zone / Woreda /
+Kebele` (whatever is missing). Save every section first.
 
 To read a submission at any time:
 

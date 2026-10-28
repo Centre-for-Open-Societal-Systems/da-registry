@@ -6,7 +6,8 @@ runs before the Jinja template (import_file_to_openg2p_da.json.j2) and:
 
 - maps the file's column headers to DA field names, tolerating case, extra
   spaces, a trailing "*" and a few common spellings;
-- turns labels into codes ("Diploma" -> DIPLOMA, "Mr." -> MR);
+- turns labels into Master Data codes ("Diploma" -> DIPLOMA), reading the lists the
+  form's dropdowns use (code_lists.py), so a value added in openg2p-data is accepted;
 - cleans what spreadsheets do to numbers (a lost leading 0 on a phone number,
   "4.0" for a month, "2024-01-05 00:00:00" for a date);
 - resolves Region / Zone / Woreda / Kebele names to the Master Data kebele and
@@ -32,6 +33,7 @@ from openg2p_registry_core.interfaces import G2PPayloadEnricherInterface
 from sqlalchemy.orm import Session
 
 from ...geo_codes import geo_codes
+from . import code_lists
 
 _logger = logging.getLogger("g2p-payload-enricher-service")
 
@@ -63,37 +65,8 @@ COLUMN_ALIASES = {
 }
 _HEADER_TO_FIELD = {alias: field for field, aliases in COLUMN_ALIASES.items() for alias in aliases}
 
-# Code lists: code -> accepted spellings (the code itself is always accepted).
-CODE_LISTS = {
-    "prefix": {"MR": ("mr", "mr."), "MRS": ("mrs", "mrs."), "DR": ("dr", "dr.")},
-    "gender": {"MALE": ("male", "m"), "FEMALE": ("female", "f")},
-    "marital_status": {
-        "SINGLE": ("single",), "MARRIED": ("married",),
-        "DIVORCED": ("divorced",), "WIDOWED": ("widowed", "widow", "widower"),
-    },
-    "education_level": {
-        "CERTIFICATE": ("certificate",), "DIPLOMA": ("diploma",),
-        "DEGREE": ("degree", "bachelor", "bachelors", "bsc", "ba"),
-        "MASTERS": ("masters", "master", "msc", "ma"),
-    },
-    "specialisation": {
-        "CROP_PRODUCTION": ("crop production", "crop"), "LIVESTOCK": ("livestock",),
-        "NATURAL_RESOURCES": ("natural resources", "natural resource", "nrm"),
-        "AGRONOMY": ("agronomy",), "HORTICULTURE": ("horticulture",), "OTHER": ("other",),
-    },
-    "position": {
-        "DEVELOPMENT_AGENT": ("development agent", "da"),
-        "SENIOR_DA": ("senior da", "senior development agent"),
-    },
-}
-# How a code is named in an error message, where title case gets it wrong.
-CODE_DISPLAY = {"SENIOR_DA": "Senior DA"}
-
-CODE_LABELS = {
-    "prefix": "Salutation", "gender": "Gender", "marital_status": "Marital Status",
-    "education_level": "Education Level", "specialisation": "Specialisation", "position": "Position",
-}
-
+# Coded fields (salutation, gender, marital status, qualification, specialisation,
+# position) are resolved against Master Data; see code_lists.py.
 # Needed to place and identify a DA at all. Other blanks are left to the
 # approver; format checks still apply to whatever is filled in.
 IMPORT_REQUIRED = {
@@ -111,17 +84,6 @@ def _normalise_header(header) -> str:
 
 def _clean(value) -> str:
     return re.sub(r"\s+", " ", str(value if value is not None else "")).strip()
-
-
-def _code(field: str, value: str) -> str | None:
-    if not value:
-        return None
-    key = value.strip().lower()
-    for code, spellings in CODE_LISTS[field].items():
-        if key == code.lower() or key in spellings:
-            return code
-    allowed = ", ".join(CODE_DISPLAY.get(c, c.replace("_", " ").title()) for c in CODE_LISTS[field])
-    raise ValueError(f"{CODE_LABELS[field]} '{value}' is not one of: {allowed}")
 
 
 def _integer(value: str, label: str) -> int | None:
@@ -253,26 +215,26 @@ class _MasterDataGeo:
         return {"hierarchy": chain, "lowest_level_value_id": kebele_id}
 
 
-def _build_da_record(row: Dict, source: str, geo: dict) -> Dict:
+def _build_da_record(row: Dict, source: str, geo: dict, session: Session) -> Dict:
     """Canonical DA fields (row keys are DA field names, values strings) ->
     the record the intake template expects. Shared by every ingestion path."""
     out = {
-        "prefix": _code("prefix", row.get("prefix")),
+        "prefix": code_lists.resolve_code("prefix", row.get("prefix"), session),
         "first_name": row.get("first_name"),
         "middle_name": row.get("middle_name"),
         "last_name": row.get("last_name") or None,
         "foundational_id": _digits(row.get("foundational_id")),
-        "gender": _code("gender", row.get("gender")),
-        "marital_status": _code("marital_status", row.get("marital_status")),
+        "gender": code_lists.resolve_code("gender", row.get("gender"), session),
+        "marital_status": code_lists.resolve_code("marital_status", row.get("marital_status"), session),
         "birth_month_ec": _integer(row.get("birth_month_ec"), "Month of Birth (EC)"),
         "birth_year_ec": _integer(row.get("birth_year_ec"), "Year of Birth (EC)"),
         "mobile_number": _phone(row.get("mobile_number")),
         "telegram_number": _phone(row.get("telegram_number")),
         "alternate_number": _phone(row.get("alternate_number")),
         "email": (row.get("email") or "").lower() or None,
-        "education_level": _code("education_level", row.get("education_level")),
-        "specialisation": _code("specialisation", row.get("specialisation")),
-        "position": _code("position", row.get("position")),
+        "education_level": code_lists.resolve_code("education_level", row.get("education_level"), session),
+        "specialisation": code_lists.resolve_code("specialisation", row.get("specialisation"), session),
+        "position": code_lists.resolve_code("position", row.get("position"), session),
         "joined_date": _date(row.get("joined_date"), "Joining Date"),
         "source": source,
         "upstream_reference": row.get("upstream_reference") or None,
@@ -304,7 +266,7 @@ class DAImportFileEnricherService(G2PPayloadEnricherInterface):
             raise ValueError("Missing: " + ", ".join(missing))
 
         geo = _MasterDataGeo.resolve({level: row[level] for level in GEO_LEVELS})
-        out = _build_da_record(row, SOURCE_CSV_IMPORT, geo)
+        out = _build_da_record(row, SOURCE_CSV_IMPORT, geo, session)
         _logger.info("DA import row enriched: Fayda ID %s, kebele %s", out["foundational_id"], out["kebele_name"])
         return out
 
@@ -358,7 +320,7 @@ class DAServicesEnricherService(G2PPayloadEnricherInterface):
         row["upstream_approved_by"] = _clean(message.get("approved_by"))
         geo = (_MasterDataGeo.resolve_by_id(kebele_id) if kebele_id
                else _MasterDataGeo.resolve({level: row[level] for level in GEO_LEVELS}))
-        out = _build_da_record(row, source, geo)
+        out = _build_da_record(row, source, geo, session)
         _logger.info("DA Services record %s enriched: Fayda ID %s, kebele %s",
                      reference, out["foundational_id"], out["kebele_name"])
         return out

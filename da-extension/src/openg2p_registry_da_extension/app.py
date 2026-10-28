@@ -17,6 +17,7 @@ from .register_domain.models import G2PIntakeFormDA, G2PRegisterDA, G2PRegisterH
 from .register_domain.services import (
     G2PRegisterDomainServiceDA,
     install_da_auto_approve,
+    install_da_intake_guard,
     install_da_own_record_guard,
 )
 
@@ -50,6 +51,11 @@ class Initializer(BaseInitializer):
         # A Development Agent (token claim da_id, role Data Editor only) sees
         # and edits only their own record. See services/da_own_record.py.
         install_da_own_record_guard()
+
+        # A form cannot be saved with its required fields left out or sent for
+        # approval incomplete; required = widget-required in the register
+        # metadata. See services/da_intake_guard.py.
+        install_da_intake_guard()
 
         G2PRegisterDomainFactory()
         G2PRegisterDomainServiceDA()

@@ -12,6 +12,10 @@ from openg2p_registry_da_extension.register_domain.services.g2p_register_domain_
 )
 
 
+REQUIRED = {"first_name": "Name", "middle_name": "Father Name", "gender": "Gender", "email": "Email",
+            "foundational_id": "Fayda ID (FAN)"}  # what widget-required in the metadata would give
+
+
 def validate(record: dict) -> dict:
     """Run the synchronous checks in the order the service runs them."""
     Service._normalise_source(record)
@@ -21,7 +25,7 @@ def validate(record: dict) -> dict:
     Service._validate_email(record)
     Service._validate_birth_ec(record)
     Service._validate_joined_date(record)
-    Service._validate_required(record)
+    Service._validate_required(record, REQUIRED)
     return record
 
 

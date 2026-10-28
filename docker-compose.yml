@@ -468,6 +468,9 @@ services:
       REGISTRY_STAFF_PORTAL_API_MASTER_DATA_DB_PORT: 5432
       REGISTRY_STAFF_PORTAL_API_MASTER_DATA_DB_DBNAME: da_master_data_db
       REGISTRY_STAFF_PORTAL_API_MASTER_DATA_READ_MODE: db
+      # Coded values saved through the form / change requests are checked against the
+      # Master Data lists the widgets declare (attribute_id), through the Master Data API.
+      REGISTRY_STAFF_PORTAL_API_VALIDATE_ATTRIBUTE_VALUES: ${VALIDATE_ATTRIBUTE_VALUES:-true}
       # Platform 1.2 reads geo hierarchy and code lists through the Master Data API.
       REGISTRY_STAFF_PORTAL_API_MASTER_DATA_API_URL: http://da-master-data-api:8000
       REGISTRY_STAFF_PORTAL_API_MASTER_DATA_TOKEN_URL: http://keycloak:8080/realms/staff/protocol/openid-connect/token

@@ -145,6 +145,14 @@ On a cluster the Master Data db-seed image (openg2p-data's
 loads the lists; the registry's db-seed loads the sample DAs from the same
 pack.
 
+Validation is metadata-driven: required fields are the form's `widget-required`
+flags (checked on section save and before a submission can be finalized), and
+coded fields are checked against the Master Data lists the widgets declare
+(`REGISTRY_STAFF_PORTAL_API_VALIDATE_ATTRIBUTE_VALUES`; imports resolve codes,
+displays or translations through `code_lists.py`). Adding a value to a list
+or making a field optional is a change in openg2p-data / the register
+metadata, not in Python.
+
 Local-only settings in `docker-compose.yml`: Master Data is read from its
 database (`*_MASTER_DATA_READ_MODE=db`), and DCI search skips partner signature
 and consent checks (`REGISTRY_PARTNER_API_SIGNATURE_VALIDATION_ENABLED` /
