@@ -149,7 +149,7 @@ guard, not the place to discover duplicates.
 ## 2. Read DAs (DCI search)
 
 ```
-POST /dci/registry/sync/search
+POST /dci/sync/search
 Content-Type: application/json
 ```
 

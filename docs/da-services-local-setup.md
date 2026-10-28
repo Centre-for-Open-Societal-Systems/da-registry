@@ -52,7 +52,7 @@ TCP 9000.
 |---|---|---|
 | Bulk import (Excel) | Partner `POST /partner/ingest_data` | [contract §1](da-services-api-contract.md#1-push-an-approved-da) |
 | Result of each pushed DA | Partner `GET /partner/da/status` | [contract §3](da-services-api-contract.md#3-status-of-a-push) |
-| Look DAs up (DA-ID, Fayda ID, name, Woreda) | Partner `POST /dci/registry/sync/search` | [contract §2](da-services-api-contract.md#2-read-das-dci-search) and §4 below |
+| Look DAs up (DA-ID, Fayda ID, name, Woreda) | Partner `POST /dci/sync/search` | [contract §2](da-services-api-contract.md#2-read-das-dci-search) and §4 below |
 | Single DA form, approval, search and view as a user | Staff API | [da-services-staff-api.md](da-services-staff-api.md) |
 
 On the local stack the partner API does not check signatures or consent, so
@@ -65,7 +65,7 @@ has every call below, ready to run against these addresses.
 
 ## 4. DCI search: three examples
 
-`POST http://localhost:8106/dci/registry/sync/search`, `Content-Type: application/json`.
+`POST http://localhost:8106/dci/sync/search`, `Content-Type: application/json`.
 Only `search_criteria.query` (and `pagination`) change between the three.
 
 ```json

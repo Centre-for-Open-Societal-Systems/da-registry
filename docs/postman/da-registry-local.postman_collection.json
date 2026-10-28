@@ -953,7 +953,7 @@
             ],
             "description": "",
             "url": {
-              "raw": "{{partner_api}}/dci/registry/sync/search",
+              "raw": "{{partner_api}}/dci/sync/search",
               "host": [
                 "{{partner_api}}"
               ],
@@ -982,7 +982,7 @@
             ],
             "description": "",
             "url": {
-              "raw": "{{partner_api}}/dci/registry/sync/search",
+              "raw": "{{partner_api}}/dci/sync/search",
               "host": [
                 "{{partner_api}}"
               ],
@@ -1011,7 +1011,7 @@
             ],
             "description": "",
             "url": {
-              "raw": "{{partner_api}}/dci/registry/sync/search",
+              "raw": "{{partner_api}}/dci/sync/search",
               "host": [
                 "{{partner_api}}"
               ],

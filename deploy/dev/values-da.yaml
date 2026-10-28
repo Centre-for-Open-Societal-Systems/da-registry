@@ -26,7 +26,8 @@ registry:
     envVars:
       # Same list as docker-compose.yml: DA location (names and codes), position
       # and last_approved_at, so DA Services can filter by Woreda / Kebele.
-      REGISTRY_PARTNER_API_DCI_EXPRESSION_ALLOWED_FIELDS: '["functional_record_id","first_name","middle_name","last_name","given_name","gender","birth_date","foundational_id","record_name","record_status","search_text","marital_status","income_level","education_level","residency_status","disability_status","displacement_status","region_name","zone_name","woreda_name","kebele_name","geo_lowest_level_value_id","position","specialisation","upstream_reference","region_code","zone_code","woreda_code","last_approved_at"]'
+      # registry-platform 1.2.2-rc.557 reads DCI_ALLOWED_SEARCH_FIELDS (rc.544: DCI_EXPRESSION_ALLOWED_FIELDS); the old name is ignored and every DA filter field is then "not searchable".
+      REGISTRY_PARTNER_API_DCI_ALLOWED_SEARCH_FIELDS: '["functional_record_id","first_name","middle_name","last_name","given_name","gender","birth_date","foundational_id","record_name","record_status","search_text","marital_status","income_level","education_level","residency_status","disability_status","displacement_status","region_name","zone_name","woreda_name","kebele_name","geo_lowest_level_value_id","position","specialisation","upstream_reference","region_code","zone_code","woreda_code","last_approved_at"]'
   celeryWorker:
     enabled: true
     image:

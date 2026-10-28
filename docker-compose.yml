@@ -509,7 +509,8 @@ services:
       # Application reference: the platform default ends in one random digit, so two records in the same second collide (unique index) during bulk import; four digits.
       REGISTRY_PARTNER_API_APPLICATION_REFERENCE_FORMAT: "{DATE:%Y%b%d|upper}-{SECONDS:5}-{RAND:4}"
       # DCI expression search: the platform's default fields plus the DA location (names and codes), position and last_approved_at (changes since), so DA Services can filter exactly by Woreda / Kebele.
-      REGISTRY_PARTNER_API_DCI_EXPRESSION_ALLOWED_FIELDS: '["functional_record_id","first_name","middle_name","last_name","given_name","gender","birth_date","foundational_id","record_name","record_status","search_text","marital_status","income_level","education_level","residency_status","disability_status","displacement_status","region_name","zone_name","woreda_name","kebele_name","geo_lowest_level_value_id","position","specialisation","upstream_reference","region_code","zone_code","woreda_code","last_approved_at"]'
+      # registry-platform 1.2.2-rc.557 reads DCI_ALLOWED_SEARCH_FIELDS (rc.544: DCI_EXPRESSION_ALLOWED_FIELDS); the old name is ignored and every DA filter field is then "not searchable".
+      REGISTRY_PARTNER_API_DCI_ALLOWED_SEARCH_FIELDS: '["functional_record_id","first_name","middle_name","last_name","given_name","gender","birth_date","foundational_id","record_name","record_status","search_text","marital_status","income_level","education_level","residency_status","disability_status","displacement_status","region_name","zone_name","woreda_name","kebele_name","geo_lowest_level_value_id","position","specialisation","upstream_reference","region_code","zone_code","woreda_code","last_approved_at"]'
       # Local stack only: there is no Partner Management (signing keys) or
       # Consent Manager here, so DCI search skips both checks. The response is
       # stamped "disabled" for each. Keep both on (the default) in deployments.
