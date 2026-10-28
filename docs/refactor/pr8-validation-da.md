@@ -2,7 +2,9 @@
 
 Yash Sontakke · 27–28 October 2026 · tested @ aa64492 of `asmitonweb:develop-refactor` (PR https://github.com/Centre-for-Open-Societal-Systems/da-registry/pull/8, registry-platform 1.2.2-rc.557)
 
-> **Status 28 Oct:** PR #8 is open (2 commits, 23 files, "wip" per Asmit). It is the first refactor step for DA: per-component Dockerfiles, platform rc.544 → rc.557, `ui/staff-ui` override scaffold. The DA extension, seeds, Keycloak/IAM init, Helm values and `deploy/dev` are unchanged by the PR, so everything below that works does so because the extension survived the platform bump, not because it was refactored yet. Section 4 lists what the refactor still has to move.
+> **Status 28 Oct, evening – branch `feature/da-on-refactor` (on top of PR #8):** sections 3, 4 and 7 are now done on this branch, see section 8 at the end for what changed, the re-run results and what is still open. The text below is the 27 Oct finding kept as the record.
+>
+> **Status 28 Oct (morning):** PR #8 is open (2 commits, 23 files, "wip" per Asmit). It is the first refactor step for DA: per-component Dockerfiles, platform rc.544 → rc.557, `ui/staff-ui` override scaffold. The DA extension, seeds, Keycloak/IAM init, Helm values and `deploy/dev` are unchanged by the PR, so everything below that works does so because the extension survived the platform bump, not because it was refactored yet. Section 4 lists what the refactor still has to move.
 
 The PR was run unchanged on a laptop with docker compose (project `da-pr8`, fresh DB volume): the five DA images built from the PR on the public rc.557 base images, develop's compose for Keycloak / IAM / Master Data (MDM) / AWE / ID generator. No PR code was modified; one compose override was used only to verify the DCI fix (B1). Test assets: the Postman collection replayed by script (39 API checks), a UI session script (12 checks), the extension's unit tests inside the built image (62), the 6-row Excel import file, DB and log inspection. This file is the "what we had / what is missing / what comes next" list asked for on 27 October and will be updated as items are fixed.
 
@@ -65,3 +67,34 @@ Record photo upload and its URL on the approval screen; DA Services push with a 
 6. Seeds into the openg2p-data fork: geo, IAM catalog (incl. `register:export` for DA roles), users/roles/data policies, templates, sample DAs.
 7. Decide the Fayda format (FIN 12 vs FAN 16) and the age rule; remove the 2010 UI cap.
 8. Re-run this validation on the PR head after the above, then on dev after DevOps moves to rc.557 (partner registration, DCI setting rename, Keycloak items).
+
+## 8. Branch `feature/da-on-refactor` – what was done on top of PR #8 (28 Oct)
+
+Six commits on PR #8's head (aa64492), each one step, each verified on the same compose stack rebuilt from the branch (`da-pr8`, fresh seed). Commit messages carry the detail; this is the map.
+
+| Step | Commit | What | Why |
+|---|---|---|---|
+| 1 | b27b4b2 | `REGISTRY_PARTNER_API_DCI_ALLOWED_SEARCH_FIELDS` in compose, Helm values and `deploy/dev`; docs, Postman and the API contract on `/dci/sync/search` | B1 + B2 |
+| 2 | 648909e | Fayda ID is the 16-digit FAN (validator, register metadata pattern/label, import aliases, sample data, templates); minimum-age rule removed, only "not in the future"; `birth_year_ec` min 1920 instead of the 2010 cap | section 5 requirement gaps; one Fayda format with farmer/livestock |
+| 3 | e096560 | AWE seed = the platform's default two-level approval (Stage 1 / Stage 2 Officers, `alex.carter` / `nina.patel` as seed approvers); every seed INSERT idempotent (`ON CONFLICT`) so re-seeding a stack moves the stages; real approvers are AWE configuration (role rules in the AWE admin portal) | section 4 "AWE is configuration" |
+| 4 | 4c476ab | `docker/patches/patch_platform.py` deleted; the three platform fixes are start-up overrides in `platform_overrides.py` (partner JSON response, scoped IAM permission lookup, worker NullPool engine – the worker one installs on `worker_process_init`); component Dockerfiles are `FROM base` + `pip install` only; unit tests for the overrides | section 4 "no base-image patches" |
+| 5 | bf28c97 | Imports and DA Services pushes go through the same approval as the form (`DA_AUTO_APPROVE_IMPORTS` default `false`; the worker sends them to AWE with a Keycloak service token, client `da-registry-backend`); "a DA sees and edits only their own record" (token claim `da_id` from scope `da-self-service`, synthetic data policy + change-request guard); `register:export` for the DA roles; Keycloak init creates scope, attribute, test users; docs and Postman | section 1 last bullet, section 7 items 4–5 |
+| 6 | (this commit) | Photo-URL runtime hook removed (`g2p_intake_form_data_service.py`): the DA form has no photo field, the hook was dead code | fewer platform wraps |
+| 7 | (this commit) | This section; validation re-run | section 7 item 8 |
+
+**Re-run on the branch (28 Oct, stack rebuilt at step 6):**
+
+- API checks (Postman collection replayed + flow checks): 38/38 PASS. Covers IAM login, form render/save/finalize → stage 1 (`alex.carter`) → stage 2 (`nina.patel`) → DA-ID; search and filters; change request through both stages; Master Data; DA Services push → `QUEUED` with an open approval task, no auto-approve; `/partner/da/status` and `/exceptions`; DCI by DA-ID, Fayda ID, Woreda code, changed-since on `/dci/sync/search`; Excel import 5 rows PENDING with approval tasks, bad-Kebele row listed as an exception.
+- UI session checks: 13/13 (pages, IAM login, UI API routes incl. `render-intake-form`, staff API with the UI token).
+- Unit tests inside the built images: staff-api 86 passed / 2 skipped, partner-api 3 passed / 1 skipped (override tests), celery-worker 7 passed / 1 skipped.
+- Logs: no tracebacks in staff-api; partner-api only the 404s from a test replaying the old DCI path; worker shows B3 (asyncpg "different loop") on first attempts, every row retried and completed – unchanged from 27 Oct, reported for upstream.
+
+**Still open after this branch (next PRs / other repos):**
+
+- Dropdowns from Master Data: `specialisation`, `position`, education and the other code lists still come from register metadata; they should be code lists in the openg2p-data pack (`domains/da/`) with the widget `widget-data-source` on the attributes API.
+- Seeds into the openg2p-data fork: geo hierarchy, IAM catalog, Keycloak clients/scope/roles/users, templates, sample DAs (section 4). The repo keeps only the platform default approval seed.
+- Runtime wraps that could become `component_registry` subclasses (FilterBuilder booleans, approval start, own-record guard) – kept as wraps for now; middleware and engine overrides have no subclass hook.
+- Upstream (OpenG2P): the three platform bugs behind `platform_overrides.py`, and B3.
+- DevOps for dev: DCI setting rename in the oan-helm chart values, secret `da-registry-backend-keycloak`/`client-secret`, scope `da-self-service` and the `da_id` attribute in the shared `staff` realm, `da-services` partner registration, `DA_AUTO_APPROVE_IMPORTS` (default off).
+- Not tested here: Helm deploy, DA Services (Frappe) calls, DCI async search, signature validation.
+

@@ -18,7 +18,6 @@ from .register_domain.services import (
     G2PRegisterDomainServiceDA,
     install_da_auto_approve,
     install_da_own_record_guard,
-    install_record_image_url_resolution,
 )
 
 _logger = logging.getLogger(_config.logging_default_logger_name)
@@ -43,11 +42,6 @@ class Initializer(BaseInitializer):
         from .platform_overrides import install_platform_overrides
 
         install_platform_overrides()
-
-        # Intake reads return record_image_document_id but not the presigned
-        # URL the register reads add; resolve it so a record photo shows on
-        # the approval screen. See the function for details.
-        install_record_image_url_resolution()
 
         # File import / partner ingestion: approve unique DAs without a user
         # token. See register_domain/services/auto_approve.py.
