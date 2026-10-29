@@ -1,14 +1,14 @@
 # Follow-ups to fix or review later
 
-Open items found while bringing the DA registry in line with the OpenG2P standards (29 October 2026). None of them blocks building and pushing the images; the dev deploy stays off (`DEPLOY_TO_DEV`, default false) until the deployment items are done.
+Open items found while bringing the DA registry in line with the OpenG2P standards (29 October 2026). None of them blocks building and pushing the images; the dev deploy stays off (`DEPLOY_TO_DEV`, default false) until the open deployment items are done and the chart pin is filled in.
 
 ## Deployment (before turning the dev deploy on)
 
-| Item | What is wrong | What to do |
+| Item | Status | What to do |
 |---|---|---|
-| Release target | The Jenkinsfile upgrades release `da` in namespace `commons`, which has no workloads. The DA that runs is release `da-registry` in namespace `da-registry`. | Settle the one release and namespace; point the pipeline at it. |
-| Chart and platform pin | `HELM_CHART_VERSION` 1.0.0-dev.5 brings registry-platform rc.544, the images are rc.557. | Move the chart and the images to the same platform version together. |
-| Values | The pipeline upgrades with `--reuse-values`, values live in this repository (`deploy/dev/values-da.yaml`), and the repository keeps its own chart copy (`helm/openg2p-da-registry`). Crop Sown and Livestock pin their values in oan-helm (`ci/deploy/oan-chart.json`). | Port to the Crop Sown and Livestock pattern: pinned values in oan-helm, `--reset-values`, no chart copy here. |
+| Release target | Done by this change. The pipeline upgrades the existing release `da-registry` in namespace `da-registry` (never an install). | Nothing. |
+| Chart and platform pin | Done by this change and oan-helm #39. The chart `openg2p-da-registry` 1.0.0-dev.17 is on registry-platform rc.557, the same as the images; `ci/deploy/oan-chart.json` pins its archive by SHA-256. | After #39 is released, fill in the placeholder fields of `ci/deploy/oan-chart.json` (see `ci/deploy/README.md`). |
+| Values | Done by this change and oan-helm #39. Public values are pinned in oan-helm (`environments/dev/values/da.yaml`) and applied with `--reset-values`; `deploy/dev/values-da.yaml` and the repository's chart copy are removed. | Nothing. |
 | Keycloak client | `da-registry-backend` (service account) and its secret `da-registry-backend-keycloak` / `client-secret` do not exist on the dev cluster. The references are optional, so the pods start; imports and DA Services pushes cannot open an approval until it exists. | Create the client and the secret (Keycloak admin). |
 | Self-service scope | Scope `da-self-service` and attribute `da_id` in the `staff` realm are not created. | Create them before testing a Development Agent's own-record access. |
 | Master Data lists | The form's dropdowns read `DA_EDUCATION_LEVEL`, `DA_SPECIALISATION`, `DA_POSITION`, `DA_SOURCE`. | Merge openg2p-data PR 22 and re-run the Master Data seed (`PACK_DOMAINS=agriculture`). |
