@@ -1,7 +1,7 @@
 // DA Registry (OpenG2P) -- CI/CD pipeline.
 //
 // Every branch: build the five images and push them to ECR.
-// develop:      also deploy them to the dev cluster, release `da` in namespace
+// develop:      deploy them to the dev cluster only when DEPLOY_TO_DEV is ticked, release `da` in namespace
 //               `commons`, chart oan-coss/openg2p-da-registry (the one Rancher
 //               installed). Values: deploy/dev/values-da.yaml.
 // staging/main: build and push only; no deploy target yet.
@@ -14,6 +14,15 @@ pipeline {
         disableConcurrentBuilds()
     }
 
+    parameters {
+        // Off by default: a develop build only builds and pushes the images. The
+        // dev deploy waits until the release target, the pinned values and the
+        // Keycloak client secret the values reference exist; then a person ticks
+        // this on a develop build.
+        booleanParam(name: 'DEPLOY_TO_DEV', defaultValue: false,
+                     description: 'Deploy this develop build to the dev cluster')
+    }
+
     environment {
         AWS_ACCOUNT_ID = "379220350808"
         AWS_REGION     = "ap-south-1"
@@ -22,10 +31,10 @@ pipeline {
         // prefix (staff-api-<commit>, staff-api-develop, ...).
         ECR_REPO       = "openg2p/da-registry"
 
-        // Must match ARG RP_VERSION / STAFF_UI_VERSION in the root Dockerfile
+        // Must match ARG RP_VERSION in the component Dockerfiles
         // and the openg2p-registry dependency in helm/openg2p-da-registry/Chart.yaml.
         // The staff UI is built from the same registry-platform run.
-        RP_VERSION     = "1.2.2-rc.544"
+        RP_VERSION     = "1.2.2-rc.557"
 
         // Dev deployment. The chart and version are the ones the release was
         // installed with in Rancher; move them together with that install.
@@ -58,14 +67,14 @@ pipeline {
                 script {
                     env.IMAGE_TAG = env.GIT_COMMIT.take(12)
 
-                    // Build the root Dockerfile's targets, the same definition
-                    // docker compose builds, so CI ships what developers run.
+                    // Build the same component Dockerfiles that docker compose
+                    // uses, so CI ships what developers run.
                     def components = [
-                        [name: 'staff-api',   target: 'staff-api',   args: "--build-arg RP_VERSION=${RP_VERSION}"],
-                        [name: 'staff-ui',    target: 'staff-ui',    args: "--build-arg STAFF_UI_VERSION=${RP_VERSION}"],
-                        [name: 'partner-api', target: 'partner-api', args: "--build-arg RP_VERSION=${RP_VERSION}"],
-                        [name: 'celery',      target: 'celery',      args: "--build-arg RP_VERSION=${RP_VERSION}"],
-                        [name: 'db-seed',     target: 'db-seed',     args: "--build-arg RP_VERSION=${RP_VERSION}"],
+                        [name: 'staff-api',   dockerfile: 'docker/staff-api/Dockerfile',   args: "--build-arg RP_VERSION=${RP_VERSION}"],
+                        [name: 'staff-ui',    dockerfile: 'docker/staff-ui/Dockerfile',    args: ""],
+                        [name: 'partner-api', dockerfile: 'docker/partner-api/Dockerfile', args: "--build-arg RP_VERSION=${RP_VERSION}"],
+                        [name: 'celery',      dockerfile: 'docker/celery/Dockerfile',      args: "--build-arg RP_VERSION=${RP_VERSION}"],
+                        [name: 'db-seed',     dockerfile: 'docker/db-seed/Dockerfile',     args: "--build-arg RP_VERSION=${RP_VERSION}"],
                     ]
 
                     // Each environment branch also moves a tag of its own name.
@@ -74,8 +83,8 @@ pipeline {
                         def image  = "${ECR_REGISTRY}/${ECR_REPO}:${c.name}-${env.IMAGE_TAG}"
                         def latest = movingTag ? "${ECR_REGISTRY}/${ECR_REPO}:${c.name}-${movingTag}" : null
                         sh """
-                            docker build ${c.args} --target ${c.target} \
-                                -f Dockerfile -t ${image} ${latest ? "-t ${latest}" : ''} .
+                            docker build ${c.args} \
+                                -f ${c.dockerfile} -t ${image} ${latest ? "-t ${latest}" : ''} .
                             docker push ${image}
                             ${latest ? "docker push ${latest}" : ''}
                         """
@@ -90,7 +99,7 @@ pipeline {
             // --reuse-values keeps what was set in Rancher; DEV_VALUES and the
             // commit's image tags go on top. No --atomic: a failing db-seed
             // hook should leave the release inspectable, not roll it back.
-            when { branch 'develop' }
+            when { allOf { branch 'develop'; expression { params.DEPLOY_TO_DEV } } }
             steps {
                 withCredentials([file(credentialsId: "${DEV_KUBECONFIG_CRED_ID}", variable: 'KUBECONFIG')]) {
                     sh """

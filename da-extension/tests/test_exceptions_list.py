@@ -59,7 +59,7 @@ DUPLICATE_PUSH = row(
     data_model_id=DA_SERVICES_DATA_MODEL_ID,
     reference_id="FR-DA-9",
     approval_status="PENDING",
-    remarks="Auto-approval skipped: Fayda ID 770000000001 is already registered as DA-1.",
+    remarks="Fayda ID 770000000001 is already registered as DA-1.",
 )
 SYNC_RETRY = row(
     ingest_id="i4",

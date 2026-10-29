@@ -189,6 +189,10 @@ Desktop.ini
 # da-registry-dashboard-api, cloned by the Jenkinsfile
 /.build/
 
+# Generated staff-ui checkout and dependency marker.
+**/.app/
+**/.deps-stamp
+
 # ---------------------------------------------------------------------------
 # Helm artifacts
 # ---------------------------------------------------------------------------
@@ -203,3 +207,6 @@ helm/**/charts/*.tgz
 
 # ci/commons-services/migrate-far-geo.sh dumps the tables it rewrites here (record data).
 far-geo-backup-*.sql.gz
+
+# Local checkout of openg2p-data mounted into the seed jobs (OPENG2P_DATA_PATH), never committed
+docker/db-seed/openg2p-data-local/

@@ -1,4 +1,4 @@
-# DA Services roles in the DA registry (DA-165, DA-166)
+# DA Services roles in the DA registry
 
 This page covers what a DA Services user can do in the DA registry staff API,
 and which DAs they can see.
@@ -8,7 +8,7 @@ and which DAs they can see.
 - **Which DAs they see** comes from data policies. A data policy is a filter on
   DA records, held as a client role `DP_<mnemonic>`.
 
-## 1. Roles (DA-165)
+## 1. Roles
 
 Each DA Services role is a Keycloak group in the `staff` realm. A user joins the
 group of their role, and the group carries the registry roles.
@@ -31,69 +31,36 @@ needs:
 | `intake-form-data/save_intake_form_submission`, `finalize_...`, `search_in_intake_form_submissions` | `intakeSubmission:edit` |
 | `change-requests/create_change_request` | `changeRequest:create` |
 | `change-requests/search_in_change_request` | `changeRequest:view` |
+| `register-data/get_export_queue_records` (the register list screen polls it) | `register:export` |
 
 ### Who approves a DA
 
-Decision (22 Oct 2026): DAs from the bulk import and from the DA Services
-push are approved automatically (`DA_AUTO_APPROVE_IMPORTS=true`); a DA entered
-on the web intake form is approved by an administrator.
+Every submitted DA and every change request goes through the platform's
+two-level approval: Stage 1 Officers, then Stage 2 Officers. Each stage is
+completed by any one of its approvers (mode `any-n`, one decision). The
+repository seeds the same approvers in every OAN registry (`awe_meta_data/`):
+Stage 1 = `alex.carter` or `admin`, Stage 2 = `nina.patel` or `admin`; the two
+officers are created by `docker/local-dev/keycloak-init.sh`.
 
-A submitted DA (web form) goes to AWE, which assigns the approval task by the
-seeded approver rules (`awe_meta_data/30_approver_rule.sql`). The rules are by
-role on the client `da-registry-staff-portal`, so they work in every
-environment without naming a user:
+Who approves in a real environment is configuration, not code (decision of
+27-28 Oct 2026, Faiz / Asmit): after deployment an administrator edits the
+two DA policies in the AWE admin portal and replaces the example users, for
+instance with a `role` rule (a Keycloak client role such as Operations
+Administrator or Intake Validator on `da-registry-staff-portal`; AWE's service
+account needs `view-users` and `view-clients`) or with named users. Routing a
+Woreda's submissions to its own supervisor is the same kind of
+configuration once the approver roles exist per Woreda.
 
-| Stage | Approvers: users holding either role |
-|---|---|
-| DA intake form | Operations Administrator, Intake Validator |
-| DA change request | Operations Administrator, Data Validator |
-
-AWE asks Keycloak for the users that hold the role **directly**. A role that
-comes through a group (the DA Services role groups above) is not seen by that
-lookup. So an approver must hold the role directly, or, once the DA Services
-groups exist in an environment, a `group` rule can be added for
-`DA Services - Supervisor` and `DA Services - OAN Administrator` (a group rule
-fails the whole resolution while the group is missing). AWE's resolver client
-needs `view-users` and `view-clients` in Keycloak. Routing a submission to its
-own Woreda's supervisor is DA-33.
-
-## 2. Scope by Woreda, Zone or Region (DA-166)
-
-DA records carry `woreda_code`, `zone_code` and `region_code` (Master Data
-P-codes, DA-225). A data policy filters on one of these. For example, the
-policy `DP_DA_WOREDA_ET010101` uses this filter:
-
-```json
-{"type":"GROUP","operator":"AND","children":[
-  {"type":"CONDITION","field_id":"woreda_code","operator":"eq","value":"ET010101"}]}
-```
-
-The policy has `policy_target` REGISTER_RECORD and `policy_type` ALLOW, and
-belongs to the application `da-registry-staff-portal`.
-
-A user who holds the policy's role sees only matching DAs. This applies to DA
-search, DA details, intake submissions and change requests. Opening a DA
-outside the scope returns `REG-ERR-012`. A user with no data policy sees every
-DA, so Development Agent and OAN Administrator are not scoped.
-
-**Local stack:**
-
-```bash
-scripts/da-scope-local.sh woreda ET010101 <username>   # Supervisor
-scripts/da-scope-local.sh region ET04 <username>       # Executive
-```
-
-The script does three things:
-
-1. Adds the policy row to the IAM database.
-2. Creates the Keycloak role.
-3. Gives the role to the user.
-
-The user must sign in again to get a new token.
-
-**Deployment:** an IAM administrator (`dataPolicy:create`) adds the policy
-through the IAM admin API or UI. That also creates the Keycloak role. After
-that, the role is given to each user, or to a per-Woreda group.
+Bulk import (file) and the DA Services push go through the same two stages.
+The worker has no user token, so it opens the approval request with a Keycloak
+client-credentials token (`DA_AWE_TOKEN_URL`, `DA_AWE_CLIENT_ID`,
+`DA_AWE_CLIENT_SECRET`; by default the process's Master Data client
+`da-registry-backend`), see `register_domain/services/awe_service_token.py`.
+Imports are approved manually, like every other record; no setting approves
+them automatically, and no role (the Operations Administrator included)
+approves a submission or a change request directly: the direct-approval
+endpoints answer `AWE_APPROVAL_REQUIRED`. Decision (23 Oct 2026, Faiz and
+Shikha).
 
 ## 3. Local test result (16 Oct 2026)
 
@@ -110,12 +77,49 @@ was scoped to Woreda ET010101 and the Executive to Region ET04.
 
 ## 4. Limits and open points
 
-- **A Development Agent can read every DA, not only their own.** The registry
-  has no "own record" rule. The DA app must use the DA's own ID; otherwise the
-  DA can be given a narrow (for example Kebele-level) policy.
+- **A Development Agent sees only their own record** when their token carries
+  the claim `da_id` (section 5). Without that claim a Development Agent can
+  read every DA; use the claim, or a narrow data policy.
 - **Login:** these roles work with a staff Keycloak token. How DA Services
-  users sign in (OAN auth service or Keycloak) is still open (DA-167).
+  users sign in (OAN auth service or Keycloak) is still open.
 - **Approver routing:** who approves a Woreda's submissions is the approval
-  workflow's job (DA-33), not the data policies'.
+  workflow's job, not the data policies'.
 - A Woreda code is unique, but Woreda names are not (23 names repeat). Always
   scope by code.
+
+## 5. A Development Agent's own record (self-service)
+
+A DA signs in to DA Services (or the registry portal) with their own Keycloak
+user and may read and change only their own DA record. This is enforced in the
+registry's staff API (`register_domain/services/da_own_record.py`), so it holds
+for DA Services, the registry portal and any direct API call alike:
+
+- The Keycloak user carries the attribute `da_id` = the DA's DA-ID
+  (for example `DA-4374521939`). The client scope `da-self-service` maps it
+  into the access token as the claim `da_id` (local: `keycloak-init.sh`; on a
+  shared Keycloak: create the scope with a *User Attribute* mapper
+  `da_id -> da_id`, make it a default scope of the clients a DA signs in with,
+  and set the realm's user profile *unmanaged attributes* to `Admin can edit`).
+- When the token has `da_id` and the user's only roles on
+  `da-registry-staff-portal` are the Development Agent ones (`Data Editor`,
+  plus any `DP_` data-policy role), the request's data policies are replaced
+  by one ALLOW policy `functional_record_id = <da_id>` on the DA register.
+  DA search, DA details, tab records and change-request reads then return
+  only that record; any other record answers `REG-ERR-012 RECORD_ACCESS_DENIED`.
+- `create_change_request` is checked separately (the platform does not put it
+  under data policies): the change must target the DA's own record and one
+  of the sections contact (`da_contact_section_04`), service
+  (`da_service_section_02`) or location (`da_location_section_03`). The
+  identity section (name, Fayda ID) answers `REG-ERR-012`.
+- The DA's change request goes through the same two-level approval as any
+  other; the DA cannot approve it.
+- A user with any wider role (Intake Officer, Validator, Supervisor,
+  Operations Administrator, ...) is not restricted by this rule, whatever
+  claims the token has.
+
+Local test (26 Oct 2026): user `da.test` (Data Editor, `da_id` DA-4374521939)
+saw 1 of 50 DAs, read and changed only its own contact section, was refused
+on another record and on its identity section; `admin` was unchanged.
+
+Settings: `DA_SELF_SERVICE_CLAIM` (default `da_id`),
+`DA_SELF_SERVICE_CLIENT_ID` (default `da-registry-staff-portal`).

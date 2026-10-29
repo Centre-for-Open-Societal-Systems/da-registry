@@ -16,8 +16,10 @@ from .register_domain.factory import G2PRegisterDomainFactory
 from .register_domain.models import G2PIntakeFormDA, G2PRegisterDA, G2PRegisterHistoryDA
 from .register_domain.services import (
     G2PRegisterDomainServiceDA,
-    install_da_auto_approve,
-    install_record_image_url_resolution,
+    install_da_change_request_service,
+    install_da_import_approval_workflow,
+    install_da_intake_guard,
+    install_da_own_record_guard,
 )
 
 _logger = logging.getLogger(_config.logging_default_logger_name)
@@ -35,57 +37,32 @@ class Initializer(BaseInitializer):
         super().initialize()
         CoreInitializer().initialize()
 
-        self._patch_filter_builder()
+        # The temporary in-process workarounds for platform gaps, all in one
+        # module; see register_domain/temporary_platform_overrides.py.
+        from .register_domain.temporary_platform_overrides import install_temporary_platform_overrides
 
-        # Intake reads return record_image_document_id but not the presigned
-        # URL the register reads add; resolve it so a record photo shows on
-        # the approval screen. See the function for details.
-        install_record_image_url_resolution()
+        install_temporary_platform_overrides()
 
-        # File import / partner ingestion: approve unique DAs without a user
-        # token. See register_domain/services/auto_approve.py.
-        install_da_auto_approve()
+        # File import / partner ingestion: open the approval workflow with a
+        # service token, since no user token exists. Approval itself stays
+        # with the approvers. See services/import_approval_workflow.py.
+        install_da_import_approval_workflow()
+
+        # A change request is approved only through its approval task.
+        # See services/direct_approval.py.
+        install_da_change_request_service()
+
+        # A Development Agent (token claim da_id, role Data Editor only) sees
+        # and edits only their own record. See services/da_own_record.py.
+        install_da_own_record_guard()
+
+        # A form cannot be saved with its required fields left out or sent for
+        # approval incomplete; required = widget-required in the register
+        # metadata. See services/da_intake_guard.py.
+        install_da_intake_guard()
 
         G2PRegisterDomainFactory()
         G2PRegisterDomainServiceDA()
-
-    def _patch_filter_builder(self):
-        """Accept "true"/"false" strings for boolean filters (the staff UI sends
-        strings; the platform's FilterBuilder expects real booleans)."""
-        try:
-            from openg2p_registry_core.services.filter_builder import FilterBuilder
-            from sqlalchemy import Boolean
-
-            orig_build_field_conditions = FilterBuilder._build_field_conditions
-            orig_validate_value = FilterBuilder._validate_value
-
-            def _to_bool(v):
-                if isinstance(v, str) and v.lower() == "true":
-                    return True
-                if isinstance(v, str) and v.lower() == "false":
-                    return False
-                return v
-
-            def patched_validate_value(this, field_config, operator, value):
-                if field_config.get("filter_type") == "boolean":
-                    if isinstance(value, str) and value.lower() in ("true", "false"):
-                        return
-                return orig_validate_value(this, field_config, operator, value)
-
-            def patched_build_field_conditions(this, column, field_name, operators, field_config):
-                is_bool_col = hasattr(column, "type") and isinstance(column.type, Boolean)
-                if is_bool_col and isinstance(operators, dict):
-                    operators = {
-                        op: ([_to_bool(v) for v in val] if isinstance(val, list) else _to_bool(val))
-                        for op, val in operators.items()
-                    }
-                return orig_build_field_conditions(this, column, field_name, operators, field_config)
-
-            FilterBuilder._validate_value = patched_validate_value
-            FilterBuilder._build_field_conditions = patched_build_field_conditions
-            _logger.info("FilterBuilder boolean handling patched successfully")
-        except Exception as e:
-            _logger.warning(f"Failed to patch FilterBuilder: {e}")
 
     async def fastapi_app_startup(self, app):
         # Also run the idempotent migration on startup, not only on the CLI

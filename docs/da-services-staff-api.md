@@ -12,11 +12,11 @@ The partner API (bulk import and push status) is in
 | Who calls | The DA Services system | A person, through the Frappe backend |
 | Auth | Partner signature | The person's Keycloak token |
 | Used for | Bulk import, push status, DCI search | Single DA form, approval, search and view |
-| Approval | Imports are approved automatically | A Woreda approver approves in the registry |
+| Approval | Two-level approval in the registry (stage 1, stage 2), same as the form | Two-level approval in the registry |
 | Recorded as | `system` / partner | The person's name |
 
 Every call below was run end to end against the local stack on
-registry-platform `1.2.2-rc.544`; the JSON is taken from those runs and trimmed.
+registry-platform `1.2.2-rc.557`; the JSON is taken from those runs and trimmed.
 
 | | Local stack | Deployment |
 |---|---|---|
@@ -91,7 +91,7 @@ All calls are `POST` with this body:
 
 Check `response_header.response_status`, not only the HTTP code: a rejected
 field comes back as HTTP 200 with `"response_status": "ERROR"` and the reason,
-for example `REQ-VAL-001 Fayda ID (FIN) must be exactly 12 digits`.
+for example `REQ-VAL-001 Fayda ID (FAN) must be exactly 16 digits`.
 
 ### Fixed ids
 
@@ -123,21 +123,28 @@ registry shows up without a Frappe change. Today the DA form has four sections:
 
 | `section_id` | Fields (required in **bold**) |
 |---|---|
-| `da_identity_section_01` | `prefix`, **`first_name`** (Name), **`middle_name`** (Father's name), `last_name` (Grandfather's name), **`foundational_id`** (Fayda FIN, 12 digits), **`gender`**, **`marital_status`**, **`birth_month_ec`** (1–13), **`birth_year_ec`** (EC, age 18+) |
+| `da_identity_section_01` | `prefix`, **`first_name`** (Name), **`middle_name`** (Father's name), `last_name` (Grandfather's name), **`foundational_id`** (Fayda FAN, 16 digits), **`gender`**, **`marital_status`**, **`birth_month_ec`** (1–13), **`birth_year_ec`** (EC, not in the future) |
 | `da_contact_section_04` | **`mobile_number`**, `telegram_number`, `alternate_number`, **`email`** |
 | `da_service_section_02` | **`education_level`**, **`specialisation`**, **`position`**, `joined_date` (`YYYY-MM-DD`), `source` (read-only) |
 | `da_location_section_03` | **`da_geo_hierarchy`**: Region / Zone / Woreda / Kebele, saved as `geo_lowest_level_value_id` + `geo_code_hierarchy_json` |
 
 Drop-down codes (send the code, not the label):
 
-| Field | Codes |
-|---|---|
-| `prefix` | `MR`, `MRS`, `DR` |
-| `gender` | `MALE`, `FEMALE` |
-| `marital_status` | `SINGLE`, `MARRIED`, `DIVORCED`, `WIDOWED` |
-| `education_level` | `CERTIFICATE`, `DIPLOMA`, `DEGREE`, `MASTERS` |
-| `specialisation` | `CROP_PRODUCTION`, `LIVESTOCK`, `NATURAL_RESOURCES`, `AGRONOMY`, `HORTICULTURE`, `OTHER` |
-| `position` | `DEVELOPMENT_AGENT`, `SENIOR_DA` |
+The coded fields take a `value_id` of the Master Data list the widget
+declares (§2.2b); read the lists from Master Data rather than copying them.
+As seeded today:
+
+| Field | Master Data list | Values today |
+|---|---|---|
+| `prefix` | `PREFIX` | `MR`, `MRS`, `MISS`, `MS`, `DR` |
+| `gender` | `GENDER` | `MALE`, `FEMALE`, `OTHER`, `UNKNOWN` |
+| `marital_status` | `MARITAL_STATUS` | `SINGLE`, `MARRIED`, `WIDOWED`, `DIVORCED`, `SEPARATED`, `UNKNOWN` |
+| `education_level` | `DA_EDUCATION_LEVEL` | `CERTIFICATE`, `DIPLOMA`, `DEGREE`, `MASTERS` |
+| `specialisation` | `DA_SPECIALISATION` | `CROP_PRODUCTION`, `LIVESTOCK`, `NATURAL_RESOURCES`, `AGRONOMY`, `HORTICULTURE`, `OTHER` |
+| `position` | `DA_POSITION` | `DEVELOPMENT_AGENT`, `SENIOR_DA` |
+
+A value that is not in the list answers `response_status: ERROR` with
+`record 0: position='X' is not a value of DA_POSITION (permitted: ...)`.
 
 Phone numbers are Ethiopian (`0911234567` or `+251911234567`).
 
@@ -168,6 +175,32 @@ Call `get_geo_level_values` level by level (`level-region` → `level-zone` →
   }
 }
 ```
+
+### 2.2b Dropdown values (code lists)
+
+Every dropdown on the form reads Master Data too, same token and CSRF pair.
+The lists live in the openg2p-data country pack (`ETH-OAN`), nothing is
+hardcoded in the registry; a value is added or renamed there, never in code.
+
+```
+POST /attributes/get_attribute_values
+request_payload: {"attribute_id": "DA_SPECIALISATION"}
+pagination_request: {"current_page": 1, "page_size": 500, "search_text": "", "sort_by": "", "filter_by": ""}
+```
+
+| Form field (saved as) | `attribute_id` |
+|---|---|
+| `prefix` | `PREFIX` |
+| `gender` | `GENDER` |
+| `marital_status` | `MARITAL_STATUS` |
+| `education_level` (qualification) | `DA_EDUCATION_LEVEL` |
+| `specialisation` | `DA_SPECIALISATION` |
+| `position` | `DA_POSITION` |
+| `source` | `DA_SOURCE` |
+
+Each item has `value_id` (what you save), `value_display` (what you show) and
+`sort_order`. Fetch the lists once per session; they change only through a
+Master Data change request.
 
 ### 2.3 Save each section
 
@@ -237,6 +270,18 @@ REQ-VAL-001  Fayda ID 412345678901 is already in submission 2026OCT05-091557.
 
 Saving the same submission again with its own Fayda ID is fine.
 
+What a save checks (all answer HTTP 200 with `response_status: ERROR` and the
+reason in `response_error_message`):
+
+- A **new** record (`edit_action: ADD`) must carry every required field of
+  that section; a required field left out or blank answers
+  `Required: Name, Father Name, ...` (the labels of the section's `*` fields,
+  from the form metadata). An `UPDATE` may carry only the fields that change;
+  a required field sent blank is still refused.
+- Formats: Fayda ID 16 digits and not already registered, Ethiopian phone
+  numbers, email, month 1–13, year not in the future.
+- Coded fields must hold a Master Data value (§2.2b).
+
 ### 2.4 Submit for approval
 
 ```
@@ -246,6 +291,11 @@ request_payload: {"submission_id": "385e2322-226d-49b4-8c11-e77ca017bcc8"}
 
 The submission becomes `draft_status: FINAL`, `approval_status: PENDING`, and
 the registry opens an approval request (`awe_request_id`). There is no DA-ID yet.
+
+A submission with a section missing, or a required field still empty in any
+section, is refused: `Cannot submit for approval. Required: Phone Number,
+Email, Education Level, Specialisation, Position, Region / Zone / Woreda /
+Kebele` (whatever is missing). Save every section first.
 
 To read a submission at any time:
 
@@ -396,8 +446,43 @@ pagination_request: {"current_page": 1, "page_size": 20, "search_text": "8890659
 `search_text` matches DA-ID, Fayda ID, names, phone and email; send `""` to
 list all. It must be present, even when empty. Each item has
 `internal_record_id`, `functional_record_id` (DA-ID), `foundational_id`,
-`record_name` and `display_fields` (DA-ID, Fayda ID, phone, position, Woreda,
-Kebele); open one with `get_subject_record` (§3.4).
+`record_name`, `last_approved_at` and `display_fields` (DA-ID, Fayda ID, phone,
+position, Woreda, Kebele); open one with `get_subject_record` (§3.4).
+
+### 4.1 Filters (list a Woreda's DAs, sync changes)
+
+`filter_by` is a JSON **string** of `{"<field>": {"<operator>": value}}`. Use
+codes, not names: 23 Woreda names and 790 Kebele names repeat.
+
+```
+"filter_by": "{\"woreda_code\": {\"eq\": \"ET010101\"}}"
+"filter_by": "{\"woreda_code\": {\"in\": [\"ET010101\", \"ET010102\"]}}"
+"filter_by": "{\"geo_lowest_level_value_id\": {\"eq\": \"kebele-ET010101101001\"}}"
+"filter_by": "{\"last_approved_at\": {\"gte\": \"2026-10-27\"}}"
+"filter_by": "{\"woreda_code\": {\"eq\": \"ET010101\"}, \"last_approved_at\": {\"gte\": \"2026-10-27\"}}"
+```
+
+| Field | Operators | Value |
+|---|---|---|
+| `region_code`, `zone_code`, `woreda_code` | `eq`, `in` | Master Data P-code (`ET01`, `ET0101`, `ET010101`) |
+| `geo_lowest_level_value_id` | `eq`, `in` | Kebele id from the Kebele picker (§2.2) |
+| `last_approved_at` | `gt`, `gte`, `lt`, `lte`, `between` | ISO date; **compared by day**, the time part is ignored |
+| `record_status` | `eq`, `in` | `ACTIVE` (default when absent), `INACTIVE`, `ARCHIVED` |
+| `first_name`, `foundational_id`, `mobile_number`, `region_name`, `woreda_name`, `kebele_name` | `eq`, `contains` | text |
+| `education_level`, `specialisation`, `position`, `source` | `eq`, `in` | the dropdown codes |
+
+Two platform behaviours to code for:
+
+- A field that is not in this list is **ignored, not rejected**: the call
+  answers 200 with the unfiltered list (and a WARNING in the registry log), so
+  a typo in a field name looks like "no filter". A value the platform cannot
+  parse (for example a bad date) answers HTTP 200 with
+  `response_header.response_status: "ERROR"`, `response_error_code: "REQ-VAL-000"`
+  and the reason in `response_error_message`; always check `response_status`.
+- `last_approved_at` is a day filter. For "changed since the last sync", pass
+  the date of the last run and skip, on your side, the records whose
+  `last_approved_at` (full timestamp in each item) you already have. Approval
+  and change-request approval both update `last_approved_at`.
 
 ---
 

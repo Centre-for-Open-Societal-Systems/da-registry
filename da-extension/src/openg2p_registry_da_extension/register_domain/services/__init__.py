@@ -1,3 +1,5 @@
 from .g2p_register_domain_service_da import G2PRegisterDomainServiceDA
-from .g2p_intake_form_data_service import install_record_image_url_resolution
-from .auto_approve import install_da_auto_approve
+from .da_change_request import install_da_change_request_service
+from .da_own_record import install_da_own_record_guard
+from .da_intake_guard import install_da_intake_guard
+from .import_approval_workflow import install_da_import_approval_workflow
