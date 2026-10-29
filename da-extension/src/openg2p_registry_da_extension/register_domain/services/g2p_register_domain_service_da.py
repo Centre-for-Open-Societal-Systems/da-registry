@@ -66,11 +66,11 @@ class G2PRegisterDomainServiceDA(G2PRegisterDomainService):
                 continue
             label = NAME_FIELD_LABELS.get(field, field)
             if len(text) > NAME_MAX_LENGTH:
-                validation_error(f"{label} must be {NAME_MAX_LENGTH} characters or fewer")
+                validation_error(f"{label}: too long. Enter {NAME_MAX_LENGTH} characters or fewer.")
             if not matches(NAME_PATTERN, text):
                 validation_error(
-                    f"{label} may contain only letters (Latin or Ethiopic), "
-                    "spaces, hyphens and apostrophes"
+                    f"{label}: use letters (Latin or Ethiopic), "
+                    "spaces, hyphens and apostrophes only."
                 )
             record[field] = text
 
@@ -84,7 +84,7 @@ class G2PRegisterDomainServiceDA(G2PRegisterDomainService):
             record["foundational_id"] = None
             return
         if not matches(FAYDA_FAN_PATTERN, text):
-            validation_error("Fayda ID (FAN) must be exactly 16 digits")
+            validation_error("Fayda ID (FAN): enter exactly 16 digits.")
         record["foundational_id"] = text
 
     @staticmethod
@@ -98,7 +98,7 @@ class G2PRegisterDomainServiceDA(G2PRegisterDomainService):
                 record[field] = None
                 continue
             if not matches(PHONE_PATTERN, text):
-                validation_error(f"{label} must be an Ethiopian phone number, e.g. 0911234567")
+                validation_error(f"{label}: enter an Ethiopian phone number, for example 0911234567.")
             record[field] = text
 
     @staticmethod
@@ -111,7 +111,7 @@ class G2PRegisterDomainServiceDA(G2PRegisterDomainService):
             record["email"] = None
             return
         if not matches(EMAIL_PATTERN, text):
-            validation_error("Email is not a valid email address")
+            validation_error("Email: enter a valid email address, for example name@example.org.")
         record["email"] = text.lower()
 
     @staticmethod
@@ -125,29 +125,29 @@ class G2PRegisterDomainServiceDA(G2PRegisterDomainService):
         year = as_int(record.get("birth_year_ec")) if "birth_year_ec" in record else None
         if "birth_month_ec" in record:
             if record.get("birth_month_ec") not in (None, "") and month is None:
-                validation_error("Month of Birth (EC) must be a number from 1 to 13")
+                validation_error("Month of birth (Ethiopian calendar): enter a number from 1 to 13.")
             if month is not None and not 1 <= month <= 13:
-                validation_error("Month of Birth (EC) must be from 1 to 13")
+                validation_error("Month of birth (Ethiopian calendar): enter a number from 1 to 13.")
             record["birth_month_ec"] = month
         if "birth_year_ec" in record:
             if record.get("birth_year_ec") not in (None, "") and year is None:
-                validation_error("Year of Birth (EC) must be a 4-digit year")
+                validation_error("Year of birth (Ethiopian calendar): enter a 4-digit year.")
             record["birth_year_ec"] = year
         if year is None:
             return
         today_y, today_m, _ = gregorian_to_ethiopic(date.today())
         if year < today_y - 100:
-            validation_error("Year of Birth (EC) is too far in the past")
+            validation_error("Year of birth (Ethiopian calendar): the year is more than 100 years ago. Enter the real year of birth.")
         # Months on the 13-month Ethiopian year; an unknown month counts as the
         # first one so a current-year birth is not refused as "future".
         if (today_y * 13 + today_m) - (year * 13 + (month or 1)) < 0:
-            validation_error("Month / Year of Birth (EC) cannot be in the future")
+            validation_error("Month and year of birth (Ethiopian calendar): the date is in the future. Enter a date that has passed.")
 
     @staticmethod
     def _validate_joined_date(record: dict) -> None:
         joined = parse_date(record.get("joined_date"))
         if joined is not None and joined > date.today():
-            validation_error("Joining Date cannot be in the future")
+            validation_error("Joining date: the date is in the future. Enter today or an earlier date.")
 
     @staticmethod
     def _validate_required(record: dict, sections: list) -> None:

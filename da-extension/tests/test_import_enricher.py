@@ -83,13 +83,13 @@ class TestEnricher(unittest.TestCase):
             self.enrich(row, session=None)
 
     def test_unknown_code_lists_the_allowed_values(self):
-        with self.assertRaisesRegex(ValueError, "Position 'Manager' is not one of: Development Agent, Senior DA"):
+        with self.assertRaisesRegex(ValueError, "Position: 'Manager' is not one of the choices. Choose one of: Development Agent, Senior DA"):
             self.enrich(dict(ROW, Position="Manager"), session=None)
 
     def test_bad_date_and_number(self):
-        with self.assertRaisesRegex(ValueError, "Joining Date '2015/31/31' must be a date"):
+        with self.assertRaisesRegex(ValueError, "Joining Date: '2015/31/31' is not a date"):
             self.enrich(dict(ROW, **{"Joining Date": "2015/31/31"}), session=None)
-        with self.assertRaisesRegex(ValueError, "Year of Birth \\(EC\\) 'nineteen' must be a whole number"):
+        with self.assertRaisesRegex(ValueError, "Year of Birth \\(EC\\): 'nineteen' is not a whole number"):
             self.enrich(dict(ROW, **{"Year of Birth (EC)": "nineteen"}), session=None)
 
 

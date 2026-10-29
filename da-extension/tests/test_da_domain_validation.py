@@ -12,7 +12,7 @@ from openg2p_registry_da_extension.register_domain.services.g2p_register_domain_
 )
 
 
-_REQUIRED = {"first_name": "Name", "middle_name": "Father Name", "gender": "Gender", "email": "Email",
+_REQUIRED = {"first_name": "Name", "middle_name": "Father's name", "gender": "Gender", "email": "Email",
             "foundational_id": "Fayda ID (FAN)"}  # what widget-required in the metadata would give
 REQUIRED = [("Contact", {"panels": [{"widgets": [
     {"widget": "input", "widget-label": label, "widget-required": True, "widget-data-path": f"reg.{field}"}
@@ -45,12 +45,12 @@ class TestFormats(unittest.TestCase):
 
     def test_rejections_name_the_field(self):
         cases = [
-            ({"foundational_id": "12345"}, "Fayda ID (FAN) must be exactly 16 digits"),
-            ({"foundational_id": "556556221254"}, "Fayda ID (FAN) must be exactly 16 digits"),
-            ({"telegram_number": "12345"}, "Telegram Number must be an Ethiopian phone number"),
-            ({"email": "x@y"}, "Email is not a valid email address"),
-            ({"first_name": "Abc123"}, "Name may contain only letters"),
-            ({"birth_month_ec": 14, "birth_year_ec": 1985}, "Month of Birth (EC) must be from 1 to 13"),
+            ({"foundational_id": "12345"}, "Fayda ID (FAN): enter exactly 16 digits."),
+            ({"foundational_id": "556556221254"}, "Fayda ID (FAN): enter exactly 16 digits."),
+            ({"telegram_number": "12345"}, "Telegram number: enter an Ethiopian phone number"),
+            ({"email": "x@y"}, "Email: enter a valid email address"),
+            ({"first_name": "Abc123"}, "Name: use letters"),
+            ({"birth_month_ec": 14, "birth_year_ec": 1985}, "Month of birth (Ethiopian calendar): enter a number from 1 to 13."),
         ]
         for record, message in cases:
             with self.subTest(record=record):

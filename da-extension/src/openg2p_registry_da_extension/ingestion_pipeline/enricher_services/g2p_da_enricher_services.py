@@ -91,7 +91,7 @@ def _integer(value: str, label: str) -> int | None:
         return None
     text = value[:-2] if value.endswith(".0") else value
     if not text.isdigit():
-        raise ValueError(f"{label} '{value}' must be a whole number")
+        raise ValueError(f"{label}: '{value}' is not a whole number. Enter digits only.")
     return int(text)
 
 
@@ -123,7 +123,7 @@ def _date(value: str, label: str) -> str | None:
             return datetime.strptime(value, fmt).date().isoformat()
         except ValueError:
             continue
-    raise ValueError(f"{label} '{value}' must be a date like 2024-01-05 or 05/01/2024")
+    raise ValueError(f"{label}: '{value}' is not a date. Use a date like 2024-01-05 or 05/01/2024.")
 
 
 class _MasterDataGeo:
@@ -164,9 +164,9 @@ class _MasterDataGeo:
             rows = [n for n in by_name.get((level, name), []) if parent_id is None or n["parent_level_value_id"] == parent_id]
             where = f" in {' / '.join(trail)}" if trail else ""
             if not rows:
-                raise ValueError(f"{level.title()} '{names[level]}' not found{where}")
+                raise ValueError(f"{level.title()} '{names[level]}' was not found{where}. Check the spelling against the location list.")
             if len(rows) > 1:
-                raise ValueError(f"{level.title()} '{names[level]}' matches more than one place{where}")
+                raise ValueError(f"{level.title()} '{names[level]}' matches more than one place{where}. Add the level above it to choose one.")
             hierarchy.append(cls._entry(rows[0]))
             trail.append(rows[0]["level_value_mnemonic"])
             parent_id = rows[0]["level_value_id"]
@@ -183,12 +183,12 @@ class _MasterDataGeo:
             node = index.get(current)
             if node is None:
                 if not chain:
-                    raise ValueError(f"Location '{kebele_id}' not found in Master Data")
+                    raise ValueError(f"Location '{kebele_id}' not found in Master Data. Check the Kebele ID.")
                 break
             chain.append(cls._entry(node))
             current = node["parent_level_value_id"]
         if (chain[0]["level_mnemonic"] or "").lower() != "kebele":
-            raise ValueError(f"Location '{kebele_id}' is a {chain[0]['level_mnemonic']}, not a kebele")
+            raise ValueError(f"Location '{kebele_id}' is a {chain[0]['level_mnemonic']}, not a kebele. Give the ID of a kebele.")
         chain = [c for c in chain if (c["level_mnemonic"] or "").lower() in GEO_LEVELS]
         chain.reverse()
         return {"hierarchy": chain, "lowest_level_value_id": kebele_id}
@@ -291,13 +291,13 @@ class DAServicesEnricherService(G2PPayloadEnricherInterface):
         message = data or {}
         da = message.get("da") or {}
         if not isinstance(da, dict):
-            raise ValueError("message.da must be an object")
+            raise ValueError("The development agent details ('da') must be an object with named fields.")
         reference = _clean(message.get("reference_id"))
         if not reference:
             raise ValueError("Missing: reference_id")
         source = _clean(message.get("source") or "WEB_INTAKE").upper()
         if source not in DA_SERVICES_SOURCES:
-            raise ValueError(f"source '{source}' is not one of: {', '.join(sorted(DA_SERVICES_SOURCES))}")
+            raise ValueError(f"Source '{source}' is not one of the allowed sources: {', '.join(sorted(DA_SERVICES_SOURCES))}.")
 
         row = {DA_SERVICES_FIELDS[k]: _clean(v) for k, v in da.items() if k in DA_SERVICES_FIELDS}
         missing = [name for field, name in DA_SERVICES_REQUIRED.items() if not row.get(field)]

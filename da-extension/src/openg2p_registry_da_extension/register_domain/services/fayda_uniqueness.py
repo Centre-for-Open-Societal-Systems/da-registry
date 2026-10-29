@@ -35,9 +35,9 @@ def duplicate_message(fayda_id: str, registered_da_id: str | None, other_referen
     # The wording ("already registered", "already in submission") is what the
     # push status API maps to DUPLICATE_IDENTITY.
     if registered_da_id:
-        return f"Fayda ID {fayda_id} is already registered as {registered_da_id}."
+        return f"Fayda ID {fayda_id} is already registered as {registered_da_id}. Open that record instead of registering the development agent again."
     if other_reference:
-        return f"Fayda ID {fayda_id} is already in submission {other_reference}."
+        return f"Fayda ID {fayda_id} is already in submission {other_reference}, which is waiting for a decision."
     return None
 
 

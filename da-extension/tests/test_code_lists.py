@@ -45,7 +45,7 @@ class TestResolve(unittest.TestCase):
     def test_unknown_value_lists_the_displays(self):
         with self.assertRaises(ValueError) as ctx:
             cl.resolve_code("position", "Manager", self.session)
-        self.assertEqual(str(ctx.exception), "Position 'Manager' is not one of: Development Agent, Senior DA, Supervisor")
+        self.assertEqual(str(ctx.exception), "Position: 'Manager' is not one of the choices. Choose one of: Development Agent, Senior DA, Supervisor.")
 
     def test_uncoded_field_passes_through(self):
         self.assertEqual(cl.resolve_code("first_name", " Abebe ", self.session), "Abebe")
