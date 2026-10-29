@@ -47,6 +47,18 @@ module is the only place that reassigns platform methods.
    same code).
    Without it: the History view shows an error instead of the changes.
    Remove when OpenG2P fixes it.
+
+3. Record history rows without a change request (staff API) - install_history_without_change_request
+   Bug: approving an intake writes register history with a submission_id and
+   no change_request_id (the column is nullable), but the response schema
+   RecordHistoryData declares change_request_id as str, so every tab holding
+   such a row failed with "Input should be a valid string" (SYS-ERR-001).
+   The override makes the field Optional[str], as submission_id already is,
+   and rebuilds it and its container models; stored data is unchanged.
+   Platform version checked: 1.2.2-rc.614 (registry-platform develop has the
+   same schema).
+   Without it: the History view fails on every tab of a record created by an
+   intake. Remove when OpenG2P fixes it.
 """
 
 import contextvars
@@ -160,6 +172,34 @@ def install_history_change_request_source() -> bool:
     return True
 
 
+# ------------------------------------- 3. history rows without a change request
+
+
+def install_history_without_change_request() -> bool:
+    from typing import Optional
+
+    try:
+        from openg2p_registry_core.schemas import register_payload, register_response
+    except ImportError:
+        return False
+    field = register_payload.RecordHistoryData.model_fields["change_request_id"]
+    if field.annotation == Optional[str]:
+        return True
+    field.annotation = Optional[str]
+    field.default = None
+    register_payload.RecordHistoryData.model_rebuild(force=True)
+    # Containers embed the item schema when built, so rebuild them too.
+    for model in (
+        register_payload.RecordHistoryListData,
+        register_response.RecordHistoryDataResponseBody,
+        register_response.RecordHistoryDataResponse,
+    ):
+        model.model_rebuild(force=True)
+    _logger.info("Record history accepts rows without a change request (record history fix)")
+    return True
+
+
 def install_temporary_platform_overrides() -> None:
     install_scoped_permission_lookup()
     install_history_change_request_source()
+    install_history_without_change_request()

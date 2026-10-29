@@ -120,3 +120,19 @@ def test_history_source_install_is_idempotent():
     assert po.install_history_change_request_source()
     assert po.install_history_change_request_source()
     assert event.contains(G2PRegisterHistory, "load", po._history_loaded)
+
+
+def test_history_row_without_change_request_is_returned():
+    pytest.importorskip("openg2p_registry_core")
+    from openg2p_registry_core.schemas.register_payload import RecordHistoryData, RecordHistoryListData
+    from openg2p_registry_core.schemas.register_response import RecordHistoryDataResponseBody
+
+    assert po.install_history_without_change_request()
+    assert po.install_history_without_change_request()
+    row = RecordHistoryData(history_record_id="h1", internal_record_id="r1", tab_id="t", section_id="s",
+                            change_request_id=None, submission_id="sub-1")
+    listing = RecordHistoryListData(register_id="reg", internal_record_id="r1", tab_id="t", history_records=[row])
+    record = RecordHistoryDataResponseBody(response_payload=listing).model_dump()["response_payload"]["history_records"][0]
+    assert record["change_request_id"] is None and record["submission_id"] == "sub-1"
+    assert RecordHistoryData(history_record_id="h", internal_record_id="r", tab_id="t", section_id="s",
+                             change_request_id="cr-1").change_request_id == "cr-1"
