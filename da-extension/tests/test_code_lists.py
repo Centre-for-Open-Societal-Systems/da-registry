@@ -66,7 +66,7 @@ class TestApiRead(unittest.TestCase):
             values = cl.attribute_values("DA_POSITION")
             cl.attribute_values("DA_POSITION")  # cached
         post.assert_called_once_with("/attributes/get_attribute_values", {"attribute_id": "DA_POSITION"},
-                                     {"current_page": 1, "page_size": 1000})
+                                     {"current_page": 1, "page_size": 1000}, timeout=None)
         self.assertEqual(values["SENIOR_DA"], "Senior DA")
         self.assertEqual(values["__i18n__SENIOR_DA"], '{"am": "x"}')
         self.assertEqual(values["__code__DEV_AGENT"], "DA")
@@ -74,3 +74,21 @@ class TestApiRead(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestChoicesAndEmptyLists(unittest.TestCase):
+    def setUp(self):
+        cl.invalidate()
+        self.addCleanup(cl.invalidate)
+
+    def test_choices_are_cut_after_ten(self):
+        self.assertEqual(cl.format_choices(["a", "b"]), "a, b")
+        self.assertEqual(cl.format_choices([str(i) for i in range(12)]), "0, 1, 2, 3, 4, 5, 6, 7, 8, 9 and 2 more")
+
+    def test_an_empty_list_is_not_cached(self):
+        answers = [{}, {"A": "Choice A"}]
+        with mock.patch.object(cl, "_values_from_api", side_effect=lambda attribute, timeout=None: answers.pop(0)) as read:
+            self.assertEqual(cl.attribute_values("L"), {})
+            self.assertEqual(cl.attribute_values("L"), {"A": "Choice A"})
+            self.assertEqual(cl.attribute_values("L"), {"A": "Choice A"})  # now cached
+        self.assertEqual(read.call_count, 2)

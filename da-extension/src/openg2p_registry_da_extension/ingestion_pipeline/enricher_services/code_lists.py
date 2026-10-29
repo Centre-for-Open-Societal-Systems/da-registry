@@ -81,10 +81,10 @@ def field_attributes(session) -> tuple[dict[str, str], dict[str, str]]:
     return attributes, labels
 
 
-def _values_from_api(attribute_id: str) -> dict[str, str]:
+def _values_from_api(attribute_id: str, timeout: float | None = None) -> dict[str, str]:
     payload = master_data_api.post(
         "/attributes/get_attribute_values", {"attribute_id": attribute_id},
-        {"current_page": 1, "page_size": 1000},
+        {"current_page": 1, "page_size": 1000}, timeout=timeout,
     ) or {}
     rows = payload.get("attribute_values") if isinstance(payload, dict) else payload
     out: dict[str, str] = {}
@@ -99,14 +99,28 @@ def _values_from_api(attribute_id: str) -> dict[str, str]:
     return out
 
 
-def attribute_values(attribute_id: str) -> dict[str, str]:
+MAX_CHOICES_SHOWN = 10
+
+
+def format_choices(displays: list[str]) -> str:
+    """The choices for an error message: at most ten, then "and N more"."""
+    shown = ", ".join(displays[:MAX_CHOICES_SHOWN])
+    extra = len(displays) - MAX_CHOICES_SHOWN
+    return f"{shown} and {extra} more" if extra > 0 else shown
+
+
+def attribute_values(attribute_id: str, timeout: float | None = None) -> dict[str, str]:
     """{value_id: display} for a Master Data list, cached. Entries prefixed
-    __code__ and __i18n__ carry alternate codes and translated displays."""
+    __code__ and __i18n__ carry alternate codes and translated displays. An
+    empty list is not cached, so a list published a moment later is seen."""
     with _lock:
         hit = _value_cache.get(attribute_id)
         if hit and hit[0] > time.monotonic():
             return hit[1]
-    values = _values_from_api(attribute_id)
+    values = _values_from_api(attribute_id, timeout)
+    if not any(not k.startswith("__") for k in values):
+        _logger.warning("Master Data list %s has no values; not cached", attribute_id)
+        return values
     with _lock:
         _value_cache[attribute_id] = (time.monotonic() + CACHE_SECONDS, values)
     return values
@@ -144,5 +158,5 @@ def resolve_code(field: str, value: str | None, session) -> str | None:
         if key.startswith("__code__") and _norm(key[len("__code__"):]) == wanted:
             return value_id
     label = labels.get(field) or field.replace("_", " ").capitalize()
-    allowed = ", ".join(values[v] for v in ids)
+    allowed = format_choices([values[v] for v in ids])
     raise ValueError(f"{label}: '{value}' is not one of the choices. Choose one of: {allowed}.")

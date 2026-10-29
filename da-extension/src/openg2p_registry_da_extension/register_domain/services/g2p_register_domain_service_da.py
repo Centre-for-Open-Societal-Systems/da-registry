@@ -3,6 +3,7 @@ from datetime import date
 
 from openg2p_registry_core.services import G2PRegisterDomainService
 
+from .choice_check import validate_choices
 from .domain_validation_utils import as_int, parse_date, validation_error
 from .ethiopian_calendar import gregorian_to_ethiopic
 from .fayda_uniqueness import duplicate_message, find_fayda_owner
@@ -46,6 +47,7 @@ class G2PRegisterDomainServiceDA(G2PRegisterDomainService):
             self._validate_birth_ec(record)
             self._validate_joined_date(record)
             self._validate_required(record, sections)
+            await validate_choices(record, sections)
             await self._check_fayda_unique(record)
             await self._sync_flattened_geo_names(record)
 
