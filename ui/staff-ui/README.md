@@ -35,6 +35,16 @@ npm start              # apply overrides, skip clone, start the production serve
 npm run reset          # delete .app/ and clone again
 ```
 
+## OAN dashboard background
+
+`overrides/src/app/[locale]/page.tsx` shows the active theme's **Dashboard Image** as one
+centered, cover-sized background on the home page. The upstream pattern and the illustration
+below the cards are removed. db-seed sets the image from the shared `oan_theme` in
+openg2p-data. To change it, edit a custom theme's Dashboard Image in the configurator, save,
+select that theme in Registry Details if it is not already active, and reload the home page.
+Removing the image leaves the theme's primary background color. Factory themes remain
+read-only.
+
 ## Docker
 
 The image has no `.app/`, so `npm install` clones once. `npm run build` then skips the clone and applies `overrides/` before the Next build.
