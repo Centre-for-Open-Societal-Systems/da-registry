@@ -40,11 +40,11 @@ class G2PRegisterDomainFactory(CoreRegisterDomainFactory):
         super().__init__(**kwargs)
         self._ensure_platform_components()
         # The celery worker never runs the extension Initializer, and it is the
-        # process that finalises file-import submissions, so the DA
-        # auto-approve hooks are installed here as well (idempotent).
-        from ..services.auto_approve import install_da_auto_approve
+        # process that finalises file-import submissions, so the service that opens
+        # their approval workflow is registered here as well (idempotent).
+        from ..services.import_approval_workflow import install_da_import_approval_workflow
 
-        install_da_auto_approve()
+        install_da_import_approval_workflow()
 
     @classmethod
     def _ensure_platform_components(cls):

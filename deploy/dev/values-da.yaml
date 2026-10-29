@@ -18,7 +18,6 @@ registry:
     envVars:
       # Imports are approved manually (two-level); the approval request is
       # opened with this client's service token (see helm values.yaml).
-      DA_AUTO_APPROVE_IMPORTS: "false"
       DA_AWE_TOKEN_URL: https://keycloak.development.oanstaging.com/realms/staff/protocol/openid-connect/token
       DA_AWE_CLIENT_ID: da-registry-backend
     envVarsFrom:
@@ -42,7 +41,6 @@ registry:
           name: da-registry-backend-keycloak
           key: client-secret
     envVars:
-      DA_AUTO_APPROVE_IMPORTS: "false"
       DA_AWE_TOKEN_URL: https://keycloak.development.oanstaging.com/realms/staff/protocol/openid-connect/token
       DA_AWE_CLIENT_ID: da-registry-backend
       # Imports open their approval request from this process, so it needs the
@@ -60,7 +58,6 @@ registry:
     envVars:
       # Imports are approved manually (two-level); the approval request is
       # opened with this client's service token (see helm values.yaml).
-      DA_AUTO_APPROVE_IMPORTS: "false"
       DA_AWE_TOKEN_URL: https://keycloak.development.oanstaging.com/realms/staff/protocol/openid-connect/token
       DA_AWE_CLIENT_ID: da-registry-backend
       # Imports open their approval request from this process, so it needs the

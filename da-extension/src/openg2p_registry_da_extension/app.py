@@ -16,7 +16,8 @@ from .register_domain.factory import G2PRegisterDomainFactory
 from .register_domain.models import G2PIntakeFormDA, G2PRegisterDA, G2PRegisterHistoryDA
 from .register_domain.services import (
     G2PRegisterDomainServiceDA,
-    install_da_auto_approve,
+    install_da_change_request_service,
+    install_da_import_approval_workflow,
     install_da_intake_guard,
     install_da_own_record_guard,
 )
@@ -38,15 +39,20 @@ class Initializer(BaseInitializer):
 
         self._patch_filter_builder()
 
-        # Three platform bugs fixed in-process instead of patching the image;
+        # Two platform bugs fixed in-process instead of patching the image;
         # see platform_overrides.py.
         from .platform_overrides import install_platform_overrides
 
         install_platform_overrides()
 
-        # File import / partner ingestion: approve unique DAs without a user
-        # token. See register_domain/services/auto_approve.py.
-        install_da_auto_approve()
+        # File import / partner ingestion: open the approval workflow with a
+        # service token, since no user token exists. Approval itself stays
+        # with the approvers. See services/import_approval_workflow.py.
+        install_da_import_approval_workflow()
+
+        # A change request is approved only through its approval task.
+        # See services/direct_approval.py.
+        install_da_change_request_service()
 
         # A Development Agent (token claim da_id, role Data Editor only) sees
         # and edits only their own record. See services/da_own_record.py.

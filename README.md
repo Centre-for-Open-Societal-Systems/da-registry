@@ -55,16 +55,17 @@ A row that cannot be used is rejected with a readable reason, recorded in
 `incoming_classified_data` (`transformation_latest_error_code` /
 `ingestion_latest_error_code`); the other rows carry on.
 
-Approval of imports (`register_domain/services/auto_approve.py` and
+Approval of imports (`register_domain/services/import_approval_workflow.py` and
 `awe_service_token.py`): a submission created without a signed-in user (file
 import, partner ingestion) is sent to the approval workflow with a Keycloak
 client-credentials token (`DA_AWE_TOKEN_URL` / `DA_AWE_CLIENT_ID` /
 `DA_AWE_CLIENT_SECRET`, falling back to the process's Master Data client), so it
 gets the same two-level approval as a web-form submission (stage 1, then stage
 2, see `docs/rbac-registry-roles.md`). Only after the second approval does the
-DA reach the register and get a DA-ID. `DA_AUTO_APPROVE_IMPORTS=true` restores
-the earlier behaviour for a one-time back-end load: the workflow is skipped and
-unique imports are approved straight away.
+DA reach the register and get a DA-ID. Nothing is approved automatically, and
+no role approves a submission or a change request directly: the staff
+endpoints that would do so answer `AWE_APPROVAL_REQUIRED`
+(`register_domain/services/direct_approval.py`); only the approval task decides.
 
 A Development Agent's own record (`register_domain/services/da_own_record.py`):
 a token with the claim `da_id` (Keycloak user attribute, client scope

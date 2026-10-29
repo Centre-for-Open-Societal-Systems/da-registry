@@ -476,7 +476,7 @@ services:
       REGISTRY_STAFF_PORTAL_API_MASTER_DATA_TOKEN_URL: http://keycloak:8080/realms/staff/protocol/openid-connect/token
       REGISTRY_STAFF_PORTAL_API_MASTER_DATA_CLIENT_ID: da-registry-backend
       REGISTRY_STAFF_PORTAL_API_MASTER_DATA_CLIENT_SECRET: ${KEYCLOAK_DA_BACKEND_CLIENT_SECRET:-dev-da-backend-secret}
-      DA_AUTO_APPROVE_IMPORTS: "false"  # imports go through the two-level approval with a service token (the MASTER_DATA_* client above); "true" = one-time back-end load, see da-extension .../services/auto_approve.py
+      # Imports go through the two-level approval, opened with a service token (the MASTER_DATA_* client above); see da-extension .../services/import_approval_workflow.py
       # Application reference: the platform default ends in one random digit, so two records in the same second collide (unique index) during bulk import; four digits.
       REGISTRY_STAFF_PORTAL_API_APPLICATION_REFERENCE_FORMAT: "{DATE:%Y%b%d|upper}-{SECONDS:5}-{RAND:4}"
       REGISTRY_STAFF_PORTAL_API_AUTH_ENABLED: "false"
@@ -548,7 +548,7 @@ services:
       REGISTRY_PARTNER_API_AWE_DEFAULT_CALLBACK_URL: "http://da-registry-staff-api:8000/awe/webhooks/decision"
       REGISTRY_PARTNER_API_AWE_CALLBACK_SECRET_ID: ${AWE_REGISTRY_CALLBACK_SECRET_ID:-00000000-0000-4000-8000-000000000001}
       REGISTRY_PARTNER_API_AWE_CALLBACK_HMAC_SECRET: ${AWE_REGISTRY_CALLBACK_HMAC_SECRET:-dev-registry-awe-callback-secret}
-      DA_AUTO_APPROVE_IMPORTS: "false"  # imports go through the two-level approval with a service token (the MASTER_DATA_* client above); "true" = one-time back-end load, see da-extension .../services/auto_approve.py
+      # Imports go through the two-level approval, opened with a service token (the MASTER_DATA_* client above); see da-extension .../services/import_approval_workflow.py
       # Application reference: the platform default ends in one random digit, so two records in the same second collide (unique index) during bulk import; four digits.
       REGISTRY_PARTNER_API_APPLICATION_REFERENCE_FORMAT: "{DATE:%Y%b%d|upper}-{SECONDS:5}-{RAND:4}"
       # DCI expression search: the platform's default fields plus the DA location (names and codes), position and last_approved_at (changes since), so DA Services can filter exactly by Woreda / Kebele.
@@ -616,7 +616,7 @@ services:
       REGISTRY_CELERY_WORKERS_AWE_DEFAULT_CALLBACK_URL: "http://da-registry-staff-api:8000/awe/webhooks/decision"
       REGISTRY_CELERY_WORKERS_AWE_CALLBACK_SECRET_ID: ${AWE_REGISTRY_CALLBACK_SECRET_ID:-00000000-0000-4000-8000-000000000001}
       REGISTRY_CELERY_WORKERS_AWE_CALLBACK_HMAC_SECRET: ${AWE_REGISTRY_CALLBACK_HMAC_SECRET:-dev-registry-awe-callback-secret}
-      DA_AUTO_APPROVE_IMPORTS: "false"  # imports go through the two-level approval with a service token (the MASTER_DATA_* client above); "true" = one-time back-end load, see da-extension .../services/auto_approve.py
+      # Imports go through the two-level approval, opened with a service token (the MASTER_DATA_* client above); see da-extension .../services/import_approval_workflow.py
       # Application reference: the platform default ends in one random digit, so two records in the same second collide (unique index) during bulk import; four digits.
       REGISTRY_CELERY_WORKERS_APPLICATION_REFERENCE_FORMAT: "{DATE:%Y%b%d|upper}-{SECONDS:5}-{RAND:4}"
       REGISTRY_CELERY_WORKERS_FUNCTIONAL_ID_GENERATION_URL: "http://id-generator:8000/v1"

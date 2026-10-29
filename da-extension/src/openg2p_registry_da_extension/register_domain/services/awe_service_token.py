@@ -4,7 +4,7 @@ A DA that arrives by file import or partner ingestion is finalised by a celery
 worker, which has no signed-in user and so no bearer token to open the AWE
 approval request with (the platform raises AWE_BEARER_TOKEN_REQUIRED). AWE
 accepts a Keycloak client-credentials token for service-to-service calls, so
-this module fetches one and `auto_approve.py` passes it to the platform's
+this module fetches one and `import_approval_workflow.py` passes it to the platform's
 workflow start. The approvers are then resolved by the seeded rules exactly as
 for a web-form submission.
 

@@ -55,9 +55,11 @@ The worker has no user token, so it opens the approval request with a Keycloak
 client-credentials token (`DA_AWE_TOKEN_URL`, `DA_AWE_CLIENT_ID`,
 `DA_AWE_CLIENT_SECRET`; by default the process's Master Data client
 `da-registry-backend`), see `register_domain/services/awe_service_token.py`.
-`DA_AUTO_APPROVE_IMPORTS=true` is the earlier mode (unique imports approved
-without any task), kept for a one-time back-end load. Decision (23 Oct 2026,
-Faiz and Shikha): imports are approved manually.
+Imports are approved manually, like every other record; no setting approves
+them automatically, and no role (the Operations Administrator included)
+approves a submission or a change request directly: the direct-approval
+endpoints answer `AWE_APPROVAL_REQUIRED`. Decision (23 Oct 2026, Faiz and
+Shikha).
 
 ## 3. Local test result (16 Oct 2026)
 

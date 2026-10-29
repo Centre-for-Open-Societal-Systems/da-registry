@@ -7,7 +7,7 @@ __variant__ = "da"
 # runs the extension Initializer, and from platform 1.2 its own Initializer
 # builds core's domain factory instead of ours. Build ours in every pool process
 # once the worker is set up: it registers the platform components the worker
-# leaves out and installs the DA auto-approve hooks. Both steps are idempotent.
+# leaves out and registers the DA import approval workflow service. Both steps are idempotent.
 if "openg2p_registry_celery_worker" in _sys.modules:
     from celery.signals import worker_process_init as _worker_process_init
 
