@@ -284,7 +284,7 @@ class DAServicesEnricherService(G2PPayloadEnricherInterface):
     `data` is the request's `message`: {"reference_id", "source", "approved_by",
     "da": {...}}. The location is `da.kebele_id` (Master Data id, preferred) or
     `da.region/zone/woreda/kebele` names. The record then goes through the same
-    template, validation, duplicate guard and auto-approve as a file import.
+    template, validation, duplicate guard and two-stage approval as a file import.
     """
 
     def enrich(self, data: Dict, session: Session) -> Dict:
