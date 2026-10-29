@@ -181,15 +181,73 @@ def test_sample_data_never_fails_the_upgrade(loader, monkeypatch, tmp_path):
     assert loader.main() == 0
 
 
-def test_the_earlier_submissions_query_uses_real_columns_and_only_this_loaders_rows(loader, monkeypatch):
-    seen = []
-    monkeypatch.setattr(loader, "registry_rows", lambda sql, params: seen.append((sql, params)) or [])
-    assert loader.earlier_submissions("9311502628318720") == []
-    sql, params = seen[0]
-    assert "s.first_created_at" in sql and "s.created_at" not in sql
-    assert "s.created_by = %s" in sql and params == ("9311502628318720", loader.SEED_CREATED_BY)
-    platform = Path(__file__).resolve().parents[1] / "docker" / "db-seed"
-    assert platform.exists()
+class RegistryDatabase:
+    """The intake tables as the platform fills them: created_by is the signed-in account's name."""
+
+    def __init__(self, *submissions):
+        self.submissions = list(submissions)  # (submission, draft, approval, identity record, created_by)
+
+    def rows(self, sql, params):
+        assert "s.first_created_at" in sql and "s.created_at" not in sql
+        if "f.internal_record_id::text = %s" in sql:
+            return [(sid, draft, approval, record) for sid, draft, approval, record, _ in self.submissions
+                    if record == params[0]]
+        if "f.foundational_id = %s" in sql:
+            return [(sid, draft, approval, record) for sid, draft, approval, record, created_by in self.submissions
+                    if created_by == params[-1]]
+        raise AssertionError(sql)
+
+
+SERVICE_ACCOUNT = "service-account-da-registry"  # what the platform stores, whatever the payload's created_by
+
+
+def resume_with(loader, monkeypatch, database):
+    sent, approved = [], []
+    monkeypatch.setattr(loader, "registry_rows", database.rows)
+    monkeypatch.setattr(loader, "submit", lambda client, fields, geo, draft=None: sent.append(draft) or
+                        ("pending", "Fayda ID is already in submission APP-1, which is waiting for a decision."))
+    monkeypatch.setattr(loader, "approve", lambda approvers, sid, timeout: approved.append(sid))
+    return loader.load_one(None, [], 5, GEO, {}, DA, {}), sent, approved
+
+
+def test_the_loaders_own_waiting_submission_is_approved_whoever_the_platform_says_created_it(loader, monkeypatch):
+    own = loader.seed_record_id(DA["fayda_fan"])
+    outcome, sent, approved = resume_with(loader, monkeypatch, RegistryDatabase(
+        ("sub-own", "FINAL", "PENDING", own, SERVICE_ACCOUNT)))
+    assert outcome == "approved" and approved == ["sub-own"] and sent == []
+
+
+def test_the_loaders_own_draft_is_completed(loader, monkeypatch):
+    own = loader.seed_record_id(DA["fayda_fan"])
+    _, sent, _ = resume_with(loader, monkeypatch, RegistryDatabase(("sub-draft", "DRAFT", None, own, SERVICE_ACCOUNT)))
+    assert sent == [("sub-draft", own)]
+
+
+@pytest.mark.parametrize("draft, approval", [("FINAL", "PENDING"), ("DRAFT", None)])
+def test_a_submission_somebody_else_entered_is_never_completed_or_approved(loader, monkeypatch, draft, approval):
+    outcome, sent, approved = resume_with(loader, monkeypatch, RegistryDatabase(
+        ("sub-tester", draft, approval, "a-testers-record", "nina.patel")))
+    assert approved == [] and sent == [None] and outcome == "skipped"
+
+
+def test_the_identity_record_carries_the_loaders_own_id(loader):
+    saved = []
+
+    class Client:
+        staff = "https://da.example.org"
+
+        def call(self, base, path, payload, **kw):
+            saved.append(payload)
+            if path.endswith("save_intake_form_submission") and payload["submission_id"] is None:
+                return True, "", {"submission_id": "sub-1"}
+            return True, "", {}
+
+    fields = loader.sections_for(DA, {})
+    assert loader.submit(Client(), fields, {"kebele_id": "x"}) == ("submitted", "sub-1")
+    own = loader.seed_record_id(DA["fayda_fan"])
+    records = [p["section_payload"][0]["internal_record_id"] for p in saved if "section_payload" in p]
+    assert records == [own] * 4
+    assert loader.seed_record_id(DA["fayda_fan"]) == own != loader.seed_record_id("9311502628318721")
 
 
 def test_the_registry_database_connection_is_closed(loader, monkeypatch):
@@ -286,3 +344,46 @@ def test_a_failure_before_the_first_da_ends_without_failing(loader, monkeypatch,
     assert "except Exception as exc:  # a setting, the pack or a service" in source
     with pytest.raises(FileNotFoundError):
         loader.main()
+
+
+def test_no_request_starts_after_the_hard_limit(loader, monkeypatch):
+    import urllib.request
+
+    monkeypatch.setattr(loader, "HARD_LIMIT", -1)
+    opener = FlakyOpener(200)
+    with pytest.raises(loader.OutOfTime):
+        loader.fetch(opener, urllib.request.Request("https://da.example.org/x"))
+    assert opener.calls == 0
+
+
+def test_a_try_never_waits_past_the_hard_limit(loader, monkeypatch):
+    import urllib.request
+
+    timeouts = []
+
+    class Recording(FlakyOpener):
+        def open(self, request, timeout):
+            timeouts.append(timeout)
+            return super().open(request, timeout)
+
+    monkeypatch.setattr(loader, "HARD_LIMIT", loader.time.time() - loader.STARTED + 5)
+    loader.fetch(Recording(200), urllib.request.Request("https://da.example.org/x"))
+    assert 0 < timeouts[0] <= 5
+
+
+def test_a_refused_decision_waits_before_the_task_is_read_again(loader, monkeypatch):
+    slept, status, calls = [], {}, []
+    monkeypatch.setattr(loader.time, "sleep", slept.append)
+    monkeypatch.setattr(loader, "approval_status", status.get)
+
+    class RefusedOnce(StageTwoApprover):
+        refused = False
+
+        def post(self, path, payload, once=False):
+            if path == "/awe/submit_task_decision" and not RefusedOnce.refused:
+                RefusedOnce.refused = True
+                raise RuntimeError("/awe/submit_task_decision: 409 conflict")
+            return super().post(path, payload, once)
+
+    loader.approve([RefusedOnce(1, True, status, calls), RefusedOnce(2, True, status, calls)], "sub-1", 5)
+    assert slept == [3] and status["sub-1"] == "APPROVED"
