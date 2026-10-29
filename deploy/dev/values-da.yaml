@@ -27,6 +27,7 @@ registry:
           # in realm staff (create the client with service accounts enabled).
           name: da-registry-backend-keycloak
           key: client-secret
+          optional: true
     image:
       repository: 379220350808.dkr.ecr.ap-south-1.amazonaws.com/openg2p/da-registry
       tag: staff-api-develop
@@ -40,6 +41,7 @@ registry:
         secretKeyRef:
           name: da-registry-backend-keycloak
           key: client-secret
+          optional: true
     envVars:
       DA_AWE_TOKEN_URL: https://keycloak.development.oanstaging.com/realms/staff/protocol/openid-connect/token
       DA_AWE_CLIENT_ID: da-registry-backend
@@ -73,6 +75,7 @@ registry:
           # in realm staff (create the client with service accounts enabled).
           name: da-registry-backend-keycloak
           key: client-secret
+          optional: true
     image:
       repository: 379220350808.dkr.ecr.ap-south-1.amazonaws.com/openg2p/da-registry
       tag: celery-develop
