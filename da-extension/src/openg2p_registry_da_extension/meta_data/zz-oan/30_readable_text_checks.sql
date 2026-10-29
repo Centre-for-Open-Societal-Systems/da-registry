@@ -1,4 +1,6 @@
--- Fails the seed when text staff read looks like a code or shorthand.
+-- Flags text staff read that looks like a code or shorthand. Advisory at run time:
+-- the db-seed entrypoint does not stop on a failed statement, so the exception is
+-- only logged; a replay run with ON_ERROR_STOP=1 fails on it.
 --
 -- Every label, placeholder, help text, section title, validation message and
 -- choice of the sections a tab or the intake form shows is resolved the way

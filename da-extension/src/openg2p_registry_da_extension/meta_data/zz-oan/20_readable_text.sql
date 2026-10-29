@@ -6,7 +6,7 @@
 -- and the import template's column headings do not. Every statement is an
 -- explicit-id UPDATE or a merge of named translation keys, so it is
 -- idempotent. It sorts after 10_label_casing.sql and so wins over it;
--- 30_readable_text_checks.sql fails the seed if a visible label, message or
+-- 30_readable_text_checks.sql flags a visible label, message or
 -- choice reads like a code.
 
 UPDATE "public"."registry_languages"
