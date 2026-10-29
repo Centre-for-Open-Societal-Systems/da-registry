@@ -177,7 +177,7 @@ docker exec -w /tmp da-registry-staff-api python -m unittest discover -s /tmp/da
 ## Platform version
 
 Platform images come from Docker Hub (`openg2p/openg2p-registry-*`), pinned to
-`1.2.2-rc.557`, the same native release used by the refactored crop/livestock
+`1.2.2-rc.614`, the same native release used by the refactored crop/livestock
 registries. Keep the component Dockerfiles and chart dependency in step:
 
 - `ARG RP_VERSION` in `docker/*/Dockerfile`

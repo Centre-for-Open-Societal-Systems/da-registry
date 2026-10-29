@@ -8,7 +8,7 @@
 # All data (geography, code lists, sample people and DAs) lives in
 # openg2p-data: the COSS fork at a pinned commit replaces the upstream copy
 # the base image carries (OPENG2P_DATA_REF is a commit SHA, never a branch).
-ARG RP_VERSION=1.2.2-rc.557
+ARG RP_VERSION=1.2.2-rc.614
 FROM openg2p/openg2p-registry-db-seed:${RP_VERSION}
 ARG OPENG2P_DATA_REPO=https://github.com/Centre-for-Open-Societal-Systems/openg2p-data.git
 ARG OPENG2P_DATA_REF=dc7e7bf69087b4684a3608fdd4bf98100aab77a8

@@ -10,7 +10,7 @@
 # The data is the COSS openg2p-data fork at a pinned commit (OPENG2P_DATA_REF
 # is a commit SHA, never a branch), or a local checkout mounted by
 # OPENG2P_DATA_PATH (see docker-compose.yml).
-ARG RP_VERSION=1.2.2-rc.557
+ARG RP_VERSION=1.2.2-rc.614
 FROM openg2p/openg2p-registry-db-seed:${RP_VERSION}
 ARG OPENG2P_DATA_REPO=https://github.com/Centre-for-Open-Societal-Systems/openg2p-data.git
 ARG OPENG2P_DATA_REF=dc7e7bf69087b4684a3608fdd4bf98100aab77a8

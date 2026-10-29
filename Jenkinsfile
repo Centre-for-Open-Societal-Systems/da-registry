@@ -35,7 +35,7 @@ pipeline {
         // Must match ARG RP_VERSION in the component Dockerfiles
         // and "platformVersion" in ci/deploy/oan-chart.json (the pinned chart's openg2p-registry).
         // The staff UI is built from the same registry-platform run.
-        RP_VERSION     = "1.2.2-rc.557"
+        RP_VERSION     = "1.2.2-rc.614"
 
         // Dev deployment. The chart, its version, the public values, the release and
         // the namespace are all read from ci/deploy/oan-chart.json by ci/deploy-dev.sh.
