@@ -66,3 +66,73 @@ def test_permission_lookup_is_scoped_to_this_application(monkeypatch):
     assert calls["headers"] == {"Authorization": "Bearer tok-123"}
 
 
+
+
+def _history_probe():
+    pytest.importorskip("openg2p_registry_core")
+    from openg2p_registry_core.models import G2PRegisterHistory
+
+    name = "G2PRegisterHistoryHistorySourceProbe"
+    probe = getattr(sys.modules[__name__], "_PROBE", None)
+    if probe is None:
+        probe = type(name, (G2PRegisterHistory,), {"__tablename__": "g2p_register_history_history_source_probe"})
+        globals()["_PROBE"] = probe
+    return probe
+
+
+def _load_history(source):
+    from datetime import datetime
+
+    from sqlalchemy import create_engine, insert, select
+    from sqlalchemy.orm import Session
+
+    probe = _history_probe()
+    assert po.install_history_change_request_source()
+    engine = create_engine("sqlite://")
+    table = probe.__table__
+    table.create(engine)
+    samples = {str: "x", bool: False, int: 1, datetime: datetime(2026, 10, 29)}
+    row = {column.name: samples.get(column.type.python_type, "x") for column in table.columns}
+    row["change_request_source"] = source
+    with Session(engine) as session:
+        session.execute(insert(table).values(**row))
+        return session.scalars(select(probe)).one()
+
+
+def test_history_source_has_the_value_the_platform_reads():
+    from sqlalchemy import inspect
+
+    record = _load_history("INTAKE_FORM")
+    assert record.change_request_source.value == "INTAKE_FORM"
+    assert record.change_request_source == "INTAKE_FORM"
+    assert not inspect(record).modified
+
+
+def test_unknown_history_source_is_left_as_stored():
+    assert _load_history("SOMETHING_ELSE").change_request_source == "SOMETHING_ELSE"
+
+
+def test_history_source_install_is_idempotent():
+    pytest.importorskip("openg2p_registry_core")
+    from openg2p_registry_core.models import G2PRegisterHistory
+    from sqlalchemy import event
+
+    assert po.install_history_change_request_source()
+    assert po.install_history_change_request_source()
+    assert event.contains(G2PRegisterHistory, "load", po._history_loaded)
+
+
+def test_history_row_without_change_request_is_returned():
+    pytest.importorskip("openg2p_registry_core")
+    from openg2p_registry_core.schemas.register_payload import RecordHistoryData, RecordHistoryListData
+    from openg2p_registry_core.schemas.register_response import RecordHistoryDataResponseBody
+
+    assert po.install_history_without_change_request()
+    assert po.install_history_without_change_request()
+    row = RecordHistoryData(history_record_id="h1", internal_record_id="r1", tab_id="t", section_id="s",
+                            change_request_id=None, submission_id="sub-1")
+    listing = RecordHistoryListData(register_id="reg", internal_record_id="r1", tab_id="t", history_records=[row])
+    record = RecordHistoryDataResponseBody(response_payload=listing).model_dump()["response_payload"]["history_records"][0]
+    assert record["change_request_id"] is None and record["submission_id"] == "sub-1"
+    assert RecordHistoryData(history_record_id="h", internal_record_id="r", tab_id="t", section_id="s",
+                             change_request_id="cr-1").change_request_id == "cr-1"

@@ -34,6 +34,31 @@ module is the only place that reassigns platform methods.
    looks a role up by name only, first match).
    Without it: users get another registry's permissions (too many or too few).
    Remove when OpenG2P fixes it.
+
+2. Record history change source (staff API) - install_history_change_request_source
+   Bug: the platform maps register history change_request_source as String,
+   but G2PRegisterService.get_record_history reads `.value` on it, so every
+   history call fails with "'str' object has no attribute 'value'"
+   (SYS-ERR-001 on every tab). This is not a method reassignment: one load
+   listener on G2PRegisterHistory converts the stored text to the platform's
+   ChangeRequestSourceEnum (a StrEnum, so it still equals and serialises as
+   the text) without marking the row changed.
+   Platform version checked: 1.2.2-rc.614 (registry-platform develop has the
+   same code).
+   Without it: the History view shows an error instead of the changes.
+   Remove when OpenG2P fixes it.
+
+3. Record history rows without a change request (staff API) - install_history_without_change_request
+   Bug: approving an intake writes register history with a submission_id and
+   no change_request_id (the column is nullable), but the response schema
+   RecordHistoryData declares change_request_id as str, so every tab holding
+   such a row failed with "Input should be a valid string" (SYS-ERR-001).
+   The override makes the field Optional[str], as submission_id already is,
+   and rebuilds it and its container models; stored data is unchanged.
+   Platform version checked: 1.2.2-rc.614 (registry-platform develop has the
+   same schema).
+   Without it: the History view fails on every tab of a record created by an
+   intake. Remove when OpenG2P fixes it.
 """
 
 import contextvars
@@ -112,5 +137,69 @@ def install_scoped_permission_lookup() -> bool:
     return True
 
 
+# ------------------------------------------------ 2. record history source
+
+
+def as_change_request_source(target) -> None:
+    """Stored change_request_source text as the platform enum, left as stored if unknown."""
+    try:
+        from openg2p_registry_core.models.enum import ChangeRequestSourceEnum
+        from sqlalchemy.orm.attributes import set_committed_value
+    except ImportError:
+        return
+    value = getattr(target, "change_request_source", None)
+    if not isinstance(value, str) or isinstance(value, ChangeRequestSourceEnum):
+        return
+    try:
+        set_committed_value(target, "change_request_source", ChangeRequestSourceEnum(value))
+    except ValueError:
+        _logger.warning("Unknown change request source %r on %s", value, type(target).__name__)
+
+
+def _history_loaded(target, _context) -> None:
+    as_change_request_source(target)
+
+
+def install_history_change_request_source() -> bool:
+    try:
+        from openg2p_registry_core.models import G2PRegisterHistory
+        from sqlalchemy import event
+    except ImportError:
+        return False
+    if not event.contains(G2PRegisterHistory, "load", _history_loaded):
+        event.listen(G2PRegisterHistory, "load", _history_loaded, propagate=True)
+        _logger.info("Register history change_request_source loaded as the platform enum (record history fix)")
+    return True
+
+
+# ------------------------------------- 3. history rows without a change request
+
+
+def install_history_without_change_request() -> bool:
+    from typing import Optional
+
+    try:
+        from openg2p_registry_core.schemas import register_payload, register_response
+    except ImportError:
+        return False
+    field = register_payload.RecordHistoryData.model_fields["change_request_id"]
+    if field.annotation == Optional[str]:
+        return True
+    field.annotation = Optional[str]
+    field.default = None
+    register_payload.RecordHistoryData.model_rebuild(force=True)
+    # Containers embed the item schema when built, so rebuild them too.
+    for model in (
+        register_payload.RecordHistoryListData,
+        register_response.RecordHistoryDataResponseBody,
+        register_response.RecordHistoryDataResponse,
+    ):
+        model.model_rebuild(force=True)
+    _logger.info("Record history accepts rows without a change request (record history fix)")
+    return True
+
+
 def install_temporary_platform_overrides() -> None:
     install_scoped_permission_lookup()
+    install_history_change_request_source()
+    install_history_without_change_request()
