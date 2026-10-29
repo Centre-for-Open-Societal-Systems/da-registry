@@ -34,7 +34,11 @@ loader first applies the same idempotent AWE seed files (/seed/awe_meta_data,
 upserts) when the AWE database settings are present.
 
 Settings (env): the names the platform chart's db-seed job already sets when
-dbSeed.loadSampleData is on, so a deployment needs nothing extra:
+dbSeed.loadSampleData is on, so a deployment needs nothing extra. The job
+(registry chart 1.2.2-rc.614) names neither the staff IAM nor the Master Data
+API; when STAFF_IAM_URL or MDS_API_URL is not set, the loader uses the public
+host beside Keycloak's on the platform's host names: keycloak.<domain> (from
+STAFF_TOKEN_URL) gives staff-iam.<domain> and master-data.<domain>.
   STAFF_API_URL, STAFF_TOKEN_URL, STAFF_CLIENT_ID, STAFF_CLIENT_SECRET
       the staff API and the registry's Keycloak client (global.authClientId);
       its service-account user needs the client role Intake Officer on the
@@ -42,9 +46,11 @@ dbSeed.loadSampleData is on, so a deployment needs nothing extra:
   STAFF_IAM_URL, INTAKE_SEED_PASSWORD, INTAKE_SEED_APPROVER_1 (alex.carter),
   INTAKE_SEED_APPROVER_2 (nina.patel), INTAKE_SEED_APPROVE_TIMEOUT (300)
       the approvers' sign-in (STAFF_IAM_URL: the staff IAM the approvers' browser
-      would use, reachable from the job); without them nothing is submitted
+      would use, reachable from the job; Keycloak returns the sign-in to its
+      public callback); without them nothing is submitted
   MDS_API_URL, MDS_TOKEN_URL, MDS_CLIENT_ID, MDS_CLIENT_SECRET
-      Master Data API, read only (geography)
+      Master Data API, read only (geography; the staff client's token unless
+      MDS_CLIENT_ID is set)
   AWE_PGHOST, AWE_PGPORT, AWE_PGDATABASE, AWE_PGUSER, AWE_PGPASSWORD
   OPENG2P_DATA_DIR (default /openg2p-data), PACK (default ETH-OAN),
   STAFF_API_WAIT_SECONDS (default 600)
@@ -87,6 +93,17 @@ def env(name: str, default: str = "") -> str:
     return (os.environ.get(name) or default).strip()
 
 
+def beside_keycloak(name: str, label: str) -> str:
+    """Setting `name`, or the public host <label>.<domain> beside Keycloak's keycloak.<domain>."""
+    if env(name):
+        return env(name).rstrip("/")
+    token_url = urllib.parse.urlsplit(env("STAFF_TOKEN_URL"))
+    first, _, domain = token_url.netloc.partition(".")
+    if first != "keycloak" or not domain:
+        return ""
+    return f"{token_url.scheme}://{label}.{domain}"
+
+
 def read_json(path: str):
     with open(path, encoding="utf-8") as fh:
         return json.load(fh)
@@ -107,7 +124,7 @@ def http(url: str, data: bytes | None = None, headers: dict | None = None, timeo
 class Client:
     def __init__(self):
         self.staff = env("STAFF_API_URL").rstrip("/")
-        self.master_data = env("MDS_API_URL").rstrip("/")
+        self.master_data = beside_keycloak("MDS_API_URL", "master-data")
         self._tokens: dict[str, tuple[str, float]] = {}
 
     def token(self, kind: str) -> str:
@@ -375,8 +392,10 @@ def main() -> int:
     if not os.path.exists(fixture):
         log(f"no sample DAs in this openg2p-data ({fixture}): nothing to submit.")
         return 0
-    missing = [n for n in ("STAFF_API_URL", "STAFF_TOKEN_URL", "STAFF_CLIENT_ID", "MDS_API_URL", "STAFF_IAM_URL",
-                           "INTAKE_SEED_PASSWORD") if not env(n)]
+    settings = {n: env(n) for n in ("STAFF_API_URL", "STAFF_TOKEN_URL", "STAFF_CLIENT_ID", "INTAKE_SEED_PASSWORD")}
+    settings["MDS_API_URL"] = beside_keycloak("MDS_API_URL", "master-data")
+    settings["STAFF_IAM_URL"] = beside_keycloak("STAFF_IAM_URL", "staff-iam")
+    missing = [n for n, value in settings.items() if not value]
     if missing:
         log("missing settings " + ", ".join(missing) + ": sample DAs not submitted.")
         return 1
@@ -394,7 +413,8 @@ def main() -> int:
         log(f"staff API not reachable at {client.staff}: sample DAs not submitted.")
         return 1
     seed_approval_policies()
-    approvers = [StaffSession(env("STAFF_IAM_URL"), client.staff, env(name, default), env("INTAKE_SEED_PASSWORD"))
+    log(f"staff IAM {settings['STAFF_IAM_URL']}, Master Data {settings['MDS_API_URL']}")
+    approvers = [StaffSession(settings["STAFF_IAM_URL"], client.staff, env(name, default), env("INTAKE_SEED_PASSWORD"))
                  for name, default in (("INTAKE_SEED_APPROVER_1", "alex.carter"),
                                        ("INTAKE_SEED_APPROVER_2", "nina.patel"))]
     approve_timeout = int(env("INTAKE_SEED_APPROVE_TIMEOUT", "300"))

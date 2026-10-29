@@ -61,3 +61,29 @@ def test_a_stage_task_that_never_opens_fails(loader):
     loader.time.sleep = lambda seconds: None
     with pytest.raises(RuntimeError, match="no stage 1 task for alex.carter"):
         loader.approve(approvers, "sub-1", 0)
+
+
+KEYCLOAK_TOKEN = "https://keycloak.development.oanstaging.com/realms/staff/protocol/openid-connect/token"
+
+
+@pytest.mark.parametrize("name, label, environ, expected", [
+    ("STAFF_IAM_URL", "staff-iam", {"STAFF_TOKEN_URL": KEYCLOAK_TOKEN}, "https://staff-iam.development.oanstaging.com"),
+    ("MDS_API_URL", "master-data", {"STAFF_TOKEN_URL": KEYCLOAK_TOKEN},
+     "https://master-data.development.oanstaging.com"),
+    ("MDS_API_URL", "master-data", {"MDS_API_URL": "http://mds.internal/", "STAFF_TOKEN_URL": KEYCLOAK_TOKEN},
+     "http://mds.internal"),
+    ("STAFF_IAM_URL", "staff-iam",
+     {"STAFF_TOKEN_URL": "https://auth.example.org/realms/staff/protocol/openid-connect/token"}, ""),
+    ("STAFF_IAM_URL", "staff-iam", {}, ""),
+])
+def test_iam_and_master_data_are_the_hosts_beside_keycloak(loader, monkeypatch, name, label, environ, expected):
+    for var in ("STAFF_IAM_URL", "MDS_API_URL", "STAFF_TOKEN_URL"):
+        monkeypatch.delenv(var, raising=False)
+    for var, value in environ.items():
+        monkeypatch.setenv(var, value)
+    assert loader.beside_keycloak(name, label) == expected
+
+
+def test_image_pins_an_openg2p_data_with_the_sample_das():
+    text = (SEED / "Dockerfile").read_text(encoding="utf-8")
+    assert "ARG OPENG2P_DATA_REF=34b239463cc38af8c028428df1eb52d786cc14c2" in text
