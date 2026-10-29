@@ -1,29 +1,28 @@
-"""Fixes for three platform bugs, installed at start-up inside this extension.
+"""Fixes for two platform bugs, installed at start-up inside this extension.
 
 They used to be text patches applied to the platform's files at image build
 time (docker/patches/patch_platform.py). The registry standards of 27-28 Oct
 2026 rule that out: the platform images stay as published and a registry only
-adds its extension. The same three fixes are therefore applied here, in the
+adds its extension. The same fixes are therefore applied here, in the
 running process, by replacing the platform method concerned; the platform
 package on disk is untouched. Each installer is idempotent and skips cleanly
 when the platform package it targets is not present in the process (the
-partner-API fix in the staff API, the worker fix in the APIs, ...).
+IAM fix in the staff API, the worker fix in the celery worker, ...).
 
 Drop an installer once the fix has landed in the platform image that
-RP_VERSION points at (checked on 1.2.2-rc.557: all three are still needed).
+RP_VERSION points at (checked on 1.2.2-rc.557: both are still needed).
 
-1. Partner API ingest responses: `response_timestamp` is a datetime and the
-   platform serialises the response with `model_dump()`, so JSONResponse fails
-   with "Object of type datetime is not JSON serializable" and every
-   POST /partner/ingest_data answers HTTP 500 although the record was accepted.
-   `model_dump(mode="json")` serialises it.
-2. IAM permission lookup: the platform asks IAM `get_permissions_for_roles`
+Partner API ingest replies are not fixed here: the data models in
+meta_data/data-models/data_models.sql carry the DCI response template, which
+is what makes the platform serialise the reply.
+
+1. IAM permission lookup: the platform asks IAM `get_permissions_for_roles`
    with bare role names, and IAM answers with the first active role of that
    name across every registered application. On a cluster hosting several
    registries the roles share names, so a user's permissions come from
    whichever application sorts first. `get_application_permissions_for_user`
    resolves the caller's roles inside this application only.
-3. Celery worker database engine: one pooled async engine per process, but
+2. Celery worker database engine: one pooled async engine per process, but
    each task module runs on its own event loop; asyncpg binds a connection to
    the loop it was opened on, so a pooled connection handed from one task
    type to another fails with "attached to a different loop" and valid records
@@ -38,38 +37,7 @@ import logging
 _logger = logging.getLogger("da-platform-overrides")
 _INSTALLED = "_da_platform_override"
 
-# ---------------------------------------------------------------- 1. partner
-
-
-def install_partner_json_responses() -> bool:
-    try:
-        from fastapi.responses import JSONResponse
-        from openg2p_registry_core.helpers import TemplateHelper
-        from openg2p_registry_partner_api.ingestion.helpers.request_response_helper import RequestResponseHelper
-    except ImportError:
-        return False
-    if getattr(RequestResponseHelper._construct_data_model_response, _INSTALLED, False):
-        return True
-
-    def _construct_data_model_response(self, response_template_store_id, response):
-        # Same as the platform's method, with mode="json" so datetimes serialise.
-        if not response_template_store_id:
-            return JSONResponse(content=response.model_dump(mode="json"))
-        template_helper = TemplateHelper.get_component()
-        response_data = template_helper.render_with_template(
-            document_store_id=response_template_store_id,
-            data=response.model_dump(mode="json"),
-            expand_data=False,
-        )
-        return JSONResponse(content=response_data)
-
-    setattr(_construct_data_model_response, _INSTALLED, True)
-    RequestResponseHelper._construct_data_model_response = _construct_data_model_response
-    _logger.info("Partner API responses serialised with mode=json (platform datetime fix)")
-    return True
-
-
-# ------------------------------------------------------------ 2. permissions
+# ------------------------------------------------------------ 1. permissions
 
 _current_request: contextvars.ContextVar = contextvars.ContextVar("da_current_request", default=None)
 
@@ -138,7 +106,7 @@ def install_scoped_permission_lookup() -> bool:
     return True
 
 
-# ----------------------------------------------------------------- 3. worker
+# ----------------------------------------------------------------- 2. worker
 
 
 def install_worker_null_pool() -> bool:
@@ -167,6 +135,5 @@ def install_worker_null_pool() -> bool:
 
 
 def install_platform_overrides() -> None:
-    install_partner_json_responses()
     install_scoped_permission_lookup()
     install_worker_null_pool()

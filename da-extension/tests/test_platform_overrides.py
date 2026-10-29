@@ -1,12 +1,10 @@
-"""In-process fixes for three platform bugs (platform_overrides.py).
+"""In-process fixes for two platform bugs (platform_overrides.py).
 
 Each test skips when the platform package it targets is not installed in the
-process running the tests (the partner-API fix needs the partner-API image,
-the worker fix the celery image); the staff-API image covers the IAM one.
+process running the tests (the worker fix needs the celery image); the staff-API image covers the IAM one.
 """
 
 import asyncio
-import datetime
 import importlib
 import sys
 from types import SimpleNamespace
@@ -29,24 +27,6 @@ def test_permissions_for_application_keeps_only_this_client():
     assert po.permissions_for_application(payload, "da-registry-staff-portal") == {"register:view", "changeRequest:create"}
     assert po.permissions_for_application(payload, "unknown") == set()
     assert po.permissions_for_application(None, "x") == set()
-
-
-def test_partner_responses_serialise_datetimes():
-    pytest.importorskip("openg2p_registry_partner_api")
-    from openg2p_fastapi_common.schemas import G2PResponse, G2PResponseBody, G2PResponseHeader, G2PResponseStatus
-    from openg2p_registry_partner_api.ingestion.helpers.request_response_helper import RequestResponseHelper
-
-    assert po.install_partner_json_responses() is True
-    assert po.install_partner_json_responses() is True  # idempotent
-    response = G2PResponse(
-        response_header=G2PResponseHeader(request_id="", response_status=G2PResponseStatus.SUCCESS,
-                                          response_error_code="", response_error_message="",
-                                          response_timestamp=datetime.datetime(2026, 10, 28, 12, 0, 0)),
-        response_body=G2PResponseBody(pagination_response=None, response_payload=None),
-    )
-    http = RequestResponseHelper._construct_data_model_response(RequestResponseHelper(), None, response)
-    assert http.status_code == 200
-    assert b"2026-10-28T12:00:00" in http.body
 
 
 def test_permission_lookup_is_scoped_to_this_application(monkeypatch):
