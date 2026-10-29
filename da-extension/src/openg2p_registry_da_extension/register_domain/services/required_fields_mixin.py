@@ -91,7 +91,7 @@ class RequiredFieldsMixin:
             intake_class = await self._resolve_intake_form_class(section_register_id, session)
             rows = await self._get_intake_rows(intake_class, submission.submission_id, session)
         except Exception as exc:  # noqa: BLE001 - unknown submission: the platform decides below
-            _logger.info("intake guard: no stored rows for submission %s (%s)", submission_id, exc)
+            _logger.warning("intake guard: no stored rows for submission %s (%s)", submission_id, exc)
             return set()
         # The platform returns {internal_record_id: row}; accept a list of rows too.
         ids = rows.keys() if isinstance(rows, dict) else (getattr(r, "internal_record_id", None) for r in rows)

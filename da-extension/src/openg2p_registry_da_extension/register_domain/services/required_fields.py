@@ -14,6 +14,12 @@ condition holds. A condition is {"field", "operator", "value"} (operators
 equals, notEquals, in, notIn, empty, notEmpty, contains) or a group
 {"and": [...]}, {"or": [...]}, {"not": {...}}.
 
+Limits: on a web save or finalize a condition is evaluated against the record
+of its own section, so a condition naming a field of another section sees no
+value (the enrichers pass the whole record and are not affected). Section
+schemas are cached for five minutes, so a metadata edit reaches a running pod
+within that time.
+
 A widget's data path names the field: "<register_id>.email", or for the geo
 widget {"value": "<register_id>.geo_lowest_level_value_id", "hierarchy": ...}.
 """
