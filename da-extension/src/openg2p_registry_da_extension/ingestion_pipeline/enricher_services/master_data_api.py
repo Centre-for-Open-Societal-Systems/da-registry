@@ -66,9 +66,10 @@ def _access_token(client: httpx.Client) -> str | None:
     body = resp.json()
     if not body.get("access_token"):
         raise MasterDataUnavailable("Keycloak answered without an access token for Master Data")
+    token = body["access_token"]
     with _lock:
-        _token = (time.monotonic() + max(int(body.get("expires_in") or 60) - 30, 10), body["access_token"])
-    return _token[1]
+        _token = (time.monotonic() + max(int(body.get("expires_in") or 60) - 30, 10), token)
+    return token
 
 
 def post(path: str, payload: dict[str, Any] | None = None, pagination: dict[str, Any] | None = None) -> Any:
