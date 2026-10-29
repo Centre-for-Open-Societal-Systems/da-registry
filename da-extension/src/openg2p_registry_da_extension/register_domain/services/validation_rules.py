@@ -25,15 +25,15 @@ EMAIL_PATTERN = r"^[^@\s]+@[^@\s]+\.[^@\s]+$"
 
 NAME_FIELD_LABELS = {
     "first_name": "Name",
-    "middle_name": "Father Name",
-    "last_name": "Grandfather Name",
+    "middle_name": "Father's name",
+    "last_name": "Grandfather's name",
 }
 NAME_FIELDS = tuple(NAME_FIELD_LABELS)
 
 PHONE_FIELD_LABELS = {
-    "mobile_number": "Phone Number",
-    "telegram_number": "Telegram Number",
-    "alternate_number": "Alternate Number",
+    "mobile_number": "Phone number",
+    "telegram_number": "Telegram number",
+    "alternate_number": "Alternate number",
 }
 
 # Required fields are not listed here: widget-required in the register metadata

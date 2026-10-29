@@ -143,6 +143,6 @@ def resolve_code(field: str, value: str | None, session) -> str | None:
     for key, value_id in values.items():
         if key.startswith("__code__") and _norm(key[len("__code__"):]) == wanted:
             return value_id
-    label = labels.get(field) or field.replace("_", " ").title()
+    label = labels.get(field) or field.replace("_", " ").capitalize()
     allowed = ", ".join(values[v] for v in ids)
-    raise ValueError(f"{label} '{value}' is not one of: {allowed}")
+    raise ValueError(f"{label}: '{value}' is not one of the choices. Choose one of: {allowed}.")

@@ -56,7 +56,7 @@ class TestGeo(unittest.TestCase):
 
     def test_resolve_errors_name_the_place(self):
         base = {"region": "Tigray", "zone": "North Western", "woreda": "Tahtay Adiyabo"}
-        with self.assertRaisesRegex(ValueError, "Kebele 'Nowhere' not found in Tigray / North Western / Tahtay Adiyabo"):
+        with self.assertRaisesRegex(ValueError, "Kebele 'Nowhere' was not found in Tigray / North Western / Tahtay Adiyabo"):
             enr._MasterDataGeo.resolve({**base, "kebele": "Nowhere"})
         with self.assertRaisesRegex(ValueError, "Kebele 'Badme' matches more than one place"):
             enr._MasterDataGeo.resolve({**base, "kebele": "Badme"})

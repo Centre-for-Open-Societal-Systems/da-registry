@@ -90,9 +90,9 @@ class TestDAServicesEnricher(unittest.TestCase):
     def test_rejections(self):
         cases = [
             ({k: v for k, v in MESSAGE.items() if k != "reference_id"}, "Missing: reference_id"),
-            (dict(MESSAGE, source="SMS"), "source 'SMS' is not one of"),
+            (dict(MESSAGE, source="SMS"), "Source 'SMS' is not one of"),
             (dict(MESSAGE, da={"first_name": "A"}), "Missing: father_name, fayda_id, kebele_id"),
-            (dict(MESSAGE, da="not an object"), "message.da must be an object"),
+            (dict(MESSAGE, da="not an object"), "development agent details"),
         ]
         for message, text in cases:
             with self.subTest(text=text):
