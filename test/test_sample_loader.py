@@ -34,9 +34,11 @@ class FakeApprover:
     def __init__(self, name, stage, open_tasks, calls):
         self.username, self.stage, self.open_tasks, self.calls = name, stage, open_tasks, calls
 
-    def post(self, path, payload):
+    def post(self, path, payload, once=False):
         self.calls.append((self.username, path, payload))
         if path == "/awe/list_my_tasks":
+            if payload["status"] != "open":
+                return {"data": {"items": []}}
             return {"data": {"items": [t for t in self.open_tasks if t["stage_order"] == self.stage]}}
         if path == "/awe/submit_task_decision":
             self.open_tasks[:] = [t for t in self.open_tasks if t["id"] != payload["task_id"]]
@@ -59,17 +61,17 @@ def test_each_submission_is_approved_at_stage_1_then_stage_2(loader):
 def test_a_stage_task_that_never_opens_fails(loader):
     approvers = [FakeApprover("alex.carter", 1, [], []), FakeApprover("nina.patel", 2, [], [])]
     loader.time.sleep = lambda seconds: None
-    with pytest.raises(RuntimeError, match="no stage 1 task for alex.carter"):
+    with pytest.raises(RuntimeError, match="sub-1 is not approved within 0s"):
         loader.approve(approvers, "sub-1", 0)
 
 
-KEYCLOAK_TOKEN = "https://keycloak.development.oanstaging.com/realms/staff/protocol/openid-connect/token"
+KEYCLOAK_TOKEN = "https://keycloak.example.org/realms/staff/protocol/openid-connect/token"
 
 
 @pytest.mark.parametrize("name, label, environ, expected", [
-    ("STAFF_IAM_URL", "staff-iam", {"STAFF_TOKEN_URL": KEYCLOAK_TOKEN}, "https://staff-iam.development.oanstaging.com"),
+    ("STAFF_IAM_URL", "staff-iam", {"STAFF_TOKEN_URL": KEYCLOAK_TOKEN}, "https://staff-iam.example.org"),
     ("MDS_API_URL", "master-data", {"STAFF_TOKEN_URL": KEYCLOAK_TOKEN},
-     "https://master-data.development.oanstaging.com"),
+     "https://master-data.example.org"),
     ("MDS_API_URL", "master-data", {"MDS_API_URL": "http://mds.internal/", "STAFF_TOKEN_URL": KEYCLOAK_TOKEN},
      "http://mds.internal"),
     ("STAFF_IAM_URL", "staff-iam",
@@ -160,7 +162,7 @@ def test_a_rerun_approves_waiting_submissions_and_completes_drafts(loader, monke
 ])
 def test_only_the_uniqueness_wording_counts_as_already_there(loader, monkeypatch, message, outcome):
     monkeypatch.setattr(loader, "earlier_submissions", lambda fayda: [])
-    client = type("C", (), {"staff": "s", "call": lambda self, base, path, payload: (False, message, None)})()
+    client = type("C", (), {"staff": "s", "call": lambda self, base, path, payload, **kw: (False, message, None)})()
     assert loader.load_one(client, [], 5, GEO, {}, DA, {}) == outcome
 
 
@@ -177,3 +179,110 @@ def test_sample_data_never_fails_the_upgrade(loader, monkeypatch, tmp_path):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("OPENG2P_DATA_DIR", str(tmp_path))
     assert loader.main() == 0
+
+
+def test_the_earlier_submissions_query_uses_real_columns_and_only_this_loaders_rows(loader, monkeypatch):
+    seen = []
+    monkeypatch.setattr(loader, "registry_rows", lambda sql, params: seen.append((sql, params)) or [])
+    assert loader.earlier_submissions("9311502628318720") == []
+    sql, params = seen[0]
+    assert "s.first_created_at" in sql and "s.created_at" not in sql
+    assert "s.created_by = %s" in sql and params == ("9311502628318720", loader.SEED_CREATED_BY)
+    platform = Path(__file__).resolve().parents[1] / "docker" / "db-seed"
+    assert platform.exists()
+
+
+def test_the_registry_database_connection_is_closed(loader, monkeypatch):
+    import sys
+    import types as t
+
+    closed = []
+
+    class Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def execute(self, sql, params):
+            raise RuntimeError("UndefinedColumn")
+
+    class Conn:
+        def cursor(self):
+            return Cursor()
+
+        def close(self):
+            closed.append(True)
+
+    monkeypatch.setitem(sys.modules, "psycopg2", t.SimpleNamespace(connect=lambda **kw: Conn()))
+    for name, value in (("PGHOST", "db"), ("PGDATABASE", "da")):
+        monkeypatch.setenv(name, value)
+    with pytest.raises(RuntimeError):
+        loader.registry_rows("SELECT 1", ())
+    assert closed == [True]
+
+
+class StageTwoApprover:
+    """Stage 1 was approved by an earlier run; the stage 2 task waits, claimed or open."""
+
+    def __init__(self, stage, claimed, status, calls, lose_decision=False):
+        self.username, self.stage, self.claimed, self.status, self.calls = f"u{stage}", stage, claimed, status, calls
+        self.lose_decision = lose_decision
+
+    def post(self, path, payload, once=False):
+        self.calls.append((self.username, path, once))
+        if path == "/awe/list_my_tasks":
+            wanted = "claimed" if self.claimed else "open"
+            if self.stage == 2 and payload["status"] == wanted and self.status.get("sub-1") != "APPROVED":
+                return {"data": {"items": [{"id": "t2", "artifact_id": "sub-1", "stage_order": 2}]}}
+            return {"data": {"items": []}}
+        if path == "/awe/submit_task_decision":
+            self.status["sub-1"] = "APPROVED"
+            if self.lose_decision:
+                raise RuntimeError("POST /awe/submit_task_decision: timed out")
+        return {}
+
+
+@pytest.mark.parametrize("claimed", [False, True])
+def test_approval_resumes_at_the_stage_reached(loader, monkeypatch, claimed):
+    status, calls = {}, []
+    monkeypatch.setattr(loader, "approval_status", status.get)
+    loader.approve([StageTwoApprover(1, claimed, status, calls), StageTwoApprover(2, claimed, status, calls)],
+                   "sub-1", 5)
+    sent = [(user, path) for user, path, _ in calls if path != "/awe/list_my_tasks"]
+    assert sent == ([] if claimed else [("u2", "/awe/claim_task")]) + [("u2", "/awe/submit_task_decision")]
+    assert all(once for _, path, once in calls if path != "/awe/list_my_tasks")
+
+
+def test_a_lost_decision_is_read_again_not_resent(loader, monkeypatch):
+    monkeypatch.setattr(loader.time, "sleep", lambda seconds: None)
+    status, calls = {}, []
+    monkeypatch.setattr(loader, "approval_status", status.get)
+    loader.approve([StageTwoApprover(1, True, status, calls, True), StageTwoApprover(2, True, status, calls, True)],
+                   "sub-1", 5)
+    assert [path for _, path, _ in calls].count("/awe/submit_task_decision") == 1
+
+
+def test_the_retry_log_leaves_out_the_query(loader, monkeypatch):
+    import urllib.request
+
+    logged = []
+    monkeypatch.setattr(loader.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(loader, "log", logged.append)
+    loader.fetch(FlakyOpener(503, 200), urllib.request.Request("https://staff-iam.example.org/auth/callback?code=secret"))
+    assert logged and all("secret" not in line for line in logged)
+
+
+def test_a_failure_before_the_first_da_ends_without_failing(loader, monkeypatch, tmp_path):
+    pack = tmp_path / "packs" / "ETH-OAN" / "samples"
+    pack.mkdir(parents=True)
+    (pack / "development_agents.json").write_text("[]", encoding="utf-8")  # no individuals.json
+    for name, value in (("STAFF_API_URL", "https://da.example.org"), ("STAFF_TOKEN_URL",
+                        "https://keycloak.example.org/t"), ("STAFF_CLIENT_ID", "c"), ("INTAKE_SEED_PASSWORD", "p")):
+        monkeypatch.setenv(name, value)
+    monkeypatch.setenv("OPENG2P_DATA_DIR", str(tmp_path))
+    source = (Path(__file__).resolve().parents[1] / "docker/db-seed/load_sample_data.py").read_text(encoding="utf-8")
+    assert "except Exception as exc:  # a setting, the pack or a service" in source
+    with pytest.raises(FileNotFoundError):
+        loader.main()

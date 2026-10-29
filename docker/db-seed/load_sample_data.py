@@ -31,13 +31,19 @@ submission of it still waiting for approval is approved rather than entered
 again, and a draft a failed run left behind is completed and finalized, so
 re-running loads nothing twice.
 
+Approvals are restart-safe: the loader looks up the submission's open or
+claimed task at whichever stage it has reached, so a stage approved by an
+earlier run is not looked for again; a claim or a decision is sent once and,
+when its answer is lost, the task is read again instead of resending it. The
+loader stamps its submissions (created_by "sample-data-seed") and resumes only its own.
+
 Requests cross the public ingress; a connection error, a timeout or a gateway
 status (502, 503, 504) is retried with backoff. INTAKE_SEED_VERIFY_TLS=false
 (what the chart sets) skips certificate checks. Sample data never fails the
 upgrade it rides on: a DA that cannot be entered or approved (its kebele is
 missing, a request keeps failing) is logged and counted and the others carry
-on, and a missing setting or an unreachable service is logged and the seed
-ends without sample DAs. The next seed run tries again.
+on, and any failure before the first DA (a setting, an unreachable service, a
+sign-in, the pack) is logged and the seed ends without sample DAs. The next seed run tries again.
 
 The platform entrypoint seeds the approval workflow's policies after the
 sample step; a submission cannot be finalized before they exist, so this
@@ -97,6 +103,7 @@ CSRF = uuid.uuid4().hex
 INTAKE_ARTIFACT = "registry.intake_form"
 TRANSIENT_HTTP = (502, 503, 504)  # the gateway's answer when the service behind it is away
 NETWORK_ATTEMPTS = 5
+SEED_CREATED_BY = "sample-data-seed"  # marks the submissions this loader made
 TASK_PAGE_SIZE, TASK_PAGES = 100, 20
 # The exact wording of the DA extension's Fayda uniqueness check (fayda_uniqueness.py).
 ALREADY_REGISTERED, ALREADY_SUBMITTED = " is already registered as ", " is already in submission "
@@ -138,30 +145,36 @@ def tls_context() -> ssl.SSLContext:
     return context
 
 
-def fetch(opener, request, timeout: int = 60) -> tuple[int, object, bytes]:
-    """Status, headers and body; network errors and gateway statuses are retried with backoff."""
-    for attempt in range(1, NETWORK_ATTEMPTS + 1):
+def fetch(opener, request, timeout: int = 60, attempts: int = NETWORK_ATTEMPTS) -> tuple[int, object, bytes]:
+    """Status, headers and body; network errors and gateway statuses are retried with backoff.
+
+    A request that must not be applied twice is sent with attempts=1. The query is left out of what is
+    logged: IAM's callback carries a one-time code there.
+    """
+    where = f"{request.get_method()} {request.full_url.split('?', 1)[0]}"
+    for attempt in range(1, attempts + 1):
         try:
             with opener.open(request, timeout=timeout) as response:
                 status, headers, body = response.status, response.headers, response.read()
         except urllib.error.HTTPError as exc:
             status, headers, body = exc.code, exc.headers, exc.read()
         except (urllib.error.URLError, OSError) as exc:
-            if attempt == NETWORK_ATTEMPTS:
-                raise RuntimeError(f"{request.get_method()} {request.full_url}: {exc}") from exc
+            if attempt == attempts:
+                raise RuntimeError(f"{where}: {exc}") from exc
             status, headers, body = None, None, str(exc)
-        if status is not None and (status not in TRANSIENT_HTTP or attempt == NETWORK_ATTEMPTS):
+        if status is not None and (status not in TRANSIENT_HTTP or attempt == attempts):
             return status, headers, body
         wait = 2 ** attempt
-        log(f"{request.get_method()} {request.full_url}: {status or body}; again in {wait}s")
+        log(f"{where}: {status or body}; again in {wait}s")
         time.sleep(wait)
     raise AssertionError("unreachable")
 
 
-def http(url: str, data: bytes | None = None, headers: dict | None = None, timeout: int = 60):
+def http(url: str, data: bytes | None = None, headers: dict | None = None, timeout: int = 60,
+         attempts: int = NETWORK_ATTEMPTS):
     req = urllib.request.Request(url, data=data, headers=headers or {}, method="POST" if data is not None else "GET")
     opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=tls_context()))
-    status, _, body = fetch(opener, req, timeout)
+    status, _, body = fetch(opener, req, timeout, attempts)
     return status, body.decode("utf-8", "replace")
 
 
@@ -189,7 +202,7 @@ class Client:
         self._tokens[kind] = (data["access_token"], time.monotonic() + max(int(data.get("expires_in", 60)) - 30, 10))
         return data["access_token"]
 
-    def call(self, base: str, path: str, payload: dict, pagination: dict | None = None):
+    def call(self, base: str, path: str, payload: dict, pagination: dict | None = None, once: bool = False):
         envelope = {
             "request_header": {
                 "request_id": uuid.uuid4().hex, "request_timestamp": datetime.now(timezone.utc).isoformat(),
@@ -201,7 +214,7 @@ class Client:
             "Content-Type": "application/json",
             "Authorization": "Bearer " + self.token("staff" if base == self.staff else "mds"),
             "X-CSRF-Token": CSRF, "Cookie": f"X-CSRF-Token={CSRF}",
-        })
+        }, attempts=1 if once else NETWORK_ATTEMPTS)
         try:
             data = json.loads(body)
         except ValueError:
@@ -218,7 +231,7 @@ class Client:
                 code, _ = http(self.staff + "/docs", timeout=10)
                 if code == 200:
                     return True
-            except (urllib.error.URLError, OSError):
+            except (RuntimeError, urllib.error.URLError, OSError):
                 pass
             time.sleep(10)
         return False
@@ -266,23 +279,38 @@ def location(index: dict, id_map: dict, pcode: str):
 # ------------------------------------------------- earlier submissions
 
 
-def earlier_submissions(fayda_id: str) -> list[tuple[str, str, str, str]]:
-    """(submission, draft status, approval status, intake record) of this Fayda ID, newest first.
-
-    Read from the registry database the seed job points at; without it (a local run) nothing is known.
-    """
+def registry_rows(sql: str, params: tuple) -> list[tuple] | None:
+    """Rows from the registry database the seed job points at; None without it (a local run)."""
     if not (env("PGHOST") and env("PGDATABASE")):
-        return []
+        return None
     import psycopg2  # in the db-seed image; imported here so the tests need no driver
 
-    with psycopg2.connect(host=env("PGHOST"), port=env("PGPORT", "5432"), dbname=env("PGDATABASE"),
-                          user=env("PGUSER"), password=env("PGPASSWORD")) as conn, conn.cursor() as cur:
-        cur.execute(
-            "SELECT s.submission_id::text, s.draft_status, s.approval_status, f.internal_record_id::text"
-            " FROM g2p_intake_form_das f JOIN g2p_intake_form_submissions s"
-            " ON s.submission_id::text = f.submission_id::text"
-            " WHERE f.foundational_id = %s ORDER BY s.created_at DESC NULLS LAST", (fayda_id,))
-        return cur.fetchall()
+    conn = psycopg2.connect(host=env("PGHOST"), port=env("PGPORT", "5432"), dbname=env("PGDATABASE"),
+                            user=env("PGUSER"), password=env("PGPASSWORD"))
+    try:
+        with conn.cursor() as cur:
+            cur.execute(sql, params)
+            return cur.fetchall()
+    finally:
+        conn.close()
+
+
+EARLIER_SQL = (
+    "SELECT s.submission_id::text, s.draft_status, s.approval_status, f.internal_record_id::text"
+    " FROM g2p_intake_form_das f JOIN g2p_intake_form_submissions s"
+    " ON s.submission_id::text = f.submission_id::text"
+    " WHERE f.foundational_id = %s AND s.created_by = %s ORDER BY s.first_created_at DESC")
+
+
+def earlier_submissions(fayda_id: str) -> list[tuple[str, str, str, str]]:
+    """This loader's submissions of the Fayda ID, newest first: (submission, draft, approval, intake record)."""
+    return registry_rows(EARLIER_SQL, (fayda_id, SEED_CREATED_BY)) or []
+
+
+def approval_status(submission_id: str) -> str | None:
+    rows = registry_rows("SELECT approval_status FROM g2p_intake_form_submissions WHERE submission_id::text = %s",
+                         (submission_id,))
+    return rows[0][0] if rows else None
 
 
 # ------------------------------------------------------------ AWE policies
@@ -334,11 +362,13 @@ def submit(client: Client, fields: dict, geo: dict, draft: tuple[str, str] | Non
     def save(section: str, record: dict, submission_id=None, record_id=""):
         action = "ADD" if submission_id is None else "UPDATE"
         payload = {k: v for k, v in record.items() if v not in (None, "")}
+        # The save that creates the submission is sent once: a lost answer must not create a second draft
+        # (the next run completes the first, found by its Fayda ID).
         return client.call(client.staff, "/intake-form-data/save_intake_form_submission", {
             "submission_id": submission_id, "section_id": SECTIONS[section], "section_register_id": REGISTER_ID,
-            "form_id": FORM_ID, "register_id": REGISTER_ID,
+            "form_id": FORM_ID, "register_id": REGISTER_ID, "created_by": SEED_CREATED_BY,
             "section_payload": [{"edit_action": action, "internal_record_id": record_id, "link_internal_record_id": "", **payload}],
-        })
+        }, once=submission_id is None)
 
     if draft:
         submission_id, record_id = draft
@@ -346,7 +376,10 @@ def submit(client: Client, fields: dict, geo: dict, draft: tuple[str, str] | Non
     else:
         ok, err, created = save("identity", fields["identity"])
         if ok:
+            created = created or {}
             submission_id = created.get("submission_id")
+            if not submission_id:
+                return "failed", "saving the identity section returned no submission"
             records = [r for p in created.get("section_payloads") or [] for r in p.get("records") or []]
             record_id = records[0].get("internal_record_id") if records else ""
     if not ok:
@@ -357,7 +390,8 @@ def submit(client: Client, fields: dict, geo: dict, draft: tuple[str, str] | Non
         ok, err, _ = save(section, record, submission_id, record_id)
         if not ok:
             return "failed", f"{section}: {err}"
-    ok, err, _ = client.call(client.staff, "/intake-form-data/finalize_intake_form_submission", {"submission_id": submission_id})
+    ok, err, _ = client.call(client.staff, "/intake-form-data/finalize_intake_form_submission",
+                             {"submission_id": submission_id}, once=True)
     return ("submitted", submission_id) if ok else ("failed", f"finalize: {err}")
 
 
@@ -409,7 +443,8 @@ class StaffSession:
         self._token = token
         log(f"signed in as {self.username}")
 
-    def post(self, path: str, payload: dict) -> dict:
+    def post(self, path: str, payload: dict, once: bool = False) -> dict:
+        """The response payload; `once` for a request that must not be applied twice (no network retry)."""
         envelope = {
             "request_header": {"request_id": uuid.uuid4().hex,
                                "request_timestamp": datetime.now(timezone.utc).isoformat(),
@@ -420,7 +455,7 @@ class StaffSession:
             csrf = uuid.uuid4().hex
             code, body = http(self.api_url + path, json.dumps(envelope).encode(), {
                 "Content-Type": "application/json", "Authorization": f"Bearer {self._token}",
-                "X-CSRF-Token": csrf, "Cookie": f"X-CSRF-Token={csrf}"})
+                "X-CSRF-Token": csrf, "Cookie": f"X-CSRF-Token={csrf}"}, attempts=1 if once else NETWORK_ATTEMPTS)
             try:
                 data = json.loads(body)
             except ValueError:
@@ -437,35 +472,55 @@ class StaffSession:
 
 
 def open_task(approver, submission_id: str, stage: int) -> dict | None:
-    """The approver's open task for this intake and stage, looked up page by page."""
-    for page in range(1, TASK_PAGES + 1):
-        tasks = approver.post("/awe/list_my_tasks", {"status": "open", "artifact_type": INTAKE_ARTIFACT,
-                                                     "page": page, "page_size": TASK_PAGE_SIZE})
-        items = (tasks.get("data") or {}).get("items") or []
-        task = next((t for t in items
-                     if t.get("artifact_id") == submission_id and int(t.get("stage_order") or 0) == stage), None)
-        if task or len(items) < TASK_PAGE_SIZE:
-            return task
+    """The approver's open or claimed task for this submission and stage, looked up page by page."""
+    for status in ("open", "claimed"):
+        for page in range(1, TASK_PAGES + 1):
+            tasks = approver.post("/awe/list_my_tasks", {"status": status, "artifact_type": INTAKE_ARTIFACT,
+                                                         "page": page, "page_size": TASK_PAGE_SIZE})
+            items = (tasks.get("data") or {}).get("items") or []
+            task = next((t for t in items
+                         if t.get("artifact_id") == submission_id and int(t.get("stage_order") or 0) == stage), None)
+            if task:
+                return {"status": status, **task}
+            if len(items) < TASK_PAGE_SIZE:
+                break
     return None
 
 
-def approve(approvers: list, submission_id: str, timeout: int) -> None:
-    """Stage 1 as the first approver, then stage 2 as the second, each once its task opens."""
-    deadline = time.monotonic() + timeout
-    for stage, approver in enumerate(approvers, 1):
-        while True:
-            task = open_task(approver, submission_id, stage)
-            if task:
-                break
-            if time.monotonic() > deadline:
-                raise RuntimeError(f"no stage {stage} task for {approver.username} on intake {submission_id} "
-                                   f"within {timeout}s")
-            time.sleep(3)
-        approver.post("/awe/claim_task", {"task_id": task["id"]})
+def decide(approver, task: dict, submission_id: str, stage: int) -> bool:
+    """Claim (when open) and approve, each sent once; False when an answer was lost."""
+    try:
+        if task.get("status", "open") == "open":
+            approver.post("/awe/claim_task", {"task_id": task["id"]}, once=True)
         approver.post("/awe/submit_task_decision", {
             "task_id": task["id"], "action": "approve", "comment": "Sample data (db-seed)",
-            "artifact_id": submission_id, "artifact_type": INTAKE_ARTIFACT, "current_stage": stage})
-        log(f"  stage {stage} approved as {approver.username}")
+            "artifact_id": submission_id, "artifact_type": INTAKE_ARTIFACT, "current_stage": stage}, once=True)
+    except RuntimeError as exc:
+        log(f"  stage {stage} as {approver.username}: {exc}; reading the task again")
+        return False
+    log(f"  stage {stage} approved as {approver.username}")
+    return True
+
+
+def approve(approvers: list, submission_id: str, timeout: int) -> None:
+    """Approve the submission at whichever stage it has reached: stage 1 as the first approver, stage 2 as the
+    second. Done when the registry records it approved, or (without the database) when the last stage's
+    decision went through."""
+    deadline = time.monotonic() + timeout
+    while approval_status(submission_id) != "APPROVED":
+        acted = False
+        for stage, approver in enumerate(approvers, 1):
+            task = open_task(approver, submission_id, stage)
+            if task:
+                acted = True
+                if decide(approver, task, submission_id, stage) and stage == len(approvers) \
+                        and approval_status(submission_id) is None:
+                    return
+                break
+        if time.monotonic() > deadline:
+            raise RuntimeError(f"submission {submission_id} is not approved within {timeout}s")
+        if not acted:
+            time.sleep(3)
 
 
 # ------------------------------------------------------------- main
@@ -504,23 +559,23 @@ def main() -> int:
                                   env("INTAKE_SEED_PASSWORD"))
                      for name, default in (("INTAKE_SEED_APPROVER_1", "alex.carter"),
                                            ("INTAKE_SEED_APPROVER_2", "nina.patel"))]
-    except RuntimeError as exc:
-        log(f"the approvers cannot sign in ({exc}): sample DAs not submitted.")
+    except Exception as exc:
+        log(f"the approvers cannot sign in ({exc!r}): sample DAs not submitted.")
         return 0
     approve_timeout = int(env("INTAKE_SEED_APPROVE_TIMEOUT", "300"))
     try:
         index = geo_index(client)
-    except RuntimeError as exc:
-        log(f"Master Data geography unavailable ({exc}): sample DAs not submitted.")
+    except Exception as exc:
+        log(f"Master Data geography unavailable ({exc!r}): sample DAs not submitted.")
         return 0
     tally = {"approved": 0, "skipped": 0, "failed": 0}
     for da in das or []:
         try:
             outcome = load_one(client, approvers, approve_timeout, index, id_map, da,
                                people.get(da.get("individual_id")) or {})
-        except RuntimeError as exc:
+        except Exception as exc:  # sample data must not fail the upgrade; the next run retries
             outcome = "failed"
-            log(f"{da.get('da_id')}: failed, left for the next run: {exc}")
+            log(f"{da.get('da_id')}: failed, left for the next run: {exc!r}")
         tally[outcome] += 1
     log(f"{tally['approved']} entered and approved, {tally['skipped']} already present, {tally['failed']} failed "
         f"(of {len(das or [])} in pack {env('PACK', 'ETH-OAN')}).")
@@ -551,4 +606,7 @@ def load_one(client, approvers: list, approve_timeout: int, index: dict, id_map:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except Exception as exc:  # a setting, the pack or a service: logged; the upgrade goes on
+        log(f"FAILED before loading sample DAs, none loaded: {exc!r}")
