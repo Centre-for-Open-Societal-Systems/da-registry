@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Load the openg2p-data pack's code lists into the local Master Data (MDM) database.
 
-Local docker-compose only. The DA form's dropdowns read their values from Master
+Local docker-compose only (docker/local-dev/data-loaders; to move to
+openg2p-data, see README.md in this folder). The DA form's dropdowns read their values from Master
 Data (widget-data-source type "api", service "attributes"), and the values come
 from the openg2p-data pack: packs/<PACK>/codelists/*.json plus the domains the
 registry uses (packs/<PACK>/domains/<domain>/*.json). On a cluster the Master

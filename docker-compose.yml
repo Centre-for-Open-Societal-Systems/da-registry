@@ -397,18 +397,21 @@ services:
     entrypoint: ["sh", "-c", "psql -v ON_ERROR_STOP=1 -q -f /opt/master-data-schema-topup.sql && gunzip -c /opt/ethiopia_geo_seed.sql.gz | sed -E 's/ON CONFLICT [(][a-z_]+[)] DO NOTHING/ON CONFLICT DO NOTHING/' | psql -v ON_ERROR_STOP=1 -q"]
     restart: "no"
 
-  # Code lists for the DA form's dropdowns, from the openg2p-data pack into
-  # the local Master Data DB (on a cluster the Master Data db-seed image does
-  # this with PACK_LOAD=codelists, PACK_DOMAINS=agriculture). Reads the
-  # openg2p-data baked into the db-seed image, or a local checkout when
-  # OPENG2P_DATA_PATH points at one (handy while a data PR is not merged).
+  # LOCAL DEVELOPMENT ONLY (docker/local-dev/data-loaders; not a deployable
+  # image, not built by the Jenkinsfile). Code lists for the DA form's
+  # dropdowns, from the openg2p-data pack into the local Master Data DB (on a
+  # cluster the Master Data db-seed image does this with PACK_LOAD=codelists,
+  # PACK_DOMAINS=agriculture). Reads the openg2p-data cloned into the local
+  # image, or a local checkout when OPENG2P_DATA_PATH points at one (handy
+  # while a data PR is not merged). The loader is on its way to openg2p-data:
+  # docs/refactor/moves-to-openg2p-data/README.md.
   da-registry-codelist-seed:
     build:
       context: .
-      dockerfile: docker/db-seed/Dockerfile
+      dockerfile: docker/local-dev/data-loaders/Dockerfile
       args:
         OPENG2P_DATA_REF: ${OPENG2P_DATA_REF:-develop}
-    image: da-registry-local/db-seed:dev
+    image: da-registry-local/data-loaders:dev
     container_name: da-registry-codelist-seed
     depends_on:
       da-registry-geo-seed:
@@ -423,8 +426,8 @@ services:
       PACK: ${OPENG2P_DATA_PACK:-ETH-OAN}
       PACK_DOMAINS: ${OPENG2P_DATA_DOMAINS:-agriculture}
     volumes:
-      - ${OPENG2P_DATA_PATH:-./docker/db-seed/openg2p-data-local}:/openg2p-data-local:ro
-    entrypoint: ["python3", "/seed/load_codelists_mdm.py"]
+      - ${OPENG2P_DATA_PATH:-./docker/local-dev/openg2p-data-local}:/openg2p-data-local:ro
+    entrypoint: ["python3", "/local/load_codelists_mdm.py"]
     restart: "no"
 
   # -------------------------------------------------------- DA registry --
@@ -702,8 +705,6 @@ services:
     build:
       context: .
       dockerfile: docker/db-seed/Dockerfile
-      args:
-        OPENG2P_DATA_REF: ${OPENG2P_DATA_REF:-develop}
     image: da-registry-local/db-seed:dev
     container_name: da-registry-db-seed
     depends_on:
@@ -735,15 +736,10 @@ services:
       AWE_CALLBACK_SECRET_ID: ${AWE_REGISTRY_CALLBACK_SECRET_ID:-00000000-0000-4000-8000-000000000001}
       AWE_CALLBACK_HMAC_SECRET: ${AWE_REGISTRY_CALLBACK_HMAC_SECRET:-dev-registry-awe-callback-secret}
       AWE_CALLBACK_CALLER_SERVICE: ${AWE_CALLBACK_CALLER_SERVICE:-registry}
-      # Sample DAs come from openg2p-data (packs/ETH-OAN/samples/development_agents.json),
-      # baked into the image or mounted from a local checkout (OPENG2P_DATA_PATH).
-      LOAD_SAMPLE_DATA: ${LOAD_SAMPLE_DATA:-true}
-      OPENG2P_DATA_DIR: ${OPENG2P_DATA_DIR:-/openg2p-data}
-      PACK: ${OPENG2P_DATA_PACK:-ETH-OAN}
-      # false: the da-registry-geo-seed job already loaded the Ethiopia
-      # hierarchy into master data; loading it a second time from
-      # seed-data/geo trips master data's unique (mnemonic, parent, level).
-      LOAD_GEO_DATA: ${LOAD_GEO_DATA:-false}
+      # The image carries configuration only. Sample DAs are loaded by the
+      # local-only da-registry-sample-data job below, from openg2p-data.
+      LOAD_SAMPLE_DATA: "false"
+      LOAD_GEO_DATA: "false"  # geography comes from the da-registry-geo-seed job
       LOAD_IMAGES: ${LOAD_IMAGES:-false}
       LOAD_TEMPLATES: ${LOAD_TEMPLATES:-true}
       MINIO_ENDPOINT: "minio:9010"
@@ -759,8 +755,41 @@ services:
       # not reference, so every search_in_a_register call failed with
       # NoSuchBucket and the register list rendered empty.
       IMAGE_BUCKET_NAME: documents
+    restart: "no"
+
+  # LOCAL DEVELOPMENT ONLY (docker/local-dev/data-loaders; not a deployable
+  # image). Sample Development Agents from the openg2p-data pack
+  # (packs/ETH-OAN/samples/development_agents.json) into the register, after
+  # the db-seed job has applied the metadata. Set LOAD_SAMPLE_DATA=false to
+  # skip the load. The loader is on its way to openg2p-data:
+  # docs/refactor/moves-to-openg2p-data/README.md.
+  da-registry-sample-data:
+    build:
+      context: .
+      dockerfile: docker/local-dev/data-loaders/Dockerfile
+      args:
+        OPENG2P_DATA_REF: ${OPENG2P_DATA_REF:-develop}
+    image: da-registry-local/data-loaders:dev
+    container_name: da-registry-sample-data
+    depends_on:
+      da-registry-db-seed:
+        condition: service_completed_successfully
+    environment:
+      PGHOST: postgres
+      PGPORT: 5432
+      PGDATABASE: da_registry_db
+      PGUSER: ${POSTGRES_SUPERUSER:-postgres}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      MD_PGHOST: postgres
+      MD_PGPORT: 5432
+      MD_PGDATABASE: da_master_data_db
+      MD_PGUSER: ${POSTGRES_SUPERUSER:-postgres}
+      MD_PGPASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      OPENG2P_DATA_DIR: ${OPENG2P_DATA_DIR:-/openg2p-data}
+      PACK: ${OPENG2P_DATA_PACK:-ETH-OAN}
     volumes:
-      - ${OPENG2P_DATA_PATH:-./docker/db-seed/openg2p-data-local}:/openg2p-data-local:ro
+      - ${OPENG2P_DATA_PATH:-./docker/local-dev/openg2p-data-local}:/openg2p-data-local:ro
+    entrypoint: ["sh", "-c", "if [ \"${LOAD_SAMPLE_DATA:-true}\" = true ]; then exec python3 /local/load_sample_data.py; fi"]
     restart: "no"
 
 volumes:

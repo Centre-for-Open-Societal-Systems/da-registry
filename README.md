@@ -16,7 +16,8 @@ follows the same build model as the farmer registry.
 | `da-extension/` | Python extension: DA model, domain rules, ID prefix, file-import enricher, seed metadata, Jinja templates |
 | `docker/*/Dockerfile` | Thin native registry-platform images for the DA APIs, worker/beat, UI and seed job |
 | `ui/staff-ui/` | Pinned upstream Staff UI materialization with an empty DA override layer for future UI additions |
-| `docker/db-seed/` | Synthetic DA loader (local only) |
+| `docker/db-seed/` | db-seed image: the extension's configuration only (metadata, AWE seed, templates) |
+| `docker/local-dev/data-loaders/` | Local-only loaders for code lists and sample DAs (not a deployable image; they move to openg2p-data, see `docs/refactor/moves-to-openg2p-data/`) |
 | `docker/local-dev/` | Config for the local stack (Keycloak, IAM, AWE, ID generator, Postgres, geo seed) |
 | `import-templates/` | Blank CSV and Excel templates for bulk import |
 | `docker-compose.yml` | Self-contained local stack |
@@ -126,25 +127,27 @@ Seeding, in order: the geo-seed job loads the Ethiopia geo hierarchy into
 Master Data; the codelist-seed job loads the dropdown code lists from the
 openg2p-data pack (`packs/ETH-OAN`: `GENDER`, `MARITAL_STATUS`, `PREFIX` and the
 `agriculture` domain's `DA_*` lists) into Master Data; db-seed loads the DA
-metadata and the pack's nine sample DAs (`samples/development_agents.json`,
-`LOAD_SAMPLE_DATA=true`). All sample and reference data comes from the COSS
-fork of [openg2p-data](https://github.com/Centre-for-Open-Societal-Systems/openg2p-data),
-baked into the db-seed image at build time (`OPENG2P_DATA_REF`, default
-`develop`); nothing is generated or hardcoded in this repo. No real personal
-data is used. To seed from a local openg2p-data checkout (for example while a
-data PR is open), point the jobs at it:
+metadata and AWE seed (configuration only), then the sample-data job loads the
+pack's nine sample DAs (`samples/development_agents.json`; skip it with
+`LOAD_SAMPLE_DATA=false`). All sample and reference data comes from the COSS
+fork of [openg2p-data](https://github.com/Centre-for-Open-Societal-Systems/openg2p-data);
+the two local-only jobs (`docker/local-dev/data-loaders`) clone it when they
+are built (`OPENG2P_DATA_REF`, default `develop`) and are not part of any
+deployable image. Nothing is generated or hardcoded in this repo. No real
+personal data is used. To seed from a local openg2p-data checkout (for example
+while a data PR is open), point the jobs at it:
 
 ```bash
 OPENG2P_DATA_PATH=/path/to/openg2p-data OPENG2P_DATA_DIR=/openg2p-data-local \
   docker compose run --rm da-registry-codelist-seed && \
 OPENG2P_DATA_PATH=/path/to/openg2p-data OPENG2P_DATA_DIR=/openg2p-data-local \
-  docker compose run --rm da-registry-db-seed
+  docker compose run --rm da-registry-sample-data
 ```
 
 On a cluster the Master Data db-seed image (openg2p-data's
 `docker/master-data-db-seed`, `PACK_LOAD=codelists`, `PACK_DOMAINS=agriculture`)
-loads the lists; the registry's db-seed loads the sample DAs from the same
-pack.
+loads the lists; sample DAs are loaded from the same pack by openg2p-data's
+own tooling, not by the registry's db-seed image.
 
 Validation is metadata-driven: required fields are the form's `widget-required`
 flags (checked on section save and before a submission can be finalized), and
