@@ -1,5 +1,5 @@
--- Approval stages for the two DA policies: two stages (Stage 1 officers, then
--- Stage 2 officers), each completed by any one of its listed approvers
+-- Approval stages for the two DA policies: two stages (First approval, then
+-- Second approval), each completed by any one of its listed approvers
 -- (mode 'any-n', one decision), the same shape in every OAN registry. The
 -- approvers are in 30_approver_rule.sql. The upsert sets the mode on stages
 -- seeded earlier with mode 'all'. This is the starting configuration only:
@@ -17,10 +17,10 @@ SELECT v."id", v."policy_id", v."stage_order"::int, v."name", v."mode",
        v."skip_if"::json, v."on_empty", v."on_breach",
        v."escalation_rules_json"::json, v."created_at"::timestamptz, v."updated_at"::timestamptz
 FROM (VALUES
-    ('6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3fd0', '6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3fc0', 1, 'Stage 1 officers', 'any-n', 1, NULL, NULL, 'null', 'block', NULL, 'null', NOW(), NOW()),
-    ('6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3fd2', '6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3fc0', 2, 'Stage 2 officers', 'any-n', 1, NULL, NULL, 'null', 'block', NULL, 'null', NOW(), NOW()),
-    ('6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3fd1', '6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3fc1', 1, 'Stage 1 officers', 'any-n', 1, NULL, NULL, 'null', 'block', NULL, 'null', NOW(), NOW()),
-    ('6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3fd3', '6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3fc1', 2, 'Stage 2 officers', 'any-n', 1, NULL, NULL, 'null', 'block', NULL, 'null', NOW(), NOW())
+    ('6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3fd0', '6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3fc0', 1, 'First approval', 'any-n', 1, NULL, NULL, 'null', 'block', NULL, 'null', NOW(), NOW()),
+    ('6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3fd2', '6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3fc0', 2, 'Second approval', 'any-n', 1, NULL, NULL, 'null', 'block', NULL, 'null', NOW(), NOW()),
+    ('6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3fd1', '6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3fc1', 1, 'First approval', 'any-n', 1, NULL, NULL, 'null', 'block', NULL, 'null', NOW(), NOW()),
+    ('6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3fd3', '6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3fc1', 2, 'Second approval', 'any-n', 1, NULL, NULL, 'null', 'block', NULL, 'null', NOW(), NOW())
 ) AS v("id","policy_id","stage_order","name","mode","mode_value","sla_hours",
         "parallel_group","skip_if","on_empty","on_breach","escalation_rules_json",
         "created_at","updated_at")

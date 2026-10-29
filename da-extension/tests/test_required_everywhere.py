@@ -88,7 +88,7 @@ class TestConditions(unittest.TestCase):
 class TestPhrases(unittest.TestCase):
     def test_readable_without_codes_or_underscores(self):
         phrases = rf.problems(schema(widget("alternate_number", "")), {}, absent_is_missing=True)
-        self.assertEqual(phrases, ["fill in Alternate Number"])
+        self.assertEqual(phrases, ["fill in Alternate number"])
         self.assertEqual(rf.describe("Contact", rf.problems(CONTACT, {}, absent_is_missing=True)),
                          "Contact: fill in Mobile Number, Email")
 

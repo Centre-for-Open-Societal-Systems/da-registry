@@ -43,6 +43,12 @@ class TestFormats(unittest.TestCase):
         self.assertEqual(record["email"], "a@b.org")
         self.assertEqual((record["birth_month_ec"], record["birth_year_ec"]), (4, 1985))
 
+    def test_birth_year_limit_is_the_one_the_form_states(self):
+        with self.assertRaises(G2PRegistryException) as ctx:
+            validate({"birth_year_ec": 1800})
+        self.assertIn("Year of birth (Ethiopian calendar): enter 1920 or later.", str(ctx.exception))
+        validate({"birth_year_ec": 1920})
+
     def test_rejections_name_the_field(self):
         cases = [
             ({"foundational_id": "12345"}, "Fayda ID (FAN): enter exactly 16 digits."),
