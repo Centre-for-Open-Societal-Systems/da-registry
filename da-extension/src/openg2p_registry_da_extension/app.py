@@ -22,6 +22,9 @@ from .register_domain.services import (
     install_da_own_record_guard,
 )
 
+from .schema_compat import apply_native_schema_compat
+from .schema_migration import add_missing_mapped_columns
+
 _logger = logging.getLogger(_config.logging_default_logger_name)
 
 DA_TABLES = ("g2p_register_das", "g2p_register_history_das", "g2p_intake_form_das")
@@ -91,6 +94,11 @@ class Initializer(BaseInitializer):
         await G2PRegisterHistoryDA.create_migrate()
         await G2PIntakeFormDA.create_migrate()
 
+        # Add-only: any mapped column a table created by an older release lacks.
+        await add_missing_mapped_columns(
+            dbengine.get(), [G2PRegisterDA, G2PRegisterHistoryDA, G2PIntakeFormDA]
+        )
+
         # create_all() creates missing tables but never adds columns to a table
         # that already exists. Add each DA column explicitly so an existing
         # installation picks up columns introduced later.
@@ -118,6 +126,9 @@ class Initializer(BaseInitializer):
         async with dbengine.get().begin() as conn:
             # Several APIs start together; run these steps one at a time.
             await conn.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": _MIGRATION_LOCK_KEY})
+            # Platform tables that predate this release (outgoing_topics.topic_type
+            # / partner_id) are read by the outgestion beat on every tick.
+            await apply_native_schema_compat(conn)
             for table_name in DA_TABLES:
                 for column_name, column_type in da_columns.items():
                     await conn.execute(
