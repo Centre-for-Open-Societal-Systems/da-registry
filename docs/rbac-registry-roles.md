@@ -36,10 +36,11 @@ needs:
 ### Who approves a DA
 
 Every submitted DA and every change request goes through the platform's
-default two-level approval: Stage 1 Officers, then Stage 2 Officers. The
-repository seeds only the platform's example approvers for a fresh local
-stack (`awe_meta_data/`): Stage 1 = `alex.carter`, Stage 2 = `nina.patel`,
-both created by `docker/local-dev/keycloak-init.sh`.
+two-level approval: Stage 1 Officers, then Stage 2 Officers. Each stage is
+completed by any one of its approvers (mode `any-n`, one decision). The
+repository seeds the same approvers in every OAN registry (`awe_meta_data/`):
+Stage 1 = `alex.carter` or `admin`, Stage 2 = `nina.patel` or `admin`; the two
+officers are created by `docker/local-dev/keycloak-init.sh`.
 
 Who approves in a real environment is configuration, not code (decision of
 27-28 Oct 2026, Faiz / Asmit): after deployment an administrator edits the
