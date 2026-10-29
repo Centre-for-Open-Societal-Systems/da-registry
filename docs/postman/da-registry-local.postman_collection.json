@@ -1,72 +1,474 @@
 {
   "info": {
     "_postman_id": "163e3949-95ed-51f2-b982-2b572befa976",
-    "name": "DA Registry (local)",
-    "description": "DA Registry APIs for DA Services, against the local docker compose stack. Run 0 first; it stores the token. See docs/da-services-local-setup.md and docs/da-services-staff-api.md.",
+    "name": "DA Registry API (local + dev)",
+    "description": "DA Registry APIs for DA Services (local stack). Variables point at the local stack (docs/da-services-local-setup.md). Phase 1: build on the Partner API folder (push, status, exceptions, DCI search); the Staff API folders need a user's Keycloak token (login decision pending). Dev: staff portal https://da-registry.development.oanstaging.com; the partner API public host on dev is not available yet (requested from DevOps), and partner signature/consent checks are on there.\n\nEnvironments: import `da-registry-local.postman_environment.json` or `da-registry-dev.postman_environment.json` and select one at the top right. Then run folder `0. Login` (dev: the three 0-dev requests; local: 0-local).",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "item": [
     {
-      "name": "0. Get token (local Keycloak, admin/admin)",
-      "request": {
-        "method": "POST",
-        "header": [
-          {
-            "key": "Content-Type",
-            "value": "application/x-www-form-urlencoded"
-          }
-        ],
-        "url": {
-          "raw": "{{keycloak}}/realms/staff/protocol/openid-connect/token",
-          "host": [
-            "{{keycloak}}"
-          ],
-          "path": [
-            "realms",
-            "staff",
-            "protocol",
-            "openid-connect",
-            "token"
-          ]
-        },
-        "body": {
-          "mode": "urlencoded",
-          "urlencoded": [
-            {
-              "key": "grant_type",
-              "value": "password"
+      "name": "0. Login",
+      "description": "Run ONE of the two options before anything else.\n\nDEV (deployed): send 0-dev-a, 0-dev-b, 0-dev-c in order (or right-click the folder > Run). They do the same browser sign-in the Staff Portal does (Keycloak form -> IAM callback) and save token + csrf into the environment. The token lives 5 minutes: when a request answers G2P-AUT-401, run the three again. Needs `username` and `password` in the dev environment (password is a secret field, type it in Postman, do not commit it).\n\nLOCAL: send 0-local only (direct Keycloak token with admin/admin).\n\n0-local-da: token of a Development Agent test user, to see the own-record rule (section 5 of docs/rbac-registry-roles.md).\n\nThree demo users for the two-level approval (local): 0-local-officer enters the DA, 0-local-validator approves Stage 1, 0-local-approver approves Stage 2. Switch the token by sending the matching request before each step.",
+      "item": [
+        {
+          "name": "0-dev-a. Open the sign-in page",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{staff_portal_ui}}/api/login",
+              "host": [
+                "{{staff_portal_ui}}/api/login"
+              ]
             },
+            "description": "Follows the redirect to Keycloak and keeps the login page. The test script saves the form action into `kc_login_action`. Postman stores the Keycloak session cookies automatically."
+          },
+          "response": [],
+          "event": [
             {
-              "key": "client_id",
-              "value": "iam-staff-portal"
-            },
-            {
-              "key": "client_secret",
-              "value": "dev-iam-staff-secret"
-            },
-            {
-              "key": "username",
-              "value": "admin"
-            },
-            {
-              "key": "password",
-              "value": "admin"
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Keycloak login page received\", () => pm.response.to.have.status(200));",
+                  "const html = pm.response.text();",
+                  "let m = html.match(/id=\"kc-form-login\"[^>]*action=\"([^\"]+)\"/) || html.match(/<form[^>]*action=\"([^\"]+)\"[^>]*method=\"post\"/i);",
+                  "if (!m) { throw new Error(\"Login form not found. Is staff_portal_ui correct? \" + pm.environment.get(\"staff_portal_ui\")); }",
+                  "const action = m[1].replace(/&amp;/g, \"&\");",
+                  "pm.environment.set(\"kc_login_action\", action);",
+                  "console.log(\"Login form action saved. Now send 0-dev-b.\");"
+                ]
+              }
             }
           ]
         },
-        "description": "Local testing only. In DA Services the token comes from the user's Keycloak sign-in."
-      },
-      "event": [
         {
-          "listen": "test",
-          "script": {
-            "type": "text/javascript",
-            "exec": [
-              "const r = pm.response.json();",
-              "const v = r.access_token;",
-              "if (v) pm.collectionVariables.set('token', v);"
-            ]
+          "name": "0-dev-b. Send username and password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "url": {
+              "raw": "{{kc_login_action}}",
+              "host": [
+                "{{kc_login_action}}"
+              ]
+            },
+            "description": "Posts the credentials to Keycloak. Redirects are OFF on purpose: the 302 Location (IAM callback) is saved into `iam_callback`.",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "username",
+                  "value": "{{username}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{password}}"
+                },
+                {
+                  "key": "credentialId",
+                  "value": ""
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code !== 302) {",
+                  "  const t = pm.response.text();",
+                  "  const err = (t.match(/kc-feedback-text[^>]*>([^<]+)</) || t.match(/alert-error[^>]*>\\s*([^<]+)</) || [null, \"no redirect\"])[1];",
+                  "  throw new Error(\"Login failed (\" + pm.response.code + \"): \" + err.trim() + \". Check username/password in the environment, and re-run 0-dev-a (the login page expires).\");",
+                  "}",
+                  "pm.test(\"Credentials accepted (302 to IAM callback)\", () => pm.response.to.have.status(302));",
+                  "pm.environment.set(\"iam_callback\", pm.response.headers.get(\"Location\"));",
+                  "console.log(\"Redirected to IAM callback. Now send 0-dev-c.\");"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "followRedirects": false
           }
+        },
+        {
+          "name": "0-dev-c. Finish sign-in (get token + csrf)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{iam_callback}}",
+              "host": [
+                "{{iam_callback}}"
+              ]
+            },
+            "description": "Calls the IAM callback with redirects OFF; its Set-Cookie headers carry X-Access-Token and X-CSRF-Token, which the test script copies into `token` and `csrf`."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"IAM callback set the session cookies\", () => pm.expect([302, 307]).to.include(pm.response.code));",
+                  "const sc = pm.response.headers.all().filter(h => h.key.toLowerCase() === \"set-cookie\").map(h => h.value);",
+                  "function last(name) {",
+                  "  const vals = sc.filter(v => v.startsWith(name + \"=\")).map(v => v.split(\";\")[0].substring(name.length + 1).replace(/^\"|\"$/g, \"\")).filter(v => v);",
+                  "  return vals.length ? vals[vals.length - 1] : \"\";",
+                  "}",
+                  "const token = last(\"X-Access-Token\"), csrf = last(\"X-CSRF-Token\");",
+                  "if (!token || !csrf) { throw new Error(\"Cookies missing in the callback response. Re-run 0-dev-a, 0-dev-b, 0-dev-c in order (each run of a is a fresh login attempt).\"); }",
+                  "pm.environment.set(\"token\", token);",
+                  "pm.environment.set(\"csrf\", csrf);",
+                  "pm.environment.set(\"token_at\", String(Date.now()));",
+                  "try {",
+                  "  const claims = JSON.parse(atob(token.split(\".\")[1].replace(/-/g, \"+\").replace(/_/g, \"/\")));",
+                  "  const mins = Math.round((claims.exp * 1000 - Date.now()) / 60000);",
+                  "  pm.environment.set(\"token_expires_at\", String(claims.exp * 1000));",
+                  "  console.log(\"Logged in as \" + claims.preferred_username + \". Token valid for \" + mins + \" min; re-run the three login requests when a call returns G2P-AUT-401.\");",
+                  "} catch (e) { console.log(\"Token saved.\"); }"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          }
+        },
+        {
+          "name": "0-local. Get token (local Keycloak, admin/admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "url": {
+              "raw": "{{keycloak}}/realms/staff/protocol/openid-connect/token",
+              "host": [
+                "{{keycloak}}"
+              ],
+              "path": [
+                "realms",
+                "staff",
+                "protocol",
+                "openid-connect",
+                "token"
+              ]
+            },
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "password"
+                },
+                {
+                  "key": "client_id",
+                  "value": "iam-staff-portal"
+                },
+                {
+                  "key": "client_secret",
+                  "value": "dev-iam-staff-secret"
+                },
+                {
+                  "key": "username",
+                  "value": "admin"
+                },
+                {
+                  "key": "password",
+                  "value": "admin"
+                }
+              ]
+            },
+            "description": "LOCAL ONLY. Direct password grant on the local Keycloak. On dev this is not allowed (the staff-portal client is browser-only), use 0-dev-a/b/c instead."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "function setVar(k, v) { pm.collectionVariables.set(k, v); if (pm.environment.name) pm.environment.set(k, v); }",
+                  "const r = pm.response.json();",
+                  "const v = r.access_token;",
+                  "if (v) setVar('token', v);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "0-local-da. Get token as a DA (da.test, own record only)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "url": {
+              "raw": "{{keycloak}}/realms/staff/protocol/openid-connect/token",
+              "host": [
+                "{{keycloak}}"
+              ],
+              "path": [
+                "realms",
+                "staff",
+                "protocol",
+                "openid-connect",
+                "token"
+              ]
+            },
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "password"
+                },
+                {
+                  "key": "client_id",
+                  "value": "iam-staff-portal"
+                },
+                {
+                  "key": "client_secret",
+                  "value": "dev-iam-staff-secret"
+                },
+                {
+                  "key": "username",
+                  "value": "da.test"
+                },
+                {
+                  "key": "password",
+                  "value": "pass"
+                }
+              ]
+            },
+            "description": "LOCAL ONLY. Token of the test DA user da.test (role Data Editor, Keycloak attribute da_id = their DA-ID). With this token: 13 returns only that DA, 11/14 work only on it (other records: REG-ERR-012), 14 is refused on the identity section. Create the user first (see docs/rbac-registry-roles.md section 5; the local test script sets attribute da_id and the role)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "function setVar(k, v) { pm.collectionVariables.set(k, v); if (pm.environment.name) pm.environment.set(k, v); }",
+                  "const r = pm.response.json();",
+                  "const v = r.access_token;",
+                  "if (v) setVar('token', v);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "0-local-officer. Token as da.officer (enters DAs)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "url": {
+              "raw": "{{keycloak}}/realms/staff/protocol/openid-connect/token",
+              "host": [
+                "{{keycloak}}"
+              ],
+              "path": [
+                "realms",
+                "staff",
+                "protocol",
+                "openid-connect",
+                "token"
+              ]
+            },
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "password"
+                },
+                {
+                  "key": "client_id",
+                  "value": "iam-staff-portal"
+                },
+                {
+                  "key": "client_secret",
+                  "value": "dev-iam-staff-secret"
+                },
+                {
+                  "key": "username",
+                  "value": "da.officer"
+                },
+                {
+                  "key": "password",
+                  "value": "pass"
+                }
+              ]
+            },
+            "description": "LOCAL ONLY. Intake Officer + Data Editor: runs 1-5, S16, S18/S19. Cannot approve. Users come from docker/local-dev/keycloak-init.sh (password pass)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "function setVar(k, v) { pm.collectionVariables.set(k, v); if (pm.environment.name) pm.environment.set(k, v); }",
+                  "const r = pm.response.json();",
+                  "const v = r.access_token;",
+                  "if (v) setVar('token', v);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "0-local-validator. Token as da.validator (Stage 1)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "url": {
+              "raw": "{{keycloak}}/realms/staff/protocol/openid-connect/token",
+              "host": [
+                "{{keycloak}}"
+              ],
+              "path": [
+                "realms",
+                "staff",
+                "protocol",
+                "openid-connect",
+                "token"
+              ]
+            },
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "password"
+                },
+                {
+                  "key": "client_id",
+                  "value": "iam-staff-portal"
+                },
+                {
+                  "key": "client_secret",
+                  "value": "dev-iam-staff-secret"
+                },
+                {
+                  "key": "username",
+                  "value": "da.validator"
+                },
+                {
+                  "key": "password",
+                  "value": "pass"
+                }
+              ]
+            },
+            "description": "LOCAL ONLY. Intake Validator + Data Validator: sees the Stage 1 task (6/7), claims (9) and approves (10 / 16). Does not get the Stage 2 task. Users come from docker/local-dev/keycloak-init.sh (password pass)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "function setVar(k, v) { pm.collectionVariables.set(k, v); if (pm.environment.name) pm.environment.set(k, v); }",
+                  "const r = pm.response.json();",
+                  "const v = r.access_token;",
+                  "if (v) setVar('token', v);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "0-local-approver. Token as da.approver (Stage 2)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "url": {
+              "raw": "{{keycloak}}/realms/staff/protocol/openid-connect/token",
+              "host": [
+                "{{keycloak}}"
+              ],
+              "path": [
+                "realms",
+                "staff",
+                "protocol",
+                "openid-connect",
+                "token"
+              ]
+            },
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "password"
+                },
+                {
+                  "key": "client_id",
+                  "value": "iam-staff-portal"
+                },
+                {
+                  "key": "client_secret",
+                  "value": "dev-iam-staff-secret"
+                },
+                {
+                  "key": "username",
+                  "value": "da.approver"
+                },
+                {
+                  "key": "password",
+                  "value": "pass"
+                }
+              ]
+            },
+            "description": "LOCAL ONLY. Operations Administrator: approves Stage 2 (10b / 16b), can also do Stage 1. Users come from docker/local-dev/keycloak-init.sh (password pass)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "function setVar(k, v) { pm.collectionVariables.set(k, v); if (pm.environment.name) pm.environment.set(k, v); }",
+                  "const r = pm.response.json();",
+                  "const v = r.access_token;",
+                  "if (v) setVar('token', v);"
+                ]
+              }
+            }
+          ]
         }
       ]
     },
@@ -134,7 +536,7 @@
                 "value": "X-CSRF-Token={{csrf}}"
               }
             ],
-            "description": "Change foundational_id to an unused 12-digit number before each run.",
+            "description": "Change foundational_id to an unused 16-digit number before each run.",
             "url": {
               "raw": "{{staff_api}}/intake-form-data/save_intake_form_submission",
               "host": [
@@ -147,20 +549,33 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"request_header\": {\n    \"request_id\": \"{{$guid}}\",\n    \"request_timestamp\": \"{{$isoTimestamp}}\",\n    \"sender_app_mnemonic\": \"da-services\",\n    \"sender_app_url\": \"http://localhost\"\n  },\n  \"request_body\": {\n    \"request_payload\": {\n      \"submission_id\": null,\n      \"section_id\": \"da_identity_section_01\",\n      \"section_register_id\": \"6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3f90\",\n      \"form_id\": \"6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3f91\",\n      \"register_id\": \"6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3f90\",\n      \"section_payload\": [\n        {\n          \"edit_action\": \"ADD\",\n          \"internal_record_id\": \"\",\n          \"link_internal_record_id\": \"\",\n          \"prefix\": \"DR\",\n          \"first_name\": \"Selam\",\n          \"middle_name\": \"Tesfaye\",\n          \"last_name\": \"Gebru\",\n          \"foundational_id\": \"889065919900\",\n          \"gender\": \"FEMALE\",\n          \"marital_status\": \"MARRIED\",\n          \"birth_month_ec\": 4,\n          \"birth_year_ec\": 1987\n        }\n      ]\n    }\n  }\n}"
+              "raw": "{\n  \"request_header\": {\n    \"request_id\": \"{{$guid}}\",\n    \"request_timestamp\": \"{{$isoTimestamp}}\",\n    \"sender_app_mnemonic\": \"da-services\",\n    \"sender_app_url\": \"http://localhost\"\n  },\n  \"request_body\": {\n    \"request_payload\": {\n      \"submission_id\": null,\n      \"section_id\": \"da_identity_section_01\",\n      \"section_register_id\": \"6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3f90\",\n      \"form_id\": \"6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3f91\",\n      \"register_id\": \"6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3f90\",\n      \"section_payload\": [\n        {\n          \"edit_action\": \"ADD\",\n          \"internal_record_id\": \"\",\n          \"link_internal_record_id\": \"\",\n          \"prefix\": \"DR\",\n          \"first_name\": \"Selam\",\n          \"middle_name\": \"Tesfaye\",\n          \"last_name\": \"Gebru\",\n          \"foundational_id\": \"{{fayda_id}}\",\n          \"gender\": \"FEMALE\",\n          \"marital_status\": \"MARRIED\",\n          \"birth_month_ec\": 4,\n          \"birth_year_ec\": 1987\n        }\n      ]\n    }\n  }\n}"
             }
           },
           "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// fresh Fayda ID and phone for every run, so repeated runs do not collide with an existing DA",
+                  "const n = String(Math.floor(100000 + Math.random() * 900000));",
+                  "pm.collectionVariables.set('fayda_id', '931100' + n); pm.collectionVariables.set('mobile_number', '0913' + n);",
+                  "if (pm.environment.name) { pm.environment.set('fayda_id', '931100' + n); pm.environment.set('mobile_number', '0913' + n); }"
+                ]
+              }
+            },
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "function setVar(k, v) { pm.collectionVariables.set(k, v); if (pm.environment.name) pm.environment.set(k, v); }",
                   "const r = pm.response.json();",
                   "const v = r.response_body.response_payload && r.response_body.response_payload.submission_id;",
-                  "if (v) pm.collectionVariables.set('submission_id', v);",
+                  "if (v) setVar('submission_id', v);",
                   "const rec = (((r.response_body.response_payload || {}).section_payloads || [])[0] || {}).records || [];",
-                  "if (rec[0]) pm.collectionVariables.set('internal_record_id', rec[0].internal_record_id);"
+                  "if (rec[0]) setVar('internal_record_id', rec[0].internal_record_id);"
                 ]
               }
             }
@@ -201,7 +616,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"request_header\": {\n    \"request_id\": \"{{$guid}}\",\n    \"request_timestamp\": \"{{$isoTimestamp}}\",\n    \"sender_app_mnemonic\": \"da-services\",\n    \"sender_app_url\": \"http://localhost\"\n  },\n  \"request_body\": {\n    \"request_payload\": {\n      \"submission_id\": \"{{submission_id}}\",\n      \"section_id\": \"da_contact_section_04\",\n      \"section_register_id\": \"6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3f90\",\n      \"form_id\": \"6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3f91\",\n      \"register_id\": \"6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3f90\",\n      \"section_payload\": [\n        {\n          \"edit_action\": \"UPDATE\",\n          \"internal_record_id\": \"{{internal_record_id}}\",\n          \"link_internal_record_id\": \"\",\n          \"mobile_number\": \"0913919900\",\n          \"email\": \"selam.gebru@example.org\"\n        }\n      ]\n    }\n  }\n}"
+              "raw": "{\n  \"request_header\": {\n    \"request_id\": \"{{$guid}}\",\n    \"request_timestamp\": \"{{$isoTimestamp}}\",\n    \"sender_app_mnemonic\": \"da-services\",\n    \"sender_app_url\": \"http://localhost\"\n  },\n  \"request_body\": {\n    \"request_payload\": {\n      \"submission_id\": \"{{submission_id}}\",\n      \"section_id\": \"da_contact_section_04\",\n      \"section_register_id\": \"6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3f90\",\n      \"form_id\": \"6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3f91\",\n      \"register_id\": \"6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3f90\",\n      \"section_payload\": [\n        {\n          \"edit_action\": \"UPDATE\",\n          \"internal_record_id\": \"{{internal_record_id}}\",\n          \"link_internal_record_id\": \"\",\n          \"mobile_number\": \"{{mobile_number}}\",\n          \"email\": \"selam.gebru@example.org\"\n        }\n      ]\n    }\n  }\n}"
             }
           }
         },
@@ -366,9 +781,10 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "function setVar(k, v) { pm.collectionVariables.set(k, v); if (pm.environment.name) pm.environment.set(k, v); }",
                   "const r = pm.response.json();",
                   "const v = r.response_body.response_payload && r.response_body.response_payload.awe_request_id;",
-                  "if (v) pm.collectionVariables.set('awe_request_id', v);"
+                  "if (v) setVar('awe_request_id', v);"
                 ]
               }
             }
@@ -501,9 +917,10 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "function setVar(k, v) { pm.collectionVariables.set(k, v); if (pm.environment.name) pm.environment.set(k, v); }",
                   "const r = pm.response.json();",
                   "const v = (r.response_body.response_payload.data.items.find(t => t.status === 'open') || {}).id;",
-                  "if (v) pm.collectionVariables.set('task_id', v);"
+                  "if (v) setVar('task_id', v);"
                 ]
               }
             }
@@ -609,7 +1026,7 @@
                 "value": "X-CSRF-Token={{csrf}}"
               }
             ],
-            "description": "",
+            "description": "\n\nTwo-level approval: this is Stage 1 (`current_stage: 1`). After it succeeds, AWE opens a Stage 2 task. Run 7 (new task id) and 9 (claim) again, then 10b.",
             "url": {
               "raw": "{{staff_api}}/awe/submit_task_decision",
               "host": [
@@ -625,6 +1042,46 @@
               "raw": "{\n  \"request_header\": {\n    \"request_id\": \"{{$guid}}\",\n    \"request_timestamp\": \"{{$isoTimestamp}}\",\n    \"sender_app_mnemonic\": \"da-services\",\n    \"sender_app_url\": \"http://localhost\"\n  },\n  \"request_body\": {\n    \"request_payload\": {\n      \"task_id\": \"{{task_id}}\",\n      \"action\": \"approve\",\n      \"comment\": \"Checked against the Fayda card\",\n      \"artifact_id\": \"{{submission_id}}\",\n      \"artifact_type\": \"registry.intake_form\",\n      \"current_stage\": 1\n    }\n  }\n}"
             }
           }
+        },
+        {
+          "name": "10b. Approve stage 2 (run 7 and 9 again first)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "X-CSRF-Token",
+                "value": "{{csrf}}"
+              },
+              {
+                "key": "Cookie",
+                "value": "X-CSRF-Token={{csrf}}"
+              }
+            ],
+            "description": "Stage 2 of the two-level approval. Same body as the stage-1 request with `current_stage: 2` and the Stage 2 task id from 7. Approvers: Operations Administrator. Only after this stage does the submission reach the register.",
+            "url": {
+              "raw": "{{staff_api}}/awe/submit_task_decision",
+              "host": [
+                "{{staff_api}}"
+              ],
+              "path": [
+                "awe",
+                "submit_task_decision"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_header\": {\n    \"request_id\": \"{{$guid}}\",\n    \"request_timestamp\": \"{{$isoTimestamp}}\",\n    \"sender_app_mnemonic\": \"da-services\",\n    \"sender_app_url\": \"http://localhost\"\n  },\n  \"request_body\": {\n    \"request_payload\": {\n      \"task_id\": \"{{task_id}}\",\n      \"action\": \"approve\",\n      \"comment\": \"Checked against the Fayda card\",\n      \"artifact_id\": \"{{submission_id}}\",\n      \"artifact_type\": \"registry.intake_form\",\n      \"current_stage\": 2\n    }\n  }\n}"
+            }
+          },
+          "event": []
         },
         {
           "name": "11. DA record with DA-ID",
@@ -648,7 +1105,7 @@
                 "value": "X-CSRF-Token={{csrf}}"
               }
             ],
-            "description": "Wait 15-30 s after the approval; the DA-ID may show as TEMP-\u2026 for a few seconds.",
+            "description": "Wait 15-30 s after the approval; the DA-ID may show as TEMP-… for a few seconds.\n\nNote: approval is processed in the background. Wait about 10 seconds after request 10 (or 16) before sending this one, otherwise you get REGISTER_DATA_NOT_FOUND. The DA-ID appears in `functional_record_id` once assigned.",
             "url": {
               "raw": "{{staff_api}}/register-data/get_subject_record",
               "host": [
@@ -704,7 +1161,8 @@
             }
           }
         }
-      ]
+      ],
+      "description": "Two-level approval (standard, as in the farmer registry): Stage 1 then Stage 2, any one approver per stage. Order: 7 -> 9 -> 10 (stage 1) -> 7 -> 9 -> 10b (stage 2) -> wait ~10 s -> 11. Stage 1 approvers: Operations Administrator, Intake Validator (intake) / Data Validator (change request). Stage 2: Operations Administrator."
     },
     {
       "name": "Search and view",
@@ -745,6 +1203,84 @@
             "body": {
               "mode": "raw",
               "raw": "{\n  \"request_header\": {\n    \"request_id\": \"{{$guid}}\",\n    \"request_timestamp\": \"{{$isoTimestamp}}\",\n    \"sender_app_mnemonic\": \"da-services\",\n    \"sender_app_url\": \"http://localhost\"\n  },\n  \"request_body\": {\n    \"request_payload\": {\n      \"register_id\": \"6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3f90\"\n    },\n    \"pagination_request\": {\n      \"current_page\": 1,\n      \"page_size\": 20,\n      \"search_text\": \"\",\n      \"sort_by\": \"\",\n      \"filter_by\": \"\"\n    }\n  }\n}"
+            }
+          }
+        },
+        {
+          "name": "13b. List a Woreda's DAs (filter_by woreda_code)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "X-CSRF-Token",
+                "value": "{{csrf}}"
+              },
+              {
+                "key": "Cookie",
+                "value": "X-CSRF-Token={{csrf}}"
+              }
+            ],
+            "description": "filter_by is a JSON string. Use codes, not names (23 Woreda names and 790 Kebele names repeat). Also: zone_code, region_code (eq/in), geo_lowest_level_value_id (Kebele id). Unknown fields are ignored by the platform, not rejected.",
+            "url": {
+              "raw": "{{staff_api}}/register-data/search_in_a_register",
+              "host": [
+                "{{staff_api}}"
+              ],
+              "path": [
+                "register-data",
+                "search_in_a_register"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_header\": {\n    \"request_id\": \"{{$guid}}\",\n    \"request_timestamp\": \"{{$isoTimestamp}}\",\n    \"sender_app_mnemonic\": \"da-services\",\n    \"sender_app_url\": \"http://localhost\"\n  },\n  \"request_body\": {\n    \"request_payload\": {\n      \"register_id\": \"6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3f90\"\n    },\n    \"pagination_request\": {\n      \"current_page\": 1,\n      \"page_size\": 20,\n      \"search_text\": \"\",\n      \"sort_by\": \"\",\n      \"filter_by\": \"{\\\"woreda_code\\\": {\\\"eq\\\": \\\"ET010101\\\"}}\"\n    }\n  }\n}"
+            }
+          }
+        },
+        {
+          "name": "13c. DAs approved since a date (sync changes)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "X-CSRF-Token",
+                "value": "{{csrf}}"
+              },
+              {
+                "key": "Cookie",
+                "value": "X-CSRF-Token={{csrf}}"
+              }
+            ],
+            "description": "last_approved_at is compared by DAY (the platform drops the time part). Pass the date of the last sync and skip, on your side, the items whose last_approved_at you already have. Combine with woreda_code to sync one Woreda.",
+            "url": {
+              "raw": "{{staff_api}}/register-data/search_in_a_register",
+              "host": [
+                "{{staff_api}}"
+              ],
+              "path": [
+                "register-data",
+                "search_in_a_register"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_header\": {\n    \"request_id\": \"{{$guid}}\",\n    \"request_timestamp\": \"{{$isoTimestamp}}\",\n    \"sender_app_mnemonic\": \"da-services\",\n    \"sender_app_url\": \"http://localhost\"\n  },\n  \"request_body\": {\n    \"request_payload\": {\n      \"register_id\": \"6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3f90\"\n    },\n    \"pagination_request\": {\n      \"current_page\": 1,\n      \"page_size\": 20,\n      \"search_text\": \"\",\n      \"sort_by\": \"\",\n      \"filter_by\": \"{\\\"woreda_code\\\": {\\\"eq\\\": \\\"ET010101\\\"}, \\\"last_approved_at\\\": {\\\"gte\\\": \\\"2026-10-01\\\"}}\"\n    }\n  }\n}"
             }
           }
         }
@@ -797,11 +1333,12 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "function setVar(k, v) { pm.collectionVariables.set(k, v); if (pm.environment.name) pm.environment.set(k, v); }",
                   "const r = pm.response.json();",
                   "const v = r.response_body.response_payload && r.response_body.response_payload.change_request_id;",
-                  "if (v) pm.collectionVariables.set('change_request_id', v);",
+                  "if (v) setVar('change_request_id', v);",
                   "const p = r.response_body.response_payload || {};",
-                  "if (p.awe_request_id) pm.collectionVariables.set('awe_request_id', p.awe_request_id);"
+                  "if (p.awe_request_id) setVar('awe_request_id', p.awe_request_id);"
                 ]
               }
             }
@@ -829,7 +1366,7 @@
                 "value": "X-CSRF-Token={{csrf}}"
               }
             ],
-            "description": "",
+            "description": "\n\nNote: approval is processed in the background. Wait about 10 seconds after request 10 (or 16) before sending this one, otherwise you get REGISTER_DATA_NOT_FOUND. The DA-ID appears in `functional_record_id` once assigned.",
             "url": {
               "raw": "{{staff_api}}/change-requests/get_change_request",
               "host": [
@@ -868,7 +1405,7 @@
                 "value": "X-CSRF-Token={{csrf}}"
               }
             ],
-            "description": "",
+            "description": "\n\nTwo-level approval: this is Stage 1 (`current_stage: 1`). After it succeeds, AWE opens a Stage 2 task. Run 7 (new task id) and 9 (claim) again, then 16b.",
             "url": {
               "raw": "{{staff_api}}/awe/submit_task_decision",
               "host": [
@@ -884,8 +1421,259 @@
               "raw": "{\n  \"request_header\": {\n    \"request_id\": \"{{$guid}}\",\n    \"request_timestamp\": \"{{$isoTimestamp}}\",\n    \"sender_app_mnemonic\": \"da-services\",\n    \"sender_app_url\": \"http://localhost\"\n  },\n  \"request_body\": {\n    \"request_payload\": {\n      \"task_id\": \"{{task_id}}\",\n      \"action\": \"approve\",\n      \"comment\": \"Phone confirmed with the DA\",\n      \"artifact_id\": \"{{change_request_id}}\",\n      \"artifact_type\": \"registry.change_request\",\n      \"current_stage\": 1\n    }\n  }\n}"
             }
           }
+        },
+        {
+          "name": "16b. Decide stage 2 of the change request (7 and 9 again first)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "X-CSRF-Token",
+                "value": "{{csrf}}"
+              },
+              {
+                "key": "Cookie",
+                "value": "X-CSRF-Token={{csrf}}"
+              }
+            ],
+            "description": "Stage 2 of the two-level approval. Same body as the stage-1 request with `current_stage: 2` and the Stage 2 task id from 7. Approvers: Operations Administrator. Only after this stage does the change request reach the register.",
+            "url": {
+              "raw": "{{staff_api}}/awe/submit_task_decision",
+              "host": [
+                "{{staff_api}}"
+              ],
+              "path": [
+                "awe",
+                "submit_task_decision"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_header\": {\n    \"request_id\": \"{{$guid}}\",\n    \"request_timestamp\": \"{{$isoTimestamp}}\",\n    \"sender_app_mnemonic\": \"da-services\",\n    \"sender_app_url\": \"http://localhost\"\n  },\n  \"request_body\": {\n    \"request_payload\": {\n      \"task_id\": \"{{task_id}}\",\n      \"action\": \"approve\",\n      \"comment\": \"Phone confirmed with the DA\",\n      \"artifact_id\": \"{{change_request_id}}\",\n      \"artifact_type\": \"registry.change_request\",\n      \"current_stage\": 2\n    }\n  }\n}"
+            }
+          },
+          "event": []
         }
       ]
+    },
+    {
+      "name": "Staff API: bulk import (ingest one DA, or upload a file)",
+      "item": [
+        {
+          "name": "S16. Register a DA through the staff API (ingest-data, same body as 17)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "X-CSRF-Token",
+                "value": "{{csrf}}"
+              },
+              {
+                "key": "Cookie",
+                "value": "X-CSRF-Token={{csrf}}"
+              }
+            ],
+            "url": {
+              "raw": "{{staff_api}}/input-mechanism-data/ingest-data?data_model=DA_SERVICES&register_id=6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3f90&intake_form_id=6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3f91",
+              "host": [
+                "{{staff_api}}"
+              ],
+              "path": [
+                "input-mechanism-data",
+                "ingest-data"
+              ],
+              "query": [
+                {
+                  "key": "data_model",
+                  "value": "DA_SERVICES"
+                },
+                {
+                  "key": "register_id",
+                  "value": "6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3f90"
+                },
+                {
+                  "key": "intake_form_id",
+                  "value": "6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3f91"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"header\": {\n    \"version\": \"1.0.0\",\n    \"message_id\": \"{{$guid}}\",\n    \"message_ts\": \"{{$isoTimestamp}}\",\n    \"sender_id\": \"da-services\",\n    \"data_model\": \"DA_SERVICES\"\n  },\n  \"signature\": \"local-dev\",\n  \"message\": {\n    \"reference_id\": \"FR-DA-0002\",\n    \"source\": \"CSV_IMPORT\",\n    \"approved_by\": \"Admin\",\n    \"da\": {\n      \"first_name\": \"Frehiwot\",\n      \"father_name\": \"Assefa\",\n      \"grandfather_name\": \"Bekele\",\n      \"fayda_id\": \"8045123456980001\",\n      \"gender\": \"Female\",\n      \"phone_number\": \"0911556677\",\n      \"education_level\": \"Masters\",\n      \"specialisation\": \"Agronomy\",\n      \"position\": \"Senior DA\",\n      \"kebele_id\": \"kebele-ET010101101001\"\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "The staff API's version of the partner push (17): same raw body (header + message), but with the signed-in user's token and CSRF instead of a partner signature. Permission intakeSubmission:edit (role Intake Officer). Response: response_payload.correlation_id. The DA is validated and sent to the two-level approval like a form submission (tasks in 6/7, approve with 10 and 10b); the DA-ID comes after the stage-2 approval. This is the phase-1 path for DA Services bulk import: one request per DA. On dev this answers REGP-ERR-001 PARTNER_NOT_REGISTERED until DA Services (header.sender_id da-services) is registered in Partner Management by DevOps; the form path (Single DA form folder) works on dev without it."
+          },
+          "response": []
+        },
+        {
+          "name": "S17. Outcome of an ingest (search_in_ingestion_data by reference_id)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "X-CSRF-Token",
+                "value": "{{csrf}}"
+              },
+              {
+                "key": "Cookie",
+                "value": "X-CSRF-Token={{csrf}}"
+              }
+            ],
+            "url": {
+              "raw": "{{staff_api}}/ingestion-data/search_in_ingestion_data",
+              "host": [
+                "{{staff_api}}"
+              ],
+              "path": [
+                "ingestion-data",
+                "search_in_ingestion_data"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_header\": {\n    \"request_id\": \"{{$guid}}\",\n    \"request_timestamp\": \"{{$isoTimestamp}}\",\n    \"sender_app_mnemonic\": \"da-services\",\n    \"sender_app_url\": \"http://localhost\"\n  },\n  \"request_body\": {\n    \"request_payload\": {},\n    \"pagination_request\": {\n      \"current_page\": 1,\n      \"page_size\": 10,\n      \"search_text\": \"FR-DA-0002\",\n      \"sort_by\": \"\",\n      \"filter_by\": \"\"\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Platform view of an ingest: search_text matches anywhere in the raw payload, so the reference_id finds it. Returns the pipeline state (classification_status PROCESSED / FAILED, classification_latest_error_code, intake_form_submission_id, ingest_correlation_id), not the DA-ID. Permission incomingMessage:view (role Integration Manager). For DA-ID and a plain reason use 18 (/partner/da/status) on the partner API, or S13 with the submission's record."
+          },
+          "response": []
+        },
+        {
+          "name": "S18. Upload an import file (Excel / CSV)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "X-CSRF-Token",
+                "value": "{{csrf}}"
+              },
+              {
+                "key": "Cookie",
+                "value": "X-CSRF-Token={{csrf}}"
+              }
+            ],
+            "url": {
+              "raw": "{{staff_api}}/documents/upload_documents",
+              "host": [
+                "{{staff_api}}"
+              ],
+              "path": [
+                "documents",
+                "upload_documents"
+              ]
+            },
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "bucket",
+                  "value": "import-files",
+                  "type": "text"
+                },
+                {
+                  "key": "documents",
+                  "type": "file",
+                  "src": "",
+                  "description": "Pick the Excel file, e.g. DA_Demo_Import.xlsx (columns as in docs/import template)"
+                }
+              ]
+            },
+            "description": "Uploads the file to the import-files bucket. Pick the file in Body > form-data > documents. The test script saves response_payload.documents[0].document_id into `document_id` for S19."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "function setVar(k, v) { pm.collectionVariables.set(k, v); if (pm.environment.name) pm.environment.set(k, v); }",
+                  "const r = pm.response.json(); const d = ((r.response_body || {}).response_payload || {}).documents || [];",
+                  "if (d[0]) { setVar('document_id', d[0].document_id); console.log('document_id ' + d[0].document_id); }"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "S19. Start the file import (enqueue_import_file)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "X-CSRF-Token",
+                "value": "{{csrf}}"
+              },
+              {
+                "key": "Cookie",
+                "value": "X-CSRF-Token={{csrf}}"
+              }
+            ],
+            "url": {
+              "raw": "{{staff_api}}/input-mechanism-data/enqueue_import_file",
+              "host": [
+                "{{staff_api}}"
+              ],
+              "path": [
+                "input-mechanism-data",
+                "enqueue_import_file"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_header\": {\n    \"request_id\": \"{{$guid}}\",\n    \"request_timestamp\": \"{{$isoTimestamp}}\",\n    \"sender_app_mnemonic\": \"da-services\",\n    \"sender_app_url\": \"http://localhost\"\n  },\n  \"request_body\": {\n    \"request_payload\": {\n      \"document_id\": \"{{document_id}}\",\n      \"data_model_id\": \"6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3fb2\",\n      \"register_id\": \"6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3f90\",\n      \"intake_form_id\": \"6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3f91\"\n    }\n  }\n}"
+            },
+            "description": "Queues the uploaded file (data_model IMPORT_FILE). The worker turns each row into a submission and opens its approval request with the registry's service token. Then: 5 (list submissions) to see the rows, 4 (get submission) for awe_request_id, 7 -> 9 -> 10, 7 -> 9 -> 10b to approve, 11 for the DA-ID. Permission intakeSubmission:edit."
+          },
+          "response": []
+        }
+      ],
+      "description": "Two ways to bring DAs in bulk through the staff API. Either path sends every DA through the two-level approval (folder Approval): nothing is auto-approved.\n\nA) One DA per request: S16 (ingest-data), outcome with S17.\nB) A whole Excel / CSV file: S18 upload, then S19 enqueue; rows appear in request 5 (list submissions, submission_source PARTNER) within 1-2 minutes, each with a stage-1 task in 6/7. A row with an unknown Kebele or a duplicate Fayda ID is rejected with the reason (S17, or 18b on the partner API)."
     },
     {
       "name": "Partner API and DCI",
@@ -913,7 +1701,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"header\": {\n    \"version\": \"1.0.0\",\n    \"message_id\": \"{{$guid}}\",\n    \"message_ts\": \"{{$isoTimestamp}}\",\n    \"sender_id\": \"da-services\",\n    \"data_model\": \"DA_SERVICES\"\n  },\n  \"signature\": \"local-dev\",\n  \"message\": {\n    \"reference_id\": \"FR-DA-0001\",\n    \"source\": \"CSV_IMPORT\",\n    \"approved_by\": \"Admin\",\n    \"da\": {\n      \"first_name\": \"Frehiwot\",\n      \"father_name\": \"Assefa\",\n      \"grandfather_name\": \"Bekele\",\n      \"fayda_id\": \"804512345699\",\n      \"gender\": \"Female\",\n      \"phone_number\": \"0911556677\",\n      \"education_level\": \"Masters\",\n      \"specialisation\": \"Agronomy\",\n      \"position\": \"Senior DA\",\n      \"kebele_id\": \"kebele-ET010101101001\"\n    }\n  }\n}"
+              "raw": "{\n  \"header\": {\n    \"version\": \"1.0.0\",\n    \"message_id\": \"{{$guid}}\",\n    \"message_ts\": \"{{$isoTimestamp}}\",\n    \"sender_id\": \"da-services\",\n    \"data_model\": \"DA_SERVICES\"\n  },\n  \"signature\": \"local-dev\",\n  \"message\": {\n    \"reference_id\": \"FR-DA-0001\",\n    \"source\": \"CSV_IMPORT\",\n    \"approved_by\": \"Admin\",\n    \"da\": {\n      \"first_name\": \"Frehiwot\",\n      \"father_name\": \"Assefa\",\n      \"grandfather_name\": \"Bekele\",\n      \"fayda_id\": \"8045123456990001\",\n      \"gender\": \"Female\",\n      \"phone_number\": \"0911556677\",\n      \"education_level\": \"Masters\",\n      \"specialisation\": \"Agronomy\",\n      \"position\": \"Senior DA\",\n      \"kebele_id\": \"kebele-ET010101101001\"\n    }\n  }\n}"
             }
           }
         },
@@ -942,6 +1730,54 @@
           }
         },
         {
+          "name": "18b. Exceptions list (stuck DAs, newest first)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{partner_api}}/partner/da/exceptions?page_number=1&page_size=20",
+              "host": [
+                "{{partner_api}}"
+              ],
+              "path": [
+                "partner",
+                "da",
+                "exceptions"
+              ],
+              "query": [
+                {
+                  "key": "page_number",
+                  "value": "1"
+                },
+                {
+                  "key": "page_size",
+                  "value": "20"
+                },
+                {
+                  "key": "source",
+                  "value": "da_services",
+                  "disabled": true,
+                  "description": "da_services | file_import"
+                },
+                {
+                  "key": "exception_type",
+                  "value": "DUPLICATE_IDENTITY",
+                  "disabled": true,
+                  "description": "DUPLICATE_IDENTITY | INVALID_KEBELE | MISSING_MANDATORY_FIELD | INVALID_FIELD | REJECTED | FAILED_SYNC"
+                },
+                {
+                  "key": "state",
+                  "value": "EXCEPTION",
+                  "disabled": true,
+                  "description": "EXCEPTION | FAILED_RETRY"
+                }
+              ]
+            },
+            "description": "Every DA that is stuck (DA Services pushes and file-import rows), with reason and exception_type. Only the latest attempt per record. correlation_id works with 18."
+          },
+          "response": []
+        },
+        {
           "name": "19. DCI search by DA-ID",
           "request": {
             "method": "POST",
@@ -953,7 +1789,7 @@
             ],
             "description": "",
             "url": {
-              "raw": "{{partner_api}}/dci/registry/sync/search",
+              "raw": "{{partner_api}}/dci/sync/search",
               "host": [
                 "{{partner_api}}"
               ],
@@ -966,7 +1802,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"signature\": \"local-dev\",\n  \"header\": {\n    \"version\": \"1.0.0\",\n    \"message_id\": \"{{$guid}}\",\n    \"message_ts\": \"{{$isoTimestamp}}\",\n    \"action\": \"search\",\n    \"sender_id\": \"da-services\",\n    \"receiver_id\": \"da-registry\"\n  },\n  \"message\": {\n    \"transaction_id\": \"{{$guid}}\",\n    \"search_request\": [\n      {\n        \"reference_id\": \"q1\",\n        \"timestamp\": \"{{$isoTimestamp}}\",\n        \"locale\": \"eng\",\n        \"search_criteria\": {\n          \"version\": \"1.0.0\",\n          \"reg_type\": \"DA\",\n          \"reg_record_type\": \"DA\",\n          \"query_type\": \"expression\",\n          \"query\": {\n            \"type\": \"expression\",\n            \"value\": {\n              \"expression\": {\n                \"query\": {\n                  \"search_text\": {\n                    \"$eq\": \"DA-3500000001\"\n                  }\n                }\n              }\n            }\n          }\n        }\n      }\n    ]\n  }\n}"
+              "raw": "{\n  \"signature\": \"local-dev\",\n  \"header\": {\n    \"version\": \"1.0.0\",\n    \"message_id\": \"{{$guid}}\",\n    \"message_ts\": \"{{$isoTimestamp}}\",\n    \"action\": \"search\",\n    \"sender_id\": \"da-services\",\n    \"receiver_id\": \"da-registry\"\n  },\n  \"message\": {\n    \"transaction_id\": \"{{$guid}}\",\n    \"search_request\": [\n      {\n        \"reference_id\": \"q1\",\n        \"timestamp\": \"{{$isoTimestamp}}\",\n        \"locale\": \"eng\",\n        \"search_criteria\": {\n          \"version\": \"1.0.0\",\n          \"reg_type\": \"DA\",\n          \"reg_record_type\": \"DA\",\n          \"query_type\": \"expression\",\n          \"query\": {\n            \"type\": \"expression\",\n            \"value\": {\n              \"expression\": {\n                \"query\": {\n                  \"search_text\": {\n                    \"$eq\": \"DA-3700000001\"\n                  }\n                }\n              }\n            }\n          }\n        }\n      }\n    ]\n  }\n}"
             }
           }
         },
@@ -982,7 +1818,7 @@
             ],
             "description": "",
             "url": {
-              "raw": "{{partner_api}}/dci/registry/sync/search",
+              "raw": "{{partner_api}}/dci/sync/search",
               "host": [
                 "{{partner_api}}"
               ],
@@ -995,12 +1831,12 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"signature\": \"local-dev\",\n  \"header\": {\n    \"version\": \"1.0.0\",\n    \"message_id\": \"{{$guid}}\",\n    \"message_ts\": \"{{$isoTimestamp}}\",\n    \"action\": \"search\",\n    \"sender_id\": \"da-services\",\n    \"receiver_id\": \"da-registry\"\n  },\n  \"message\": {\n    \"transaction_id\": \"{{$guid}}\",\n    \"search_request\": [\n      {\n        \"reference_id\": \"q1\",\n        \"timestamp\": \"{{$isoTimestamp}}\",\n        \"locale\": \"eng\",\n        \"search_criteria\": {\n          \"version\": \"1.0.0\",\n          \"reg_type\": \"DA\",\n          \"reg_record_type\": \"DA\",\n          \"query_type\": \"expression\",\n          \"query\": {\n            \"type\": \"expression\",\n            \"value\": {\n              \"expression\": {\n                \"query\": {\n                  \"search_text\": {\n                    \"$eq\": \"783433844718\"\n                  }\n                }\n              }\n            }\n          }\n        }\n      }\n    ]\n  }\n}"
+              "raw": "{\n  \"signature\": \"local-dev\",\n  \"header\": {\n    \"version\": \"1.0.0\",\n    \"message_id\": \"{{$guid}}\",\n    \"message_ts\": \"{{$isoTimestamp}}\",\n    \"action\": \"search\",\n    \"sender_id\": \"da-services\",\n    \"receiver_id\": \"da-registry\"\n  },\n  \"message\": {\n    \"transaction_id\": \"{{$guid}}\",\n    \"search_request\": [\n      {\n        \"reference_id\": \"q1\",\n        \"timestamp\": \"{{$isoTimestamp}}\",\n        \"locale\": \"eng\",\n        \"search_criteria\": {\n          \"version\": \"1.0.0\",\n          \"reg_type\": \"DA\",\n          \"reg_record_type\": \"DA\",\n          \"query_type\": \"expression\",\n          \"query\": {\n            \"type\": \"expression\",\n            \"value\": {\n              \"expression\": {\n                \"query\": {\n                  \"search_text\": {\n                    \"$eq\": \"9311502628318720\"\n                  }\n                }\n              }\n            }\n          }\n        }\n      }\n    ]\n  }\n}"
             }
           }
         },
         {
-          "name": "21. DCI search by Woreda (paged)",
+          "name": "21. DCI search by Woreda code (paged)",
           "request": {
             "method": "POST",
             "header": [
@@ -1011,7 +1847,7 @@
             ],
             "description": "",
             "url": {
-              "raw": "{{partner_api}}/dci/registry/sync/search",
+              "raw": "{{partner_api}}/dci/sync/search",
               "host": [
                 "{{partner_api}}"
               ],
@@ -1024,7 +1860,94 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"signature\": \"local-dev\",\n  \"header\": {\n    \"version\": \"1.0.0\",\n    \"message_id\": \"{{$guid}}\",\n    \"message_ts\": \"{{$isoTimestamp}}\",\n    \"action\": \"search\",\n    \"sender_id\": \"da-services\",\n    \"receiver_id\": \"da-registry\"\n  },\n  \"message\": {\n    \"transaction_id\": \"{{$guid}}\",\n    \"search_request\": [\n      {\n        \"reference_id\": \"q1\",\n        \"timestamp\": \"{{$isoTimestamp}}\",\n        \"locale\": \"eng\",\n        \"search_criteria\": {\n          \"version\": \"1.0.0\",\n          \"reg_type\": \"DA\",\n          \"reg_record_type\": \"DA\",\n          \"query_type\": \"expression\",\n          \"query\": {\n            \"type\": \"expression\",\n            \"value\": {\n              \"expression\": {\n                \"query\": {\n                  \"woreda_name\": {\n                    \"$eq\": \"Tahtay Adiyabo\"\n                  }\n                }\n              }\n            }\n          },\n          \"pagination\": {\n            \"page_size\": 2,\n            \"page_number\": 1\n          }\n        }\n      }\n    ]\n  }\n}"
+              "raw": "{\n  \"signature\": \"local-dev\",\n  \"header\": {\n    \"version\": \"1.0.0\",\n    \"message_id\": \"{{$guid}}\",\n    \"message_ts\": \"{{$isoTimestamp}}\",\n    \"action\": \"search\",\n    \"sender_id\": \"da-services\",\n    \"receiver_id\": \"da-registry\"\n  },\n  \"message\": {\n    \"transaction_id\": \"{{$guid}}\",\n    \"search_request\": [\n      {\n        \"reference_id\": \"q1\",\n        \"timestamp\": \"{{$isoTimestamp}}\",\n        \"locale\": \"eng\",\n        \"search_criteria\": {\n          \"version\": \"1.0.0\",\n          \"reg_type\": \"DA\",\n          \"reg_record_type\": \"DA\",\n          \"query_type\": \"expression\",\n          \"query\": {\n            \"type\": \"expression\",\n            \"value\": {\n              \"expression\": {\n                \"query\": {\n                  \"woreda_code\": {\n                    \"$eq\": \"ET010101\"\n                  }\n                }\n              }\n            }\n          },\n          \"pagination\": {\n            \"page_size\": 20,\n            \"page_number\": 1\n          }\n        }\n      }\n    ]\n  }\n}"
+            }
+          }
+        },
+        {
+          "name": "21b. DCI search by Region code",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "Also zone_code (e.g. ET0403). Codes are Master Data P-codes; always filter by code, names repeat.",
+            "url": {
+              "raw": "{{partner_api}}/dci/sync/search",
+              "host": [
+                "{{partner_api}}"
+              ],
+              "path": [
+                "dci",
+                "registry",
+                "sync",
+                "search"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"signature\": \"local-dev\",\n  \"header\": {\n    \"version\": \"1.0.0\",\n    \"message_id\": \"{{$guid}}\",\n    \"message_ts\": \"{{$isoTimestamp}}\",\n    \"action\": \"search\",\n    \"sender_id\": \"da-services\",\n    \"receiver_id\": \"da-registry\"\n  },\n  \"message\": {\n    \"transaction_id\": \"{{$guid}}\",\n    \"search_request\": [\n      {\n        \"reference_id\": \"q1\",\n        \"timestamp\": \"{{$isoTimestamp}}\",\n        \"locale\": \"eng\",\n        \"search_criteria\": {\n          \"version\": \"1.0.0\",\n          \"reg_type\": \"DA\",\n          \"reg_record_type\": \"DA\",\n          \"query_type\": \"expression\",\n          \"query\": {\n            \"type\": \"expression\",\n            \"value\": {\n              \"expression\": {\n                \"query\": {\n                  \"region_code\": {\n                    \"$eq\": \"ET04\"\n                  }\n                }\n              }\n            }\n          },\n          \"pagination\": {\n            \"page_size\": 20,\n            \"page_number\": 1\n          }\n        }\n      }\n    ]\n  }\n}"
+            }
+          }
+        },
+        {
+          "name": "21c. DCI search: changed since (last_approved_at)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "DAs registered or changed (approved) after the given time. Use for incremental sync: run with the time of the last run.",
+            "url": {
+              "raw": "{{partner_api}}/dci/sync/search",
+              "host": [
+                "{{partner_api}}"
+              ],
+              "path": [
+                "dci",
+                "registry",
+                "sync",
+                "search"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"signature\": \"local-dev\",\n  \"header\": {\n    \"version\": \"1.0.0\",\n    \"message_id\": \"{{$guid}}\",\n    \"message_ts\": \"{{$isoTimestamp}}\",\n    \"action\": \"search\",\n    \"sender_id\": \"da-services\",\n    \"receiver_id\": \"da-registry\"\n  },\n  \"message\": {\n    \"transaction_id\": \"{{$guid}}\",\n    \"search_request\": [\n      {\n        \"reference_id\": \"q1\",\n        \"timestamp\": \"{{$isoTimestamp}}\",\n        \"locale\": \"eng\",\n        \"search_criteria\": {\n          \"version\": \"1.0.0\",\n          \"reg_type\": \"DA\",\n          \"reg_record_type\": \"DA\",\n          \"query_type\": \"expression\",\n          \"query\": {\n            \"type\": \"expression\",\n            \"value\": {\n              \"expression\": {\n                \"query\": {\n                  \"last_approved_at\": {\n                    \"$gt\": \"2026-10-20T00:00:00\"\n                  }\n                }\n              }\n            }\n          },\n          \"pagination\": {\n            \"page_size\": 20,\n            \"page_number\": 1\n          }\n        }\n      }\n    ]\n  }\n}"
+            }
+          }
+        },
+        {
+          "name": "21d. DCI search: combined filters (get_da_list)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "Several filters in one query are combined with AND. This is the DARegistryClient.get_da_list() mapping: woreda->woreda_code, kebele->geo_lowest_level_value_id, education_tier->education_level, active_status->record_status, search->search_text. An empty query is rejected: send record_status ACTIVE to list all.",
+            "url": {
+              "raw": "{{partner_api}}/dci/sync/search",
+              "host": [
+                "{{partner_api}}"
+              ],
+              "path": [
+                "dci",
+                "registry",
+                "sync",
+                "search"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"signature\": \"local-dev\",\n  \"header\": {\n    \"version\": \"1.0.0\",\n    \"message_id\": \"{{$guid}}\",\n    \"message_ts\": \"{{$isoTimestamp}}\",\n    \"action\": \"search\",\n    \"sender_id\": \"da-services\",\n    \"receiver_id\": \"da-registry\"\n  },\n  \"message\": {\n    \"transaction_id\": \"{{$guid}}\",\n    \"search_request\": [\n      {\n        \"reference_id\": \"q1\",\n        \"timestamp\": \"{{$isoTimestamp}}\",\n        \"locale\": \"eng\",\n        \"search_criteria\": {\n          \"version\": \"1.0.0\",\n          \"reg_type\": \"DA\",\n          \"reg_record_type\": \"DA\",\n          \"query_type\": \"expression\",\n          \"query\": {\n            \"type\": \"expression\",\n            \"value\": {\n              \"expression\": {\n                \"query\": {\n                  \"woreda_code\": {\n                    \"$eq\": \"ET010101\"\n                  },\n                  \"education_level\": {\n                    \"$eq\": \"DIPLOMA\"\n                  },\n                  \"record_status\": {\n                    \"$eq\": \"ACTIVE\"\n                  }\n                }\n              }\n            }\n          },\n          \"pagination\": {\n            \"page_size\": 20,\n            \"page_number\": 1\n          }\n        }\n      }\n    ]\n  }\n}"
             }
           }
         }
@@ -1110,6 +2033,45 @@
               "raw": "{\n  \"request_header\": {\n    \"request_id\": \"{{$guid}}\",\n    \"request_timestamp\": \"{{$isoTimestamp}}\",\n    \"sender_app_mnemonic\": \"da-services\",\n    \"sender_app_url\": \"http://localhost\"\n  },\n  \"request_body\": {\n    \"request_payload\": {\n      \"level_id\": \"level-region\",\n      \"parent_level_value_id\": \"\"\n    },\n    \"pagination_request\": {\n      \"current_page\": 1,\n      \"page_size\": 20,\n      \"search_text\": \"\",\n      \"sort_by\": \"\",\n      \"filter_by\": \"\"\n    }\n  }\n}"
             }
           }
+        },
+        {
+          "name": "24. Code list values (dropdowns: specialisation, position, qualification, prefix, gender, marital status, source)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "X-CSRF-Token",
+                "value": "{{csrf}}"
+              },
+              {
+                "key": "Cookie",
+                "value": "X-CSRF-Token={{csrf}}"
+              }
+            ],
+            "description": "Every DA dropdown reads its values from Master Data (the openg2p-data pack ETH-OAN). Same token as the staff API. attribute_id: DA_SPECIALISATION, DA_POSITION, DA_EDUCATION_LEVEL (qualification), DA_SOURCE, PREFIX, GENDER, MARITAL_STATUS. Save value_id on the DA (education_level, specialisation, position, prefix, gender, marital_status); show value_display. Do not hardcode the lists.",
+            "url": {
+              "raw": "{{master_data}}/attributes/get_attribute_values",
+              "host": [
+                "{{master_data}}"
+              ],
+              "path": [
+                "attributes",
+                "get_attribute_values"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_header\": {\n    \"request_id\": \"{{$guid}}\",\n    \"request_timestamp\": \"{{$isoTimestamp}}\",\n    \"sender_app_mnemonic\": \"da-services\",\n    \"sender_app_url\": \"http://localhost\"\n  },\n  \"request_body\": {\n    \"request_payload\": {\n      \"attribute_id\": \"DA_SPECIALISATION\"\n    },\n    \"pagination_request\": {\n      \"current_page\": 1,\n      \"page_size\": 500,\n      \"search_text\": \"\",\n      \"sort_by\": \"\",\n      \"filter_by\": \"\"\n    }\n  }\n}"
+            }
+          }
         }
       ]
     }
@@ -1158,6 +2120,30 @@
     {
       "key": "change_request_id",
       "value": ""
+    },
+    {
+      "key": "fayda_id",
+      "value": ""
+    },
+    {
+      "key": "mobile_number",
+      "value": ""
+    },
+    {
+      "key": "document_id",
+      "value": ""
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "const exp = Number(pm.environment.get('token_expires_at') || 0);",
+          "if (exp && Date.now() > exp && !pm.info.requestName.startsWith('0-')) { console.warn('Token expired. Run folder 0. Login again (0-dev-a, b, c).'); }"
+        ]
+      }
     }
   ]
 }

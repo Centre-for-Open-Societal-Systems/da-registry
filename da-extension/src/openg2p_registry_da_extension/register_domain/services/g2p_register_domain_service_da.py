@@ -6,18 +6,17 @@ from openg2p_registry_core.services import G2PRegisterDomainService
 from .domain_validation_utils import as_int, parse_date, validation_error
 from .ethiopian_calendar import gregorian_to_ethiopic
 from .fayda_uniqueness import duplicate_message, find_fayda_owner
+from .required_fields import DA_REGISTER_ID, load_required_fields, missing_labels
 from ...geo_codes import geo_codes
 from .validation_rules import (
     EMAIL_PATTERN,
-    FAYDA_FIN_PATTERN,
-    MIN_AGE_YEARS,
+    FAYDA_FAN_PATTERN,
     NAME_FIELD_LABELS,
     NAME_FIELDS,
     NAME_MAX_LENGTH,
     NAME_PATTERN,
     PHONE_FIELD_LABELS,
     PHONE_PATTERN,
-    REQUIRED_FIELDS,
     is_interactive,
     matches,
 )
@@ -34,15 +33,16 @@ class G2PRegisterDomainServiceDA(G2PRegisterDomainService):
     """
 
     async def validate_domain_attributes(self, records: list[dict]):
+        required = await load_required_fields(DA_REGISTER_ID) if records else {}
         for record in records:
             self._normalise_source(record)
             self._validate_names(record)
-            self._validate_fayda_fin(record)
+            self._validate_fayda_fan(record)
             self._validate_phones(record)
             self._validate_email(record)
             self._validate_birth_ec(record)
             self._validate_joined_date(record)
-            self._validate_required(record)
+            self._validate_required(record, required)
             await self._check_fayda_unique(record)
             await self._sync_flattened_geo_names(record)
 
@@ -75,7 +75,7 @@ class G2PRegisterDomainServiceDA(G2PRegisterDomainService):
             record[field] = text
 
     @staticmethod
-    def _validate_fayda_fin(record: dict) -> None:
+    def _validate_fayda_fan(record: dict) -> None:
         if "foundational_id" not in record:
             return
         value = record.get("foundational_id")
@@ -83,8 +83,8 @@ class G2PRegisterDomainServiceDA(G2PRegisterDomainService):
         if not text:
             record["foundational_id"] = None
             return
-        if not matches(FAYDA_FIN_PATTERN, text):
-            validation_error("Fayda ID (FIN) must be exactly 12 digits")
+        if not matches(FAYDA_FAN_PATTERN, text):
+            validation_error("Fayda ID (FAN) must be exactly 16 digits")
         record["foundational_id"] = text
 
     @staticmethod
@@ -116,8 +116,9 @@ class G2PRegisterDomainServiceDA(G2PRegisterDomainService):
 
     @staticmethod
     def _validate_birth_ec(record: dict) -> None:
-        """Month / Year of Birth in the Ethiopian calendar; the DA must be at
-        least MIN_AGE_YEARS old."""
+        """Month / Year of Birth in the Ethiopian calendar: a real month, a
+        4-digit year, not in the future and not more than 100 years back. No
+        minimum age: the FSD sets none (decision of 28 Oct 2026)."""
         if "birth_month_ec" not in record and "birth_year_ec" not in record:
             return
         month = as_int(record.get("birth_month_ec")) if "birth_month_ec" in record else None
@@ -137,13 +138,10 @@ class G2PRegisterDomainServiceDA(G2PRegisterDomainService):
         today_y, today_m, _ = gregorian_to_ethiopic(date.today())
         if year < today_y - 100:
             validation_error("Year of Birth (EC) is too far in the past")
-        # Age in months on the 13-month Ethiopian year; an unknown month counts
-        # as the last one so the check never rejects someone who might be 18.
-        age_months = (today_y * 13 + today_m) - (year * 13 + (month or 13))
-        if age_months < 0:
+        # Months on the 13-month Ethiopian year; an unknown month counts as the
+        # first one so a current-year birth is not refused as "future".
+        if (today_y * 13 + today_m) - (year * 13 + (month or 1)) < 0:
             validation_error("Month / Year of Birth (EC) cannot be in the future")
-        if age_months < MIN_AGE_YEARS * 13:
-            validation_error(f"A DA must be at least {MIN_AGE_YEARS} years old")
 
     @staticmethod
     def _validate_joined_date(record: dict) -> None:
@@ -152,16 +150,15 @@ class G2PRegisterDomainServiceDA(G2PRegisterDomainService):
             validation_error("Joining Date cannot be in the future")
 
     @staticmethod
-    def _validate_required(record: dict) -> None:
-        """Required fields, checked only when a person fills in the form.
-        Only keys present in the record are checked: the intake form saves one
-        section at a time."""
+    def _validate_required(record: dict, required: dict[str, str]) -> None:
+        """Required fields (widget-required in the register metadata), checked
+        only when a person fills in the form. Only keys present in the record
+        are checked here: the intake form saves one section at a time, and a
+        change request carries only what changed. Absent keys are the intake
+        guard's job (da_intake_guard.py) on save and finalize."""
         if not is_interactive(record):
             return
-        missing = [
-            label for field, label in REQUIRED_FIELDS.items()
-            if field in record and (record.get(field) is None or str(record.get(field)).strip() == "")
-        ]
+        missing = missing_labels(required, record, absent_is_missing=False)
         if missing:
             validation_error("Required: " + ", ".join(missing))
 

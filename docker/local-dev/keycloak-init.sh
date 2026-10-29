@@ -277,6 +277,77 @@ ensure_awe_approver_users() {
   done
 }
 
+# A Development Agent's own record: the user attribute `da_id` (their DA-ID)
+# is mapped into the access token as the claim `da_id`. The registry's staff
+# API then limits that user to their own DA record (da-extension
+# register_domain/services/da_own_record.py). The scope is a default scope of
+# every client a DA may sign in with, so the claim is always in the token.
+ensure_da_self_service_scope() {
+  local scope_id
+  # Keycloak 26 drops user attributes it does not know (user profile). Let
+  # administrators set `da_id` (and any other unmanaged attribute) on users.
+  "${KCADM}" update users/profile -r "${KEYCLOAK_REALM}" -s unmanagedAttributePolicy=ADMIN_EDIT >/dev/null 2>&1 || true
+  scope_id="$("${KCADM}" get client-scopes -r "${KEYCLOAK_REALM}" --fields id,name --format csv --noquotes 2>/dev/null \
+    | { grep ',da-self-service$' || true; } | cut -d, -f1 | head -1)"
+  if [[ -z "${scope_id}" ]]; then
+    echo "[keycloak-init] Creating client scope 'da-self-service' (claim da_id)"
+    "${KCADM}" create client-scopes -r "${KEYCLOAK_REALM}" \
+      -s name=da-self-service -s protocol=openid-connect \
+      -s 'attributes."include.in.token.scope"=true' -s 'attributes."display.on.consent.screen"=false' >/dev/null
+    scope_id="$("${KCADM}" get client-scopes -r "${KEYCLOAK_REALM}" --fields id,name --format csv --noquotes 2>/dev/null \
+    | { grep ',da-self-service$' || true; } | cut -d, -f1 | head -1)"
+    "${KCADM}" create "client-scopes/${scope_id}/protocol-mappers/models" -r "${KEYCLOAK_REALM}" \
+      -s name=da_id -s protocol=openid-connect -s protocolMapper=oidc-usermodel-attribute-mapper \
+      -s 'config."user.attribute"=da_id' -s 'config."claim.name"=da_id' -s 'config."jsonType.label"=String' \
+      -s 'config."access.token.claim"=true' -s 'config."id.token.claim"=true' -s 'config."userinfo.token.claim"=true' >/dev/null
+  fi
+  local client_id client_uuid
+  for client_id in "$@"; do
+    client_uuid="$(client_internal_id "${client_id}")"
+    [[ -n "${client_uuid}" ]] || continue
+    "${KCADM}" update "clients/${client_uuid}/default-client-scopes/${scope_id}" -r "${KEYCLOAK_REALM}" >/dev/null 2>&1 || true
+  done
+}
+
+# ensure_user_attribute <username> <attribute> <value>
+ensure_user_attribute() {
+  local user_id
+  user_id="$("${KCADM}" get users -r "${KEYCLOAK_REALM}" -q "username=$1" -q "exact=true" --fields id 2>/dev/null \
+    | sed -n 's/.*"id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
+  [[ -n "${user_id}" ]] || return 0
+  "${KCADM}" update "users/${user_id}" -r "${KEYCLOAK_REALM}" -s "attributes.$2=$3" >/dev/null
+}
+
+# Optional local test DA: set KEYCLOAK_DA_TEST_DA_ID to a registered DA-ID
+# (e.g. DA-4374521939) and the user da.test (password KEYCLOAK_DA_TEST_PASSWORD,
+# default "pass") is created with role Data Editor and attribute da_id, so a
+# token for it is limited to that one record (da_own_record.py).
+KEYCLOAK_DA_TEST_DA_ID="${KEYCLOAK_DA_TEST_DA_ID:-}"
+KEYCLOAK_DA_TEST_PASSWORD="${KEYCLOAK_DA_TEST_PASSWORD:-pass}"
+ensure_da_test_user() {
+  [[ -n "${KEYCLOAK_DA_TEST_DA_ID}" ]] || return 0
+  ensure_user "da.test" "${KEYCLOAK_DA_TEST_PASSWORD}" "da.test@localhost" "Test" "DA"
+  assign_client_role "da.test" "da-registry-staff-portal" "Data Editor"
+  ensure_user_attribute "da.test" "da_id" "${KEYCLOAK_DA_TEST_DA_ID}"
+}
+
+# Three demo users for the two-level approval, one role each (password
+# KEYCLOAK_DA_DEMO_PASSWORD, default "pass"):
+#   da.officer    Intake Officer + Data Editor   enters / imports DAs
+#   da.validator  Intake Validator + Data Validator   approves Stage 1
+#   da.approver   Operations Administrator   approves Stage 2 (and Stage 1)
+KEYCLOAK_DA_DEMO_PASSWORD="${KEYCLOAK_DA_DEMO_PASSWORD:-pass}"
+ensure_da_demo_users() {
+  ensure_user "da.officer" "${KEYCLOAK_DA_DEMO_PASSWORD}" "da.officer@localhost" "Intake" "Officer"
+  assign_client_role "da.officer" "da-registry-staff-portal" "Intake Officer"
+  assign_client_role "da.officer" "da-registry-staff-portal" "Data Editor"
+  ensure_user "da.validator" "${KEYCLOAK_DA_DEMO_PASSWORD}" "da.validator@localhost" "Woreda" "Validator"
+  assign_client_role "da.validator" "da-registry-staff-portal" "Intake Validator"
+  assign_client_role "da.validator" "da-registry-staff-portal" "Data Validator"
+  ensure_user "da.approver" "${KEYCLOAK_DA_DEMO_PASSWORD}" "da.approver@localhost" "Operations" "Approver"
+  assign_client_role "da.approver" "da-registry-staff-portal" "Operations Administrator"
+}
+
 ensure_awe_clients() {
   ensure_client "awe-admin-portal" \
     -s enabled=true \
@@ -343,6 +414,10 @@ ensure_client "da-registry-backend" \
   -s directAccessGrantsEnabled=false
 
 ensure_awe_clients
+
+ensure_da_self_service_scope "iam-staff-portal" "da-registry-staff-portal"
+ensure_da_test_user
+ensure_da_demo_users
 
 for role in "${REGISTRY_STAFF_CLIENT_ROLES[@]}"; do
   ensure_client_role "da-registry-staff-portal" "${role}"

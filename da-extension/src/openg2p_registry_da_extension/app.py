@@ -17,7 +17,8 @@ from .register_domain.models import G2PIntakeFormDA, G2PRegisterDA, G2PRegisterH
 from .register_domain.services import (
     G2PRegisterDomainServiceDA,
     install_da_auto_approve,
-    install_record_image_url_resolution,
+    install_da_intake_guard,
+    install_da_own_record_guard,
 )
 
 _logger = logging.getLogger(_config.logging_default_logger_name)
@@ -37,14 +38,24 @@ class Initializer(BaseInitializer):
 
         self._patch_filter_builder()
 
-        # Intake reads return record_image_document_id but not the presigned
-        # URL the register reads add; resolve it so a record photo shows on
-        # the approval screen. See the function for details.
-        install_record_image_url_resolution()
+        # Three platform bugs fixed in-process instead of patching the image;
+        # see platform_overrides.py.
+        from .platform_overrides import install_platform_overrides
+
+        install_platform_overrides()
 
         # File import / partner ingestion: approve unique DAs without a user
         # token. See register_domain/services/auto_approve.py.
         install_da_auto_approve()
+
+        # A Development Agent (token claim da_id, role Data Editor only) sees
+        # and edits only their own record. See services/da_own_record.py.
+        install_da_own_record_guard()
+
+        # A form cannot be saved with its required fields left out or sent for
+        # approval incomplete; required = widget-required in the register
+        # metadata. See services/da_intake_guard.py.
+        install_da_intake_guard()
 
         G2PRegisterDomainFactory()
         G2PRegisterDomainServiceDA()

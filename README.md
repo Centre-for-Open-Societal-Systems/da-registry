@@ -16,7 +16,6 @@ follows the same build model as the farmer registry.
 | `da-extension/` | Python extension: DA model, domain rules, ID prefix, file-import enricher, seed metadata, Jinja templates |
 | `docker/*/Dockerfile` | Thin native registry-platform images for the DA APIs, worker/beat, UI and seed job |
 | `ui/staff-ui/` | Pinned upstream Staff UI materialization with an empty DA override layer for future UI additions |
-| `docker/patches/` | Fixes applied to the pinned platform images at build time |
 | `docker/db-seed/` | Synthetic DA loader (local only) |
 | `docker/local-dev/` | Config for the local stack (Keycloak, IAM, AWE, ID generator, Postgres, geo seed) |
 | `import-templates/` | Blank CSV and Excel templates for bulk import |
@@ -32,7 +31,7 @@ follows the same build model as the farmer registry.
 | Register mnemonic | `DA` |
 | Tables | `g2p_register_das`, `g2p_register_history_das`, `g2p_intake_form_das` |
 | DA-ID | `functional_record_id`, `DA-` + 10 digits, from the ID generator pool `da`, on approval |
-| Fayda ID (FIN) | `foundational_id`, 12 digits, required |
+| Fayda ID (FAN) | `foundational_id`, 16 digits (the number on the Fayda card, as in the farmer registry), required |
 | Duplicate check | Fayda ID, exact match (shown to the approver) |
 | Data in | Web intake form (one DA); file import, CSV or `.xlsx` (many DAs) |
 | Data out | Partner API DCI search, each record under `da_details` (`templates/openg2p_da_to_dci.json.j2`) |
@@ -56,20 +55,32 @@ A row that cannot be used is rejected with a readable reason, recorded in
 `incoming_classified_data` (`transformation_latest_error_code` /
 `ingestion_latest_error_code`); the other rows carry on.
 
-Auto-approve (`register_domain/services/auto_approve.py`, switch
-`DA_AUTO_APPROVE_IMPORTS`, default `true`): a submission created without a
-signed-in user (file import, partner ingestion) skips the AWE workflow and is
-approved straight away, so the DA reaches the register and gets a DA-ID. Web
-intake is unchanged: an approver decides it in Tasks.
+Approval of imports (`register_domain/services/auto_approve.py` and
+`awe_service_token.py`): a submission created without a signed-in user (file
+import, partner ingestion) is sent to the approval workflow with a Keycloak
+client-credentials token (`DA_AWE_TOKEN_URL` / `DA_AWE_CLIENT_ID` /
+`DA_AWE_CLIENT_SECRET`, falling back to the process's Master Data client), so it
+gets the same two-level approval as a web-form submission (stage 1, then stage
+2, see `docs/rbac-registry-roles.md`). Only after the second approval does the
+DA reach the register and get a DA-ID. `DA_AUTO_APPROVE_IMPORTS=true` restores
+the earlier behaviour for a one-time back-end load: the workflow is skipped and
+unique imports are approved straight away.
+
+A Development Agent's own record (`register_domain/services/da_own_record.py`):
+a token with the claim `da_id` (Keycloak user attribute, client scope
+`da-self-service`) whose only registry roles are the Development Agent ones is
+limited to that one DA record: search, details, tab records and change-request
+reads see only it, and a change request may target only it and only the
+contact, service and location sections. See `docs/rbac-registry-roles.md` §5.
 
 One DA per Fayda ID (`register_domain/services/fayda_uniqueness.py`): every save
 of a DA record (web form, file import, DA Services push, change request) is
 refused when its Fayda ID already belongs to an active DA or to another live
 submission, with the reason ("Fayda ID … is already registered as DA-…"). The
 record's own id is left out, so re-saving a section is not a duplicate. Rows of
-one file that race each other are still caught at approval by auto-approve,
-which leaves the later one PENDING with the reason in `remarks`, and finally by
-the unique index on active register rows.
+one file that race each other are caught again at approval (the approver sees
+the duplicate in the submission's deduplication results) and finally by the
+unique index on active register rows.
 
 ## DA Services (Frappe) → registry
 
@@ -77,7 +88,7 @@ DA Services pushes each DA it has approved to the partner API
 (`POST /partner/ingest_data?data_model=DA_SERVICES&...`); `DAServicesEnricherService`
 maps its JSON to DA fields (location by Master Data `kebele_id` or names), and
 the record goes through the same template, validation, duplicate guard and
-auto-approve as a file import. The DA Services approver and record id are kept
+two-level approval as a file import. The DA Services approver and record id are kept
 (`upstream_approved_by`, `upstream_reference`). DA Services reads DAs back with
 DCI search. Request format, field rules and open items:
 [docs/da-services-api-contract.md](docs/da-services-api-contract.md).
@@ -110,9 +121,37 @@ Host ports are chosen to run next to the Frappe DA Service and to avoid TCP
 | Postgres | 5442 |
 | Redis | 6389 |
 
-The geo-seed job loads the Ethiopia geo hierarchy into Master Data; db-seed
-loads the DA metadata and 50 synthetic DAs (`LOAD_SAMPLE_DATA=true`). No real
-personal data is used.
+Seeding, in order: the geo-seed job loads the Ethiopia geo hierarchy into
+Master Data; the codelist-seed job loads the dropdown code lists from the
+openg2p-data pack (`packs/ETH-OAN`: `GENDER`, `MARITAL_STATUS`, `PREFIX` and the
+`agriculture` domain's `DA_*` lists) into Master Data; db-seed loads the DA
+metadata and the pack's nine sample DAs (`samples/development_agents.json`,
+`LOAD_SAMPLE_DATA=true`). All sample and reference data comes from the COSS
+fork of [openg2p-data](https://github.com/Centre-for-Open-Societal-Systems/openg2p-data),
+baked into the db-seed image at build time (`OPENG2P_DATA_REF`, default
+`develop`); nothing is generated or hardcoded in this repo. No real personal
+data is used. To seed from a local openg2p-data checkout (for example while a
+data PR is open), point the jobs at it:
+
+```bash
+OPENG2P_DATA_PATH=/path/to/openg2p-data OPENG2P_DATA_DIR=/openg2p-data-local \
+  docker compose run --rm da-registry-codelist-seed && \
+OPENG2P_DATA_PATH=/path/to/openg2p-data OPENG2P_DATA_DIR=/openg2p-data-local \
+  docker compose run --rm da-registry-db-seed
+```
+
+On a cluster the Master Data db-seed image (openg2p-data's
+`docker/master-data-db-seed`, `PACK_LOAD=codelists`, `PACK_DOMAINS=agriculture`)
+loads the lists; the registry's db-seed loads the sample DAs from the same
+pack.
+
+Validation is metadata-driven: required fields are the form's `widget-required`
+flags (checked on section save and before a submission can be finalized), and
+coded fields are checked against the Master Data lists the widgets declare
+(`REGISTRY_STAFF_PORTAL_API_VALIDATE_ATTRIBUTE_VALUES`; imports resolve codes,
+displays or translations through `code_lists.py`). Adding a value to a list
+or making a field optional is a change in openg2p-data / the register
+metadata, not in Python.
 
 Local-only settings in `docker-compose.yml`: Master Data is read from its
 database (`*_MASTER_DATA_READ_MODE=db`), and DCI search skips partner signature
@@ -153,16 +192,7 @@ registries. Keep the component Dockerfiles and chart dependency in step:
 
 When the version moves, re-check:
 
-- `docker/patches/patch_platform.py`: compatibility fixes retained from the
-  existing DA build are applied to the API/worker images and fail loudly when
-  the pinned platform changes. Remove each entry only after its upstream fix is
-  verified in the selected platform image.
-- `*_APPLICATION_REFERENCE_FORMAT` (compose and Helm): four random digits instead of the
-  platform's one, so records arriving in the same second do not collide on the unique index.
-- Celery beat picks `NO_OF_TASKS_TO_PROCESS` (4) records per tick (20 s) per stage, about
-  12 records a minute. Raise these before a large import.
-- `register_domain/factory/g2p_register_domain_factory.py`: registers platform
-  services the celery worker does not; drop names the worker starts registering.
-  From 1.2 the worker builds core's factory itself, so the extension package
-  (`__init__.py`) builds ours in each worker process; without that, imports and
-  DA Services pushes stay PENDING because auto-approve is never installed there.
+- `da-extension/.../platform_overrides.py`: three platform bugs (partner ingest
+  response datetime, IAM permission lookup across registries, worker NullPool)
+  fixed in-process at start-up; the platform image is not modified. Drop an
+  installer once the fix is in the pinned platform image.

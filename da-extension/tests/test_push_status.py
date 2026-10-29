@@ -74,7 +74,7 @@ class TestExceptionType(unittest.TestCase):
             "Auto-approval skipped: Fayda ID 1 is already in submission 2026OCT07-1.": "DUPLICATE_IDENTITY",
             "Location 'kebele-X' not found in Master Data": "INVALID_KEBELE",
             "Required: Email": "MISSING_MANDATORY_FIELD",
-            "Fayda ID (FIN) must be exactly 12 digits": "INVALID_FIELD",
+            "Fayda ID (FAN) must be exactly 16 digits": "INVALID_FIELD",
             "(sqlalchemy.dialects.postgresql.asyncpg.Error) <class 'asyncpg.exceptions.DeadlockDetectedError'>: "
             "deadlock detected": "FAILED_SYNC",
             "connection reset": "FAILED_SYNC",

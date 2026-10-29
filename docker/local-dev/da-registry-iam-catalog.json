@@ -364,6 +364,11 @@
       "permission_mnemonic": "register:authenticate",
       "permission_description": "register:authenticate",
       "active": true
+    },
+    {
+      "permission_mnemonic": "register:export",
+      "permission_description": "Export register records and read the export queue (the register list screen polls it)",
+      "active": true
     }
   ],
   "roles": [
@@ -374,7 +379,8 @@
       "permissions": [
         "intakeFormDefinition:view",
         "intakeSubmission:edit",
-        "intakeSubmission:view"
+        "intakeSubmission:view",
+        "register:export"
       ]
     },
     {
@@ -386,7 +392,8 @@
         "intakeSubmission:approve",
         "intakeSubmission:view",
         "verificationIntakeForm:create",
-        "verificationIntakeForm:view"
+        "verificationIntakeForm:view",
+        "register:export"
       ]
     },
     {
@@ -402,7 +409,8 @@
         "registerDefinition:view",
         "registerHistory:view",
         "registerSection:view",
-        "registerTab:view"
+        "registerTab:view",
+        "register:export"
       ]
     },
     {
@@ -418,7 +426,8 @@
         "registerSection:view",
         "registerTab:view",
         "verificationChangeRequest:create",
-        "verificationChangeRequest:view"
+        "verificationChangeRequest:view",
+        "register:export"
       ]
     },
     {
@@ -434,7 +443,8 @@
         "registerScore:view",
         "registerSection:view",
         "registerTab:view",
-        "verificationChangeRequest:view"
+        "verificationChangeRequest:view",
+        "register:export"
       ]
     },
     {
@@ -468,7 +478,8 @@
         "verificationChangeRequest:create",
         "verificationChangeRequest:view",
         "verificationIntakeForm:create",
-        "verificationIntakeForm:view"
+        "verificationIntakeForm:view",
+        "register:export"
       ]
     },
     {
@@ -622,7 +633,8 @@
         "verificationChangeRequest:create",
         "verificationChangeRequest:view",
         "verificationIntakeForm:create",
-        "verificationIntakeForm:view"
+        "verificationIntakeForm:view",
+        "register:export"
       ]
     }
   ]

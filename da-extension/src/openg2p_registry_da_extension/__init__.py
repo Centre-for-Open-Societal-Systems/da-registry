@@ -13,6 +13,15 @@ if "openg2p_registry_celery_worker" in _sys.modules:
 
     @_worker_process_init.connect(weak=False)
     def _set_up_da_worker(**_kwargs):
+        # Before any task opens the async engine in this pool process: NullPool
+        # instead of a pool shared across the per-task event loops (see
+        # platform_overrides.py). It cannot run at import time: the worker's
+        # main.py imports this package before it creates the
+        # openg2p_registry_extensions alias that the worker's own config needs.
+        from .platform_overrides import install_worker_null_pool
+
+        install_worker_null_pool()
+
         from .register_domain.factory import G2PRegisterDomainFactory
 
         G2PRegisterDomainFactory()

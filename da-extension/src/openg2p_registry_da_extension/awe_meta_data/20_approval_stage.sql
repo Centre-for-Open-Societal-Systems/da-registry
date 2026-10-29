@@ -1,4 +1,11 @@
--- One stage per DA policy; any one assigned approver completes it.
+-- Approval stages for the two DA policies: the platform's default two-level
+-- approval (Stage 1 Officers, then Stage 2 Officers), the same shape the
+-- reference and farmer registries seed. This is the starting configuration
+-- only: approvers for a real environment (Woreda supervisors, operations
+-- administrators, Keycloak role rules) are configured in the AWE admin
+-- portal after deployment, not in this repository (decision of 27-28 Oct
+-- 2026, Faiz / Asmit: AWE is configuration).
+-- Stage ids: 3fd0/3fd2 = change request, 3fd1/3fd3 = intake form.
 INSERT INTO "public"."approval_stage" (
     "id", "policy_id", "stage_order", "name", "mode", "mode_value", "sla_hours",
     "parallel_group", "skip_if", "on_empty", "on_breach", "escalation_rules_json",
@@ -9,8 +16,10 @@ SELECT v."id", v."policy_id", v."stage_order"::int, v."name", v."mode",
        v."skip_if"::json, v."on_empty", v."on_breach",
        v."escalation_rules_json"::json, v."created_at"::timestamptz, v."updated_at"::timestamptz
 FROM (VALUES
-    ('6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3fd0', '6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3fc0', 1, 'DA Officer', 'any-n', 1, NULL, NULL, 'null', 'block', NULL, 'null', NOW(), NOW()),
-    ('6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3fd1', '6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3fc1', 1, 'DA Officer', 'any-n', 1, NULL, NULL, 'null', 'block', NULL, 'null', NOW(), NOW())
+    ('6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3fd0', '6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3fc0', 1, 'Stage 1 Officers', 'all', NULL, NULL, NULL, 'null', 'block', NULL, 'null', NOW(), NOW()),
+    ('6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3fd2', '6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3fc0', 2, 'Stage 2 Officers', 'all', NULL, NULL, NULL, 'null', 'block', NULL, 'null', NOW(), NOW()),
+    ('6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3fd1', '6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3fc1', 1, 'Stage 1 Officers', 'all', NULL, NULL, NULL, 'null', 'block', NULL, 'null', NOW(), NOW()),
+    ('6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3fd3', '6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3fc1', 2, 'Stage 2 Officers', 'all', NULL, NULL, NULL, 'null', 'block', NULL, 'null', NOW(), NOW())
 ) AS v("id","policy_id","stage_order","name","mode","mode_value","sla_hours",
         "parallel_group","skip_if","on_empty","on_breach","escalation_rules_json",
         "created_at","updated_at")

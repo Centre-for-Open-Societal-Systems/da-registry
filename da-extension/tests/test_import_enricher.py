@@ -9,6 +9,21 @@ from unittest import mock
 
 from openg2p_registry_da_extension.ingestion_pipeline.enricher_services import g2p_da_enricher_services as module
 
+# What the register metadata and Master Data would answer (see code_lists.py).
+FIELD_ATTRIBUTES = {"prefix": "PREFIX", "gender": "GENDER", "marital_status": "MARITAL_STATUS",
+                    "education_level": "DA_EDUCATION_LEVEL", "specialisation": "DA_SPECIALISATION", "position": "DA_POSITION"}
+FIELD_LABELS = {"prefix": "Salutation", "gender": "Gender", "marital_status": "Marital Status",
+                "education_level": "Education Level", "specialisation": "Specialisation", "position": "Position"}
+LISTS = {
+    "PREFIX": {"MR": "Mr", "MRS": "Mrs", "MISS": "Miss", "MS": "Ms", "DR": "Dr"},
+    "GENDER": {"FEMALE": "Female", "MALE": "Male", "OTHER": "Other", "UNKNOWN": "Unknown"},
+    "MARITAL_STATUS": {"SINGLE": "Single", "MARRIED": "Married", "WIDOWED": "Widowed", "DIVORCED": "Divorced"},
+    "DA_EDUCATION_LEVEL": {"CERTIFICATE": "Certificate", "DIPLOMA": "Diploma", "DEGREE": "Degree", "MASTERS": "Masters"},
+    "DA_SPECIALISATION": {"CROP_PRODUCTION": "Crop production", "LIVESTOCK": "Livestock", "NATURAL_RESOURCES": "Natural resources",
+                          "AGRONOMY": "Agronomy", "HORTICULTURE": "Horticulture", "OTHER": "Other"},
+    "DA_POSITION": {"DEVELOPMENT_AGENT": "Development Agent", "SENIOR_DA": "Senior DA"},
+}
+
 GEO = {
     "hierarchy": [
         {"level": l, "level_id": f"level-{l}", "level_mnemonic": l,
@@ -20,10 +35,10 @@ GEO = {
 
 ROW = {
     "Salutation": "Mr.", " Name *": "Abebe", "Father's Name": "Kebede", "Grandfather Name": "",
-    "Fayda ID": "412345678901.0", "Sex": "M", "Marital Status": "married",
+    "Fayda ID": "412345678901.0", "Sex": "Male", "Marital Status": "married",
     "Month of Birth (EC)": "4.0", "Year of Birth (EC)": "1985", "Phone Number": "911234567",
     "Telegram": "", "Alternate Number": "+251 922 334 455", "Email": "ABEBE@EXAMPLE.ORG",
-    "Education Level": "BSc", "Specialization": "crop production", "Position": "Senior DA",
+    "Education Level": "degree", "Specialization": "crop production", "Position": "Senior DA",
     "Joining Date": "2015-09-11 00:00:00", "Region": "amhara", "Zone": "Awi", "Woreda": "Banja",
     "Kebele": "Barie", "Unknown column": "ignored",
 }
@@ -32,6 +47,8 @@ ROW = {
 class TestEnricher(unittest.TestCase):
     def setUp(self):
         patcher = mock.patch.object(module._MasterDataGeo, "resolve", return_value=GEO)
+        self.lists = mock.patch.object(module.code_lists, "field_attributes", return_value=(FIELD_ATTRIBUTES, FIELD_LABELS)); self.lists.start(); self.addCleanup(self.lists.stop)
+        self.values = mock.patch.object(module.code_lists, "attribute_values", side_effect=lambda a: LISTS[a]); self.values.start(); self.addCleanup(self.values.stop)
         self.resolve = patcher.start()
         self.addCleanup(patcher.stop)
         self.enrich = module.DAImportFileEnricherService().enrich

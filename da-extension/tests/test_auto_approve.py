@@ -40,9 +40,15 @@ class TestDuplicateReason(unittest.TestCase):
 
 
 class TestSwitch(unittest.TestCase):
-    def test_on_by_default(self):
+    def test_off_by_default(self):
+        # Decision of 23 Oct 2026: imports are approved manually, like every record.
         with mock.patch.dict(os.environ, {}, clear=True):
-            self.assertTrue(auto_approve.auto_approve_enabled())
+            self.assertFalse(auto_approve.auto_approve_enabled())
+
+    def test_can_be_switched_on_for_a_back_end_load(self):
+        for value in ("true", "1", "yes", "on"):
+            with mock.patch.dict(os.environ, {"DA_AUTO_APPROVE_IMPORTS": value}):
+                self.assertTrue(auto_approve.auto_approve_enabled())
 
     def test_can_be_switched_off(self):
         for value in ("false", "0", "no", "off"):
