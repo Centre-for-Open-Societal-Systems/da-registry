@@ -89,12 +89,31 @@ def _read_mode() -> str:
     return "db" if os.environ.get(ENV_PREFIX + "DB_HOSTNAME") else "api"
 
 
+_i18n_column: bool | None = None
+
+
+def _has_i18n_column(cur) -> bool:
+    """Whether g2p_attribute_values has display_name_i18n (checked once)."""
+    global _i18n_column
+    if _i18n_column is None:
+        cur.execute(
+            "select 1 from information_schema.columns"
+            " where table_name = 'g2p_attribute_values' and column_name = 'display_name_i18n'"
+        )
+        _i18n_column = cur.fetchone() is not None
+    return _i18n_column
+
+
 def _values_from_db(attribute_id: str) -> dict[str, str]:
     from .g2p_da_enricher_services import _MasterDataGeo
 
     with _MasterDataGeo._connection().cursor() as cur:
+        # Translations are optional: Master Data versions differ in whether the
+        # legacy table carries them (MDM 1.1.0 does; the catalogue's seed files
+        # write only code and display). Match on code and display without them.
+        i18n = "display_name_i18n" if _has_i18n_column(cur) else "null"
         cur.execute(
-            "select value_id, value_code, value_display, display_name_i18n from g2p_attribute_values"
+            f"select value_id, value_code, value_display, {i18n} from g2p_attribute_values"
             " where attribute_id = %s order by sort_order, value_id",
             (attribute_id,),
         )
@@ -163,9 +182,10 @@ def attribute_values(attribute_id: str) -> dict[str, str]:
 
 
 def invalidate() -> None:
-    global _field_cache
+    global _field_cache, _i18n_column
     with _lock:
         _field_cache = None
+        _i18n_column = None
         _value_cache.clear()
 
 
