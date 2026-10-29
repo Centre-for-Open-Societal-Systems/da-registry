@@ -21,9 +21,10 @@ follows the same build model as the farmer registry.
 | `docker/local-dev/` | Config for the local stack (Keycloak, IAM, AWE, ID generator, Postgres, geo seed) |
 | `import-templates/` | Blank CSV and Excel templates for bulk import |
 | `docker-compose.yml` | Self-contained local stack |
-| `helm/openg2p-da-registry/` | Helm overlay on the `openg2p-registry` chart (not deployable yet, see TODOs) |
-| `Jenkinsfile` | CI/CD: builds and pushes images to ECR (`openg2p/da-registry`, tag `<component>-<commit>`); on `develop` also upgrades the dev release `da` (namespace `commons`) |
-| `deploy/dev/values-da.yaml` | Dev values the Jenkinsfile applies over the `oan-coss/openg2p-da-registry` release |
+| `Jenkinsfile` | CI/CD: builds and pushes images to ECR (`openg2p/da-registry`, tag `<component>-<commit>`); on `develop`, when `DEPLOY_TO_DEV` is ticked, also upgrades the existing dev release `da-registry` (namespace `da-registry`) |
+| `ci/deploy/` | The pinned central chart: `oan-chart.json` (oan-helm commit, chart version, archive and public-values SHA-256), `oan_chart.py` (download and verification), see `ci/deploy/README.md` |
+| `ci/deploy-dev.sh` | The dev deploy the Jenkinsfile runs: verified chart and values, `helm upgrade --reset-values` on the existing release, never an install |
+| `test/` | Unit tests of the chart pin consumer |
 
 ## The DA register
 
@@ -181,8 +182,9 @@ registries. Keep the component Dockerfiles and chart dependency in step:
 - `ARG RP_VERSION` in `docker/*/Dockerfile`
 - `RP_VERSION` in the `Jenkinsfile`
 - the upstream staff-ui source revision in `ui/staff-ui/deps.json`
-- the `openg2p-registry` dependency in `helm/openg2p-da-registry/Chart.yaml`
-  (repository `https://openg2p.github.io/openg2p-helm`)
+- `platformVersion` in `ci/deploy/oan-chart.json`, which must equal the `openg2p-registry`
+  dependency of the pinned oan-helm chart (CI checks the archive); moving it means a new
+  oan-helm chart release and a new pin
 - the Master Data image (`openg2p/master-data-api:1.1.0`) and the ID generator image
   (`openg2p/openg2p-id-generator:1.1.2`) in `docker-compose.yml`, as in the livestock registry.
   The 1.2 staff UI reads geo levels through Master Data's `/geo/*` API, which 1.1.0 has.

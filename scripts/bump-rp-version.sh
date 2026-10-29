@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Bump the pinned openg2p-registry (registry-platform) version this variant
-# extends — in BOTH the Dockerfiles (ARG RP_VERSION) and the Helm chart
-# dependency — atomically, so the two can never drift.
+# extends in the Dockerfiles (ARG RP_VERSION) and reports whether the pinned
+# central chart (ci/deploy/oan-chart.json "platformVersion") is on the same version.
+# The chart pin itself moves with an oan-helm release, never from this script.
 #
 # WHY "SAFE" LATEST
 #   A variant pins ONE version used for the Docker base images AND the chart
@@ -13,12 +14,11 @@
 #   the Helm index AND the container registry. An explicit version is likewise
 #   verified to exist in both before anything is written.
 #
-# Requires: bash, curl, python3, helm. Run from the repo root.
+# Requires: bash, curl, python3. Run from the repo root.
 set -euo pipefail
 
-# ── repo-specific: the chart dir this variant ships ───────────────────────────
-# The chart dir is the only per-repo value; everything else is derived.
-CHART_DIR="helm/openg2p-da-registry"
+# ── repo-specific: the pinned central chart ───────────────────────────────────
+CHART_PIN="ci/deploy/oan-chart.json"
 
 REGISTRY_CHART="openg2p-registry"
 
@@ -46,8 +46,8 @@ note() { echo "  $*"; }
 
 usage() {
   cat <<EOF
-Bump the pinned openg2p-registry version (Dockerfiles' ARG RP_VERSION + the Helm
-chart dependency) atomically, so images and chart never drift.
+Bump the pinned openg2p-registry version in the Dockerfiles (ARG RP_VERSION) and report
+the platform version of the pinned central chart (ci/deploy/oan-chart.json).
 
 Usage:
   ./scripts/bump-rp-version.sh                 Bump to the latest SAFE version.
@@ -86,8 +86,7 @@ done
 
 command -v curl    >/dev/null || die "curl is required"
 command -v python3 >/dev/null || die "python3 is required"
-command -v helm    >/dev/null || die "helm is required"
-[ -d "$CHART_DIR" ] || die "run from the repo root ($CHART_DIR not found)"
+[ -f "$CHART_PIN" ] || die "run from the repo root ($CHART_PIN not found)"
 
 # ── discover published versions ───────────────────────────────────────────────
 chart_versions() {
@@ -154,15 +153,9 @@ else
 fi
 
 # ── current pins ──────────────────────────────────────────────────────────────
-CUR_CHART=$(python3 - "$CHART_DIR/Chart.yaml" <<'PY'
-import re,sys
-s=open(sys.argv[1]).read()
-m=re.search(r'name:\s*openg2p-registry\b.*?version:\s*(\S+)', s, re.S)
-print(m.group(1) if m else "")
-PY
-)
+CUR_CHART=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["registry"]["platformVersion"])' "$CHART_PIN")
 CUR_DOCKER=$(grep -hoE 'ARG RP_VERSION=\S+' docker/*/Dockerfile | sed 's/ARG RP_VERSION=//' | sort -u | tr '\n' ',' | sed 's/,$//')
-note "current: chart=$CUR_CHART  dockerfiles=$CUR_DOCKER"
+note "current: pinned chart platform=$CUR_CHART  dockerfiles=$CUR_DOCKER"
 
 if [ "$CHECK_ONLY" = "true" ]; then
   if [ "$CUR_CHART" = "$VERSION" ] && [ "$CUR_DOCKER" = "$VERSION" ]; then
@@ -190,35 +183,17 @@ open(f,'w').write(s)
 PY
 done
 
-python3 - "$CHART_DIR/Chart.yaml" "$VERSION" <<'PY'
-import re,sys
-f,v=sys.argv[1],sys.argv[2]
-s=open(f).read()
-# rewrite the version ONLY inside the openg2p-registry dependency block
-def repl(m): return re.sub(r'(version:\s*)\S+', r'\g<1>'+v, m.group(0), count=1)
-s=re.sub(r'-\s*name:\s*openg2p-registry\b.*?(?=\n\s*-\s|\n\S|\Z)', repl, s, count=1, flags=re.S)
-open(f,'w').write(s)
-PY
-
-# refresh the dependency lock so it matches the new pin
-echo "Updating the chart dependency lock…"
-helm repo add openg2p-charts "${HELM_INDEX%/index.yaml}" >/dev/null 2>&1 || true
-helm repo update openg2p-charts >/dev/null 2>&1 || true
-helm dependency update "$CHART_DIR" >/dev/null 2>&1 || die "helm dependency update failed for $VERSION"
-
 # ── verify + report ───────────────────────────────────────────────────────────
-NEW_CHART=$(python3 - "$CHART_DIR/Chart.yaml" <<'PY'
-import re,sys
-m=re.search(r'name:\s*openg2p-registry\b.*?version:\s*(\S+)', open(sys.argv[1]).read(), re.S)
-print(m.group(1) if m else "")
-PY
-)
 NEW_DOCKER=$(grep -hoE 'ARG RP_VERSION=\S+' docker/*/Dockerfile | sed 's/ARG RP_VERSION=//' | sort -u | tr '\n' ',' | sed 's/,$//')
-[ "$NEW_CHART" = "$VERSION" ] && [ "$NEW_DOCKER" = "$VERSION" ] \
-  || die "post-write check failed: chart=$NEW_CHART dockerfiles=$NEW_DOCKER (expected $VERSION)"
+[ "$NEW_DOCKER" = "$VERSION" ] \
+  || die "post-write check failed: dockerfiles=$NEW_DOCKER (expected $VERSION)"
 
 echo ""
-echo "Bumped openg2p-registry pin: ${CUR_CHART} -> ${VERSION}"
-echo "  Dockerfiles + chart dependency now aligned at ${VERSION}."
+echo "Bumped openg2p-registry pin in the Dockerfiles: ${CUR_DOCKER} -> ${VERSION}"
 echo "  Review, then commit:"
-echo "    git add docker helm/${CHART_DIR#helm/}/Chart.yaml && git commit"
+echo "    git add docker && git commit"
+if [ "$CUR_CHART" != "$VERSION" ]; then
+  echo "  The pinned central chart is still on ${CUR_CHART}. Release the chart on ${VERSION} in oan-helm,"
+  echo "  then update ci/deploy/oan-chart.json (repository commit, version, sha256, values) and"
+  echo "  the platformVersion in the same change."
+fi

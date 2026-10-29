@@ -1,9 +1,10 @@
 // DA Registry (OpenG2P) -- CI/CD pipeline.
 //
 // Every branch: build the five images and push them to ECR.
-// develop:      deploy them to the dev cluster only when DEPLOY_TO_DEV is ticked, release `da` in namespace
-//               `commons`, chart oan-coss/openg2p-da-registry (the one Rancher
-//               installed). Values: deploy/dev/values-da.yaml.
+// develop:      deploy them to the dev cluster only when DEPLOY_TO_DEV is ticked: an upgrade of the
+//               existing release `da-registry` in namespace `da-registry`, with the chart archive
+//               and public values pinned in ci/deploy/oan-chart.json (oan-helm, verified by
+//               SHA-256) and `--reset-values`. Never an install, never an uninstall.
 // staging/main: build and push only; no deploy target yet.
 pipeline {
     // The agent that reaches the dev cluster (as the livestock pipeline uses).
@@ -32,26 +33,27 @@ pipeline {
         ECR_REPO       = "openg2p/da-registry"
 
         // Must match ARG RP_VERSION in the component Dockerfiles
-        // and the openg2p-registry dependency in helm/openg2p-da-registry/Chart.yaml.
+        // and "platformVersion" in ci/deploy/oan-chart.json (the pinned chart's openg2p-registry).
         // The staff UI is built from the same registry-platform run.
         RP_VERSION     = "1.2.2-rc.557"
 
-        // Dev deployment. The chart and version are the ones the release was
-        // installed with in Rancher; move them together with that install.
-        HELM_CHART_REPO_NAME = "oan-coss"
-        HELM_CHART_REPO_URL  = "https://raw.githubusercontent.com/Centre-for-Open-Societal-Systems/oan-helm/main/repository/"
-        HELM_CHART           = "oan-coss/openg2p-da-registry"
-        HELM_CHART_VERSION   = "1.0.0-dev.5"
-        DEV_RELEASE          = "da"
-        DEV_NAMESPACE        = "commons"
-        DEV_VALUES           = "deploy/dev/values-da.yaml"
-        // Kubeconfig (Jenkins "Secret file") allowed to upgrade the release in DEV_NAMESPACE.
+        // Dev deployment. The chart, its version, the public values, the release and
+        // the namespace are all read from ci/deploy/oan-chart.json by ci/deploy-dev.sh.
+        // Kubeconfig (Jenkins "Secret file") allowed to upgrade the release in its namespace.
         DEV_KUBECONFIG_CRED_ID = "da-dev-kubeconfig"
     }
 
     stages {
         stage('Checkout') {
             steps { checkout scm }
+        }
+
+        stage('Validate chart pin') {
+            // The pinned-chart consumer is checked on every build, pull requests
+            // included: no network, no cluster.
+            steps {
+                sh 'docker run --rm --network none --entrypoint python -v "$PWD:/work:ro" -w /work openg2p/openg2p-registry-staff-api:${RP_VERSION} -m unittest discover -s test -p test_oan_chart.py -v'
+            }
         }
 
         stage('ECR Login') {
@@ -96,41 +98,14 @@ pipeline {
         stage('Deploy to Development') {
             // Upgrades the existing release only (no --install), so a wrong
             // name or namespace fails instead of creating a second release.
-            // --reuse-values keeps what was set in Rancher; DEV_VALUES and the
-            // commit's image tags go on top. No --atomic: a failing db-seed
-            // hook should leave the release inspectable, not roll it back.
+            // ci/deploy-dev.sh verifies the pinned chart archive and public values,
+            // renders them with this commit's images, and runs `helm upgrade
+            // --reset-values`. No --atomic: a failing db-seed hook should leave the
+            // release inspectable, not roll it back.
             when { allOf { branch 'develop'; expression { params.DEPLOY_TO_DEV } } }
             steps {
                 withCredentials([file(credentialsId: "${DEV_KUBECONFIG_CRED_ID}", variable: 'KUBECONFIG')]) {
-                    sh """
-                        set -eu
-                        helm repo add ${HELM_CHART_REPO_NAME} ${HELM_CHART_REPO_URL} --force-update
-                        helm repo update ${HELM_CHART_REPO_NAME}
-                        helm status ${DEV_RELEASE} -n ${DEV_NAMESPACE} > /dev/null
-
-                        IMAGE_SET_FLAGS="
-                            --set-string registry.staffApi.image.tag=staff-api-${IMAGE_TAG}
-                            --set-string registry.partnerApi.image.tag=partner-api-${IMAGE_TAG}
-                            --set-string registry.celeryWorker.image.tag=celery-${IMAGE_TAG}
-                            --set-string registry.celeryBeat.image.tag=celery-${IMAGE_TAG}
-                            --set-string registry.staffUi.image.tag=staff-ui-${IMAGE_TAG}
-                            --set-string registry.dbSeed.image.tag=db-seed-${IMAGE_TAG}
-                        "
-
-                        # Values before, and the manifests about to be applied, kept for audit.
-                        helm get values ${DEV_RELEASE} -n ${DEV_NAMESPACE} -a -o yaml > dev-values-before-${BUILD_NUMBER}.yaml
-                        helm template ${DEV_RELEASE} ${HELM_CHART} --version ${HELM_CHART_VERSION} -n ${DEV_NAMESPACE} \
-                            -f dev-values-before-${BUILD_NUMBER}.yaml -f ${DEV_VALUES} \$IMAGE_SET_FLAGS \
-                            > dev-rendered-${BUILD_NUMBER}.yaml
-
-                        helm upgrade ${DEV_RELEASE} ${HELM_CHART} --version ${HELM_CHART_VERSION} -n ${DEV_NAMESPACE} \
-                            --reuse-values -f ${DEV_VALUES} \$IMAGE_SET_FLAGS \
-                            --cleanup-on-fail --timeout 15m
-
-                        for d in staff-portal-api staff-portal-ui partner-api; do
-                            kubectl rollout status deployment/${DEV_RELEASE}-\$d -n ${DEV_NAMESPACE} --timeout=300s
-                        done
-                    """
+                    sh 'bash ci/deploy-dev.sh "${IMAGE_TAG}"'
                 }
             }
             post {
@@ -143,7 +118,7 @@ pipeline {
 
     post {
         failure {
-            echo "DA registry ${env.BRANCH_NAME} build/deploy failed. For a deploy failure, 'helm history ${env.DEV_RELEASE} -n ${env.DEV_NAMESPACE}' shows the release state."
+            echo "DA registry ${env.BRANCH_NAME} build/deploy failed. For a deploy failure, 'helm history da-registry -n da-registry' shows the release state."
         }
         always {
             sh 'docker image prune -f || true'

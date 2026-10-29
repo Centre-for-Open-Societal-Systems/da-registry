@@ -52,7 +52,7 @@ The partner-API ingest reply (a `datetime` in the header made every `POST /partn
 
 ## 4. Re-check on upgrade
 
-1. Bump `RP_VERSION` (Dockerfiles, `Jenkinsfile`, `helm/.../Chart.yaml`), build the images.
+1. Bump `RP_VERSION` (Dockerfiles, `Jenkinsfile`, `ci/deploy/oan-chart.json` after the oan-helm chart release), build the images.
 2. In each image run the extension tests: `python -m pytest /app/da-extension/tests` (staff-api runs all; partner-api `test_temporary_platform_overrides.py`, `test_push_status.py`, `test_code_lists.py`; worker `test_temporary_platform_overrides.py`, `test_awe_service_token.py`, `test_import_approval_workflow.py`, `test_direct_approval.py`, `test_import_enricher.py`, `test_da_services_enricher.py`, `test_code_lists.py`). A missing anchor fails or skips there.
 3. Start the stack and read the start-up logs: each `install_*` logs once; `install_da_own_record_guard` raises if its anchor is gone.
 4. Re-run the validation list in `pr8-validation-da.md` (form → two-stage approval → DA-ID; change request; search filters; partner push; DCI; import; UI).
