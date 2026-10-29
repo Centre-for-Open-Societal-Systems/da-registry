@@ -122,7 +122,8 @@ CSRF = uuid.uuid4().hex
 INTAKE_ARTIFACT = "registry.intake_form"
 TRANSIENT_HTTP = (502, 503, 504)  # the gateway's answer when the service behind it is away
 NETWORK_ATTEMPTS = 5
-# Sent as created_by; the platform records the signed-in account's name instead (the service account).
+# The request carries a created_by; the platform stores the signed-in account (the service account) instead,
+# so it cannot mark the loader's submissions.
 SEED_CREATED_BY = "sample-data-seed"
 # The identity record of every DA the loader enters has an id only the loader makes (uuid5 of the Fayda ID):
 # a rerun resumes only its own submissions, never one somebody else entered for the same person.
@@ -410,7 +411,7 @@ def submit(client: Client, fields: dict, geo: dict, draft: tuple[str, str] | Non
         action = "ADD" if submission_id is None else "UPDATE"
         payload = {k: v for k, v in record.items() if v not in (None, "")}
         # The save that creates the submission is sent once: a lost answer must not create a second draft
-        # (the next run completes the first, found by its Fayda ID).
+        # (the next run completes the first, found by its own identity record id).
         return client.call(client.staff, "/intake-form-data/save_intake_form_submission", {
             "submission_id": submission_id, "section_id": SECTIONS[section], "section_register_id": REGISTER_ID,
             "form_id": FORM_ID, "register_id": REGISTER_ID, "created_by": SEED_CREATED_BY,
@@ -641,7 +642,7 @@ def load_one(client, approvers: list, approve_timeout: int, index: dict, id_map:
     name = da.get("da_id")
     geo = location(index, id_map, da.get("geo_pcode") or "")
     if geo is None:
-        log(f"{name}: kebele {da.get('geo_pcode')} not in Master Data; skipped")
+        log(f"{name}: kebele {da.get('geo_pcode')} not in Master Data; failed, left for the next run")
         return "failed"
     earlier = earlier_submissions(da["fayda_fan"])
     waiting = next((sid for sid, status, approval, _ in earlier if status == "FINAL" and approval == "PENDING"), None)
