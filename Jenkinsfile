@@ -1,7 +1,7 @@
 // DA Registry (OpenG2P) -- CI/CD pipeline.
 //
 // Every branch: build the five images and push them to ECR.
-// develop:      also deploy them to the dev cluster, release `da` in namespace
+// develop:      deploy them to the dev cluster only when DEPLOY_TO_DEV is ticked, release `da` in namespace
 //               `commons`, chart oan-coss/openg2p-da-registry (the one Rancher
 //               installed). Values: deploy/dev/values-da.yaml.
 // staging/main: build and push only; no deploy target yet.
@@ -12,6 +12,15 @@ pipeline {
     options {
         // Overlapping runs collide on the helm upgrade ("another operation in progress").
         disableConcurrentBuilds()
+    }
+
+    parameters {
+        // Off by default: a develop build only builds and pushes the images. The
+        // dev deploy waits until the release target, the pinned values and the
+        // Keycloak client secret the values reference exist; then a person ticks
+        // this on a develop build.
+        booleanParam(name: 'DEPLOY_TO_DEV', defaultValue: false,
+                     description: 'Deploy this develop build to the dev cluster')
     }
 
     environment {
@@ -90,7 +99,7 @@ pipeline {
             // --reuse-values keeps what was set in Rancher; DEV_VALUES and the
             // commit's image tags go on top. No --atomic: a failing db-seed
             // hook should leave the release inspectable, not roll it back.
-            when { branch 'develop' }
+            when { allOf { branch 'develop'; expression { params.DEPLOY_TO_DEV } } }
             steps {
                 withCredentials([file(credentialsId: "${DEV_KUBECONFIG_CRED_ID}", variable: 'KUBECONFIG')]) {
                     sh """
