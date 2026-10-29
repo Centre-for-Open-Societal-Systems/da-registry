@@ -31,10 +31,11 @@ def test_falls_back_to_the_master_data_client_of_the_process(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_missing_settings_name_what_is_missing():
+async def test_missing_settings_are_logged_not_shown_to_staff(caplog):
     with pytest.raises(m.ServiceTokenUnavailable) as exc:
         await m.get_service_token()
-    assert "DA_AWE_TOKEN_URL" in str(exc.value) and "missing: token_url, client_id, client_secret" in str(exc.value)
+    assert "DA_AWE" not in str(exc.value) and "Ask an administrator" in str(exc.value)
+    assert "DA_AWE_TOKEN_URL" in caplog.text and "missing: token_url, client_id, client_secret" in caplog.text
 
 
 @pytest.mark.asyncio

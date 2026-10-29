@@ -72,7 +72,8 @@ def _access_token(client: httpx.Client) -> str | None:
     return token
 
 
-def post(path: str, payload: dict[str, Any] | None = None, pagination: dict[str, Any] | None = None) -> Any:
+def post(path: str, payload: dict[str, Any] | None = None, pagination: dict[str, Any] | None = None,
+         timeout: float | None = None) -> Any:
     """The response_payload of a Master Data API call."""
     global _token
     base = setting("API_URL").rstrip("/")
@@ -86,7 +87,7 @@ def post(path: str, payload: dict[str, Any] | None = None, pagination: dict[str,
         "request_body": {"request_payload": payload or {}, "pagination_request": pagination},
     }
     try:
-        with httpx.Client(timeout=TIMEOUT_SECONDS) as client:
+        with httpx.Client(timeout=timeout or TIMEOUT_SECONDS) as client:
             token = _access_token(client)
             headers = {"Authorization": f"Bearer {token}"} if token else {}
             resp = client.post(base + path, json=envelope, headers=headers)

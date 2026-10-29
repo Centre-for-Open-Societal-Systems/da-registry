@@ -2,6 +2,7 @@
 Imports openg2p_registry_core, so it runs in the container."""
 
 import asyncio
+import time
 import importlib
 import sys
 import unittest
@@ -31,8 +32,10 @@ LISTS = {
 }
 
 
-def check(record, lists=LISTS):
-    def values(attribute):
+def check(record, lists=LISTS, calls=None):
+    def values(attribute, timeout=None):
+        if calls is not None:
+            calls.append((attribute, timeout))
         value = lists[attribute]
         if isinstance(value, Exception):
             raise value
@@ -42,6 +45,10 @@ def check(record, lists=LISTS):
 
 
 class TestChoices(unittest.TestCase):
+    def setUp(self):
+        cc._down_until = 0.0
+        self.addCleanup(setattr, cc, "_down_until", 0.0)
+
     def test_fields_come_from_the_widgets(self):
         self.assertEqual(cc.choice_fields(SECTIONS), {"gender": ("GENDER", "Gender"), "position": ("DA_POSITION", "Position")})
 
@@ -64,6 +71,31 @@ class TestChoices(unittest.TestCase):
 
     def test_master_data_down_does_not_block_a_save(self):
         check({"gender": "XYZ"}, {"GENDER": MasterDataUnavailable("down"), "DA_POSITION": {}})
+
+    def test_one_failure_ends_the_check_and_is_remembered(self):
+        down = {"GENDER": MasterDataUnavailable("down"), "DA_POSITION": MasterDataUnavailable("down")}
+        calls = []
+        check({"gender": "MALE", "position": "BOSS"}, down, calls)
+        self.assertEqual(len(calls), 1)  # the second dropdown was not tried
+        check({"gender": "MALE", "position": "BOSS"}, down, calls)
+        self.assertEqual(len(calls), 1)  # nor the next save, for a minute
+        cc._down_until = time.monotonic() - 1
+        check({"gender": "MALE"}, down, calls)
+        self.assertEqual(len(calls), 2)
+
+    def test_lists_are_read_with_a_short_timeout(self):
+        calls = []
+        check({"gender": "MALE"}, LISTS, calls)
+        self.assertEqual(calls, [("GENDER", cc.TIMEOUT_SECONDS)])
+        self.assertLessEqual(cc.TIMEOUT_SECONDS, 5.0)
+
+    def test_long_lists_are_cut_after_ten_choices(self):
+        many = {f"V{i}": f"Choice {i}" for i in range(13)}
+        with self.assertRaises(G2PRegistryException) as ctx:
+            check({"gender": "ZZZ"}, {"GENDER": many, "DA_POSITION": {}})
+        message = str(ctx.exception)
+        self.assertIn("Choice 9 and 3 more.", message)
+        self.assertNotIn("Choice 10", message)
 
     def test_an_empty_list_is_not_judged(self):
         check({"position": "BOSS"}, {"GENDER": {}, "DA_POSITION": {}})

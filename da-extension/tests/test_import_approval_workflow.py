@@ -69,11 +69,13 @@ def test_a_missing_service_token_fails_the_row_with_a_clear_message():
         _start(mock.AsyncMock(side_effect=ServiceTokenUnavailable("no client secret")))
 
 
-def test_an_import_is_refused_when_approval_is_switched_off_in_the_process():
+def test_an_import_is_refused_when_approval_is_switched_off_in_the_process(caplog):
     token = mock.AsyncMock(return_value="service-token")
-    with pytest.raises(RuntimeError, match="approval is switched off in this process"):
+    with pytest.raises(RuntimeError, match="approval is switched off for imports") as exc:
         _start(token, enabled=False)
     token.assert_not_called()
+    assert "AWE_" not in str(exc.value)  # setting names go to the log, not to the staff-facing row
+    assert "AWE_ENABLED" in caplog.text
 
 
 def test_an_import_is_refused_when_no_approval_request_was_opened():

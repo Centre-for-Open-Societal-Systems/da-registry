@@ -9,8 +9,9 @@ form reads and refuses a value that is not in the list, naming the choices.
 It runs for every channel from validate_domain_attributes (web save, change
 request, file import, DA Services push). The file import and DA Services
 enrichers have already turned labels into codes, so a correct row passes.
-When Master Data cannot be read the check is skipped with a warning instead of
-blocking every save; the list is cached for five minutes.
+When Master Data cannot be read the check stops at the first failure, stays off
+for a minute and logs a warning instead of making every save wait; a list is
+cached for five minutes, an empty list is not cached.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from typing import Any
 
 from openg2p_registry_core.services.g2p_attribute_value_validator import G2PAttributeValueValidator
@@ -27,6 +29,12 @@ from ...ingestion_pipeline.enricher_services.master_data_api import MasterDataUn
 from .domain_validation_utils import validation_error
 
 _logger = logging.getLogger("da-choice-check")
+
+# A web save must not wait on Master Data once per dropdown while it is down:
+# one failure ends the check for that save and for the next minute.
+TIMEOUT_SECONDS = 5.0
+RETRY_AFTER_SECONDS = 60.0
+_down_until = 0.0
 
 
 def choice_fields(sections: list) -> dict[str, tuple[str, str]]:
@@ -51,21 +59,27 @@ def _is_blank(value: Any) -> bool:
 
 async def validate_choices(record: dict, sections: list) -> None:
     """Refuse a dropdown value that is not in its Master Data list."""
+    global _down_until
+    if time.monotonic() < _down_until:
+        return
     fields = choice_fields(sections)
     for field, (attribute_id, label) in fields.items():
         value = record.get(field)
         if _is_blank(value) or not isinstance(value, (str, int)):
             continue
         try:
-            values = await asyncio.to_thread(code_lists.attribute_values, attribute_id)
+            values = await asyncio.to_thread(code_lists.attribute_values, attribute_id, TIMEOUT_SECONDS)
         except MasterDataUnavailable as exc:
-            _logger.warning("Choice check skipped for %s: %s", field, exc)
-            continue
+            _down_until = time.monotonic() + RETRY_AFTER_SECONDS
+            _logger.warning("Choice check skipped for %.0f s, Master Data is unavailable (%s): %s",
+                            RETRY_AFTER_SECONDS, field, exc)
+            return
         ids = [k for k in values if not k.startswith("__")]
         if not ids:
-            continue  # an empty or unknown list cannot say what is wrong
+            _logger.warning("Choice check skipped for %s: list %s has no values", field, attribute_id)
+            continue  # an empty list cannot say what is wrong
         text = str(value).strip()
         if text in ids or ("__code__" + text) in values:
             continue
-        allowed = ", ".join(values[i] for i in ids)
+        allowed = code_lists.format_choices([values[i] for i in ids])
         validation_error(f"{label}: '{text}' is not one of the choices. Choose one of: {allowed}.")

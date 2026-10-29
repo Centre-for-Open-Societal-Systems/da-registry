@@ -68,8 +68,8 @@ class DAAweIntegrationService(G2PAweIntegrationService):
         # instead, so the row shows as failed with the reason and can be retried.
         if not self._awe_enabled():
             _logger.error("DA submission %s: approval is switched off in this process", submission.submission_id)
-            raise RuntimeError(NOT_STARTED + "approval is switched off in this process. "
-                               "Set AWE_ENABLED, AWE_BASE_URL and the callback settings for the worker.")
+            _logger.error("Set the worker's AWE_ENABLED, AWE_BASE_URL and callback settings (REGISTRY_CELERY_WORKERS_ prefix)")
+            raise RuntimeError(NOT_STARTED + "approval is switched off for imports. Ask an administrator to check the approval service settings.")
         try:
             kwargs["bearer_token"] = await get_service_token()
         except ServiceTokenUnavailable as exc:
@@ -82,8 +82,7 @@ class DAAweIntegrationService(G2PAweIntegrationService):
         result = await super().start_intake_submission_workflow(session, submission, *args, **kwargs)
         if not getattr(submission, "awe_request_id", None):
             _logger.error("DA submission %s: no approval request was opened", submission.submission_id)
-            raise RuntimeError(NOT_STARTED + "no approval request was opened. "
-                               "Check that the Development agent registration form has an approval policy.")
+            raise RuntimeError(NOT_STARTED + "no approval request was opened. Ask an administrator to check that the Development agent registration form has an approval policy.")
         return result
 
 

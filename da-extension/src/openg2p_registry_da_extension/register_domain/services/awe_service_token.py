@@ -62,10 +62,11 @@ async def get_service_token() -> str:
     cfg = service_token_settings()
     missing = [k for k, v in cfg.items() if not v]
     if missing:
-        raise ServiceTokenUnavailable(
+        _logger.error(
             "DA approval service token is not configured: set DA_AWE_TOKEN_URL, "
-            "DA_AWE_CLIENT_ID and DA_AWE_CLIENT_SECRET (missing: " + ", ".join(missing) + ")"
+            "DA_AWE_CLIENT_ID and DA_AWE_CLIENT_SECRET (missing: %s)", ", ".join(missing)
         )
+        raise ServiceTokenUnavailable("the approval service sign-in is not set up. Ask an administrator to check it.")
     try:
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.post(
@@ -77,9 +78,11 @@ async def get_service_token() -> str:
                 },
             )
     except httpx.HTTPError as exc:
-        raise ServiceTokenUnavailable(f"Keycloak token request failed: {exc}") from exc
+        _logger.error("Keycloak token request failed: %s", exc)
+        raise ServiceTokenUnavailable("the approval service sign-in could not be reached. Try again later.") from exc
     if resp.status_code >= 400:
-        raise ServiceTokenUnavailable(f"Keycloak refused the service token ({resp.status_code}): {resp.text[:200]}")
+        _logger.error("Keycloak refused the service token (%s): %s", resp.status_code, resp.text[:200])
+        raise ServiceTokenUnavailable("the approval service sign-in was refused. Ask an administrator to check it.")
     payload = resp.json()
     _cache["token"] = payload["access_token"]
     _cache["expires_at"] = time.time() + int(payload.get("expires_in", 300))
