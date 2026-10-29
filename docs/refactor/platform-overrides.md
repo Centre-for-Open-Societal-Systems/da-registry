@@ -1,6 +1,6 @@
 # DA registry: everything that touches the platform
 
-Yash Sontakke · 28 October 2026 · registry-platform `1.2.2-rc.557`, branch `feature/da-on-refactor`
+Yash Sontakke · 28 October 2026 · registry-platform `1.2.2-rc.614`, branch `feature/da-on-refactor`
 
 What Aruna asked for on 27 October: one list of every place where the DA
 extension overrides, wraps or otherwise depends on the OpenG2P platform's
@@ -17,7 +17,7 @@ table; when an upstream fix lands, delete the entry and its code.
 
 ## 1. Temporary overrides (kept on the user's decision of 29 Oct 2026)
 
-One lives in `register_domain/temporary_platform_overrides.py`, installed by one call in `app.py`. Each has a docstring block with the bug, the platform version checked (1.2.2-rc.557), what breaks without it and "remove when OpenG2P fixes it". None of these classes is a registered component and none of the behaviours is a setting on rc.557, so there is no subclass or configuration alternative. The fourth, the DataPolicyMiddleware own-record policy, is row D3 below. (should go upstream, then be deleted)
+One lives in `register_domain/temporary_platform_overrides.py`, installed by one call in `app.py`. Each has a docstring block with the bug, the platform version checked (1.2.2-rc.614; signatures re-checked, unchanged for every method DA overrides), what breaks without it and "remove when OpenG2P fixes it". None of these classes is a registered component and none of the behaviours is a setting on rc.614, so there is no subclass or configuration alternative. The fourth, the DataPolicyMiddleware own-record policy, is row D3 below. (should go upstream, then be deleted)
 
 The partner-API ingest reply (a `datetime` in the header made every `POST /partner/ingest_data` answer 500) is no longer worked around in code: every data model in `meta_data/data-models/data_models.sql` carries the DCI response template, which makes the platform serialise the reply.
 

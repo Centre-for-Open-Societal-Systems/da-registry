@@ -2,7 +2,7 @@
 
 Each one replaces a method of a platform class in the running process, because
 the platform offers no configuration or registration hook for it (checked on
-registry-platform 1.2.2-rc.557: none of these classes is a registered
+registry-platform 1.2.2-rc.614: none of these classes is a registered
 component, and none of the behaviours is a setting). The platform files on disk
 are untouched. Every override is idempotent and skips cleanly when the platform
 package it targets is not in the process. Remove each one when OpenG2P fixes
@@ -30,7 +30,7 @@ module is the only place that reassigns platform methods.
    share names, so a user's permissions come from whichever application sorts
    first. The override asks `get_application_permissions_for_user` for this
    application only.
-   Platform version checked: 1.2.2-rc.557, IAM 1.4.2 (the IAM service still
+   Platform version checked: 1.2.2-rc.614, IAM 1.4.2 (the IAM service still
    looks a role up by name only, first match).
    Without it: users get another registry's permissions (too many or too few).
    Remove when OpenG2P fixes it.

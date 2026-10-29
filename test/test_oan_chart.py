@@ -28,10 +28,10 @@ class CentralChartTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.path = Path(self.temp.name) / "package.tgz"
         self.pin = {"repository": BASE + "a" * 40 + "/repository/",
-                    "name": "openg2p-da-registry", "version": "1.0.0-dev.17", "platformVersion": "1.2.2-rc.557",
+                    "name": "openg2p-da-registry", "version": "1.0.0-dev.17", "platformVersion": "1.2.2-rc.614",
                     "promotionReady": True, "environment": "dev", "namespace": "da-registry", "release": "da-registry"}
 
-    def package(self, *, child_version="1.2.2-rc.557", name=None, gate=False):
+    def package(self, *, child_version="1.2.2-rc.614", name=None, gate=False):
         info = {"name": name or self.pin["name"], "version": self.pin["version"], "appVersion": self.pin["platformVersion"],
                 "dependencies": [{"name": "openg2p-registry", "alias": "registry",
                                   "repository": "https://openg2p.github.io/openg2p-helm", "version": self.pin["platformVersion"]}]}
@@ -171,7 +171,7 @@ class CommittedProfileTests(unittest.TestCase):
     def test_profile_targets_the_live_da_release(self):
         pin = committed_pin()
         self.assertEqual(pin["name"], "openg2p-da-registry")
-        self.assertEqual(pin["version"], "1.0.0-dev.18")
+        self.assertEqual(pin["version"], "1.0.0-dev.19")
         self.assertEqual((pin["release"], pin["namespace"], pin["environment"]), ("da-registry", "da-registry", "dev"))
         self.assertEqual(pin["values"]["path"], "environments/dev/values/da.yaml")
 
