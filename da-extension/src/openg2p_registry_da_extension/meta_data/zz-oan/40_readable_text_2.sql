@@ -29,12 +29,28 @@ SET "section_ui_schema" = replace(replace(section_ui_schema::text,
 WHERE "section_id" = 'da_location_section_03';
 
 -- The birth month and year say their limits where the form checks them
-UPDATE "public"."g2p_register_sections"
-SET "section_ui_schema" = replace(replace(replace(section_ui_schema::text,
-  '"max": 13', '"max": 13, "maxMessage": "Enter a birth month from 1 to 13."'),
-  '"min": 1}', '"min": 1, "minMessage": "Enter a birth month from 1 to 13."}'),
-  '"min": 1920', '"min": 1920, "minMessage": "Enter a birth year of 1920 or later, in the Ethiopian calendar."')::jsonb
-WHERE "section_id" = 'da_identity_section_01';
+-- (the widgets are found by widget-id, so the other keys of each rule stay)
+UPDATE "public"."g2p_register_sections" s
+SET "section_ui_schema" = (
+  SELECT jsonb_set(s."section_ui_schema", '{panels}', (
+    SELECT jsonb_agg(jsonb_set(row_panel, '{panels}', (
+      SELECT jsonb_agg(jsonb_set(panel, '{widgets}', (
+        SELECT jsonb_agg(
+          CASE w ->> 'widget-id'
+            WHEN 'birth_month_ec' THEN jsonb_set(w, '{widget-data-validation}',
+              COALESCE(w -> 'widget-data-validation', '{}'::jsonb) || jsonb_build_object(
+                'minMessage', 'Enter a birth month from 1 to 13.', 'maxMessage', 'Enter a birth month from 1 to 13.'))
+            WHEN 'birth_year_ec' THEN jsonb_set(w, '{widget-data-validation}',
+              COALESCE(w -> 'widget-data-validation', '{}'::jsonb) || jsonb_build_object(
+                'minMessage', 'Enter a birth year of 1920 or later, in the Ethiopian calendar.'))
+            ELSE w END ORDER BY wo)
+        FROM jsonb_array_elements(panel -> 'widgets') WITH ORDINALITY AS x(w, wo)
+      ) ) ORDER BY po)
+      FROM jsonb_array_elements(row_panel -> 'panels') WITH ORDINALITY AS y(panel, po)
+    )) ORDER BY ro)
+    FROM jsonb_array_elements(s."section_ui_schema" -> 'panels') WITH ORDINALITY AS z(row_panel, ro)
+  )))
+WHERE s."section_id" = 'da_identity_section_01';
 
 -- Section names the server messages use are the section titles
 UPDATE "public"."g2p_register_sections" SET "section_description" = 'Education and position' WHERE "section_id" = 'da_service_section_02';
@@ -76,8 +92,16 @@ SET "domain_translation" = (COALESCE("domain_translation"::jsonb, '{}'::jsonb) |
  "SEPARATED": "Separated",
  "CERTIFICATE": "Certificate",
  "DIPLOMA": "Diploma",
- "DEGREE": "Degree",
- "MASTERS": "Masters",
+ "DEGREE": "Bachelor''s degree",
+ "MASTERS": "Master''s degree",
+ "LIVESTOCK": "Livestock",
+ "OTHER": "Other",
+ "UNKNOWN": "Unknown",
+ "MR": "Mr",
+ "MRS": "Mrs",
+ "MISS": "Miss",
+ "MS": "Ms",
+ "DR": "Dr",
  "CROP_PRODUCTION": "Crop production",
  "NATURAL_RESOURCES": "Natural resources",
  "AGRONOMY": "Agronomy",
@@ -93,7 +117,7 @@ SET "domain_translation" = (COALESCE("domain_translation"::jsonb, '{}'::jsonb) |
  "PROCESSED": "Done",
  "FAILED": "Failed",
  "NOT_APPLICABLE": "Not applicable",
- "PARTNER": "File import",
+ "PARTNER": "Imported from another system",
  "STAFF_PORTAL": "Staff portal",
  "PARTNER_STAFF_PORTAL": "Staff portal",
  "PARTNER_DA_SERVICES": "Development agent services",
@@ -105,3 +129,8 @@ SET "domain_translation" = (COALESCE("domain_translation"::jsonb, '{}'::jsonb) |
  "in_review-stage2": "In review (second approval)"
 }'::jsonb)::json
 WHERE "language_code" = 'en';
+
+-- The education filter says what the Master Data list says
+UPDATE "public"."g2p_register_schemas"
+SET "filter_schema" = replace("filter_schema"::jsonb::text, '"label": "Degree"', '"label": "Bachelor''s degree"')::json
+WHERE "register_id" = '6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3f90';

@@ -23,6 +23,9 @@ from .validation_rules import (
 
 _logger = logging.getLogger("g2p-register-domain-service")
 
+# The same minimum the birth-year widget declares (widget-data-validation.min).
+MIN_BIRTH_YEAR_EC = 1920
+
 
 class G2PRegisterDomainServiceDA(G2PRegisterDomainService):
     """Domain rules for the DA register.
@@ -117,7 +120,7 @@ class G2PRegisterDomainServiceDA(G2PRegisterDomainService):
     @staticmethod
     def _validate_birth_ec(record: dict) -> None:
         """Month / Year of Birth in the Ethiopian calendar: a real month, a
-        4-digit year, not in the future and not more than 100 years back. No
+        4-digit year of 1920 or later (the limit the form states), not in the future. No
         minimum age: the FSD sets none (decision of 28 Oct 2026)."""
         if "birth_month_ec" not in record and "birth_year_ec" not in record:
             return
@@ -136,8 +139,8 @@ class G2PRegisterDomainServiceDA(G2PRegisterDomainService):
         if year is None:
             return
         today_y, today_m, _ = gregorian_to_ethiopic(date.today())
-        if year < today_y - 100:
-            validation_error("Year of birth (Ethiopian calendar): the year is more than 100 years ago. Enter the real year of birth.")
+        if year < MIN_BIRTH_YEAR_EC:
+            validation_error(f"Year of birth (Ethiopian calendar): enter {MIN_BIRTH_YEAR_EC} or later.")
         # Months on the 13-month Ethiopian year; an unknown month counts as the
         # first one so a current-year birth is not refused as "future".
         if (today_y * 13 + today_m) - (year * 13 + (month or 1)) < 0:

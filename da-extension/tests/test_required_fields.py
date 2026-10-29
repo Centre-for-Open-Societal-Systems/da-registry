@@ -135,10 +135,6 @@ class TestGuard(unittest.IsolatedAsyncioTestCase):
                 component_registry.remove(c)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TestSectionName(unittest.TestCase):
     """Messages name a section by the title staff see on the form."""
 
@@ -158,3 +154,7 @@ class TestSectionName(unittest.TestCase):
         from types import SimpleNamespace
         self.assertEqual(rf.section_name_of(SimpleNamespace(section_description="Contact details")), "Contact details")
         self.assertEqual(rf.section_name_of(SimpleNamespace(section_ui_schema={"section-title": "a_key"})), "Section")
+
+
+if __name__ == "__main__":
+    unittest.main()
