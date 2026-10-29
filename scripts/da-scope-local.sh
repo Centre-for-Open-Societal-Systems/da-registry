@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Local stack only: limit a staff user of the DA registry to one Woreda, Zone or
-# Region (DA-166). See docs/rbac-registry-roles.md.
+# Region. See docs/rbac-registry-roles.md.
 #
 #   scripts/da-scope-local.sh <woreda|zone|region> <code> <username>
 #   scripts/da-scope-local.sh woreda ET010101 da.supervisor

@@ -3,7 +3,7 @@
 The registry answers a push with a correlation_id only; validation, the Fayda
 duplicate check and the DA-ID happen afterwards in the celery pipeline. This
 reads that pipeline's own tables and reports one of the issuance states the
-DA-28 acceptance criteria name:
+DA Services panel shows:
 
   QUEUED        received, still being processed (or waiting for approval)
   GENERATED     registered; da_id is set
@@ -43,7 +43,7 @@ _FAILED = "FAILED"
 
 def exception_type(reason: Optional[str]) -> Optional[str]:
     """Group a reason into the exception kinds the DA Services panel shows.
-    Matches the registry's own messages (enricher, domain validation, auto-approve)."""
+    Matches the registry's own messages (enricher, domain validation, duplicate checks)."""
     if not reason:
         return None
     text_ = reason.lower()
@@ -93,7 +93,7 @@ def derive_state(raw: dict, classified: Optional[dict], submission: Optional[dic
     if approval == "REJECTED":
         return result(EXCEPTION, "Rejected: " + (submission.get("remarks") or "no reason given"))
     if approval != "APPROVED":
-        # Auto-approval leaves a remark when it holds a record (duplicate Fayda ID).
+        # A remark on a submission still waiting for approval says why it is held (for example a duplicate Fayda ID).
         remarks = submission.get("remarks")
         return result(EXCEPTION, remarks) if remarks else result(QUEUED)
 

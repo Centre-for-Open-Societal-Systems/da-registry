@@ -247,7 +247,7 @@ Results are paged, 10 by default; add `"pagination": {"page_size": 50,
 
 ### Mapping `get_da_list()` to a DCI query
 
-DA Services' client (`DARegistryClient.get_da_list()`, DA-225) takes
+DA Services' client (`DARegistryClient.get_da_list()`) takes
 business names; the registry filters on these fields:
 
 | `get_da_list()` parameter | DCI query field | Value |
@@ -387,7 +387,7 @@ imported in the registry portal. All filters are optional:
       "fayda_id": "804512345611",
       "name": "Tesfaye Bekele",
       "state": "EXCEPTION",
-      "reason": "Auto-approval skipped: Fayda ID 804512345611 is already registered as DA-5891503619.",
+      "reason": "Fayda ID 804512345611 is already registered as DA-5891503619.",
       "exception_type": "DUPLICATE_IDENTITY",
       "application_reference": "2026OCT07-25529-1027",
       "received_at": "2026-10-07T07:04:55.793904",

@@ -16,7 +16,8 @@ follows the same build model as the farmer registry.
 | `da-extension/` | Python extension: DA model, domain rules, ID prefix, file-import enricher, seed metadata, Jinja templates |
 | `docker/*/Dockerfile` | Thin native registry-platform images for the DA APIs, worker/beat, UI and seed job |
 | `ui/staff-ui/` | Pinned upstream Staff UI materialization with an empty DA override layer for future UI additions |
-| `docker/db-seed/` | Synthetic DA loader (local only) |
+| `docker/db-seed/` | db-seed image: the extension's configuration only (metadata, AWE seed, templates) |
+| `docker/local-dev/data-loaders/` | Local-only loaders for code lists and sample DAs (not a deployable image; they move to openg2p-data, see `docs/refactor/moves-to-openg2p-data/`) |
 | `docker/local-dev/` | Config for the local stack (Keycloak, IAM, AWE, ID generator, Postgres, geo seed) |
 | `import-templates/` | Blank CSV and Excel templates for bulk import |
 | `docker-compose.yml` | Self-contained local stack |
@@ -55,16 +56,17 @@ A row that cannot be used is rejected with a readable reason, recorded in
 `incoming_classified_data` (`transformation_latest_error_code` /
 `ingestion_latest_error_code`); the other rows carry on.
 
-Approval of imports (`register_domain/services/auto_approve.py` and
+Approval of imports (`register_domain/services/import_approval_workflow.py` and
 `awe_service_token.py`): a submission created without a signed-in user (file
 import, partner ingestion) is sent to the approval workflow with a Keycloak
 client-credentials token (`DA_AWE_TOKEN_URL` / `DA_AWE_CLIENT_ID` /
 `DA_AWE_CLIENT_SECRET`, falling back to the process's Master Data client), so it
 gets the same two-level approval as a web-form submission (stage 1, then stage
 2, see `docs/rbac-registry-roles.md`). Only after the second approval does the
-DA reach the register and get a DA-ID. `DA_AUTO_APPROVE_IMPORTS=true` restores
-the earlier behaviour for a one-time back-end load: the workflow is skipped and
-unique imports are approved straight away.
+DA reach the register and get a DA-ID. Nothing is approved automatically, and
+no role approves a submission or a change request directly: the staff
+endpoints that would do so answer `AWE_APPROVAL_REQUIRED`
+(`register_domain/services/direct_approval.py`); only the approval task decides.
 
 A Development Agent's own record (`register_domain/services/da_own_record.py`):
 a token with the claim `da_id` (Keycloak user attribute, client scope
@@ -125,25 +127,27 @@ Seeding, in order: the geo-seed job loads the Ethiopia geo hierarchy into
 Master Data; the codelist-seed job loads the dropdown code lists from the
 openg2p-data pack (`packs/ETH-OAN`: `GENDER`, `MARITAL_STATUS`, `PREFIX` and the
 `agriculture` domain's `DA_*` lists) into Master Data; db-seed loads the DA
-metadata and the pack's nine sample DAs (`samples/development_agents.json`,
-`LOAD_SAMPLE_DATA=true`). All sample and reference data comes from the COSS
-fork of [openg2p-data](https://github.com/Centre-for-Open-Societal-Systems/openg2p-data),
-baked into the db-seed image at build time (`OPENG2P_DATA_REF`, default
-`develop`); nothing is generated or hardcoded in this repo. No real personal
-data is used. To seed from a local openg2p-data checkout (for example while a
-data PR is open), point the jobs at it:
+metadata and AWE seed (configuration only), then the sample-data job loads the
+pack's nine sample DAs (`samples/development_agents.json`; skip it with
+`LOAD_SAMPLE_DATA=false`). All sample and reference data comes from the COSS
+fork of [openg2p-data](https://github.com/Centre-for-Open-Societal-Systems/openg2p-data);
+the two local-only jobs (`docker/local-dev/data-loaders`) clone it when they
+are built (`OPENG2P_DATA_REF`, a commit SHA pinned in the Dockerfile and compose file, never a branch) and are not part of any
+deployable image. Nothing is generated or hardcoded in this repo. No real
+personal data is used. To seed from a local openg2p-data checkout (for example
+while a data PR is open), point the jobs at it:
 
 ```bash
 OPENG2P_DATA_PATH=/path/to/openg2p-data OPENG2P_DATA_DIR=/openg2p-data-local \
   docker compose run --rm da-registry-codelist-seed && \
 OPENG2P_DATA_PATH=/path/to/openg2p-data OPENG2P_DATA_DIR=/openg2p-data-local \
-  docker compose run --rm da-registry-db-seed
+  docker compose run --rm da-registry-sample-data
 ```
 
 On a cluster the Master Data db-seed image (openg2p-data's
 `docker/master-data-db-seed`, `PACK_LOAD=codelists`, `PACK_DOMAINS=agriculture`)
-loads the lists; the registry's db-seed loads the sample DAs from the same
-pack.
+loads the lists; sample DAs are loaded from the same pack by openg2p-data's
+own tooling, not by the registry's db-seed image.
 
 Validation is metadata-driven: required fields are the form's `widget-required`
 flags (checked on section save and before a submission can be finalized), and
@@ -192,7 +196,8 @@ registries. Keep the component Dockerfiles and chart dependency in step:
 
 When the version moves, re-check:
 
-- `da-extension/.../platform_overrides.py`: three platform bugs (partner ingest
-  response datetime, IAM permission lookup across registries, worker NullPool)
-  fixed in-process at start-up; the platform image is not modified. Drop an
-  installer once the fix is in the pinned platform image.
+- `da-extension/.../register_domain/temporary_platform_overrides.py`: the four
+  temporary in-process workarounds (IAM permission lookup across registries,
+  worker NullPool, FilterBuilder boolean strings, DataPolicyMiddleware
+  own-record policy); the platform image is not modified. Drop each one once
+  OpenG2P fixes it in the pinned platform image.

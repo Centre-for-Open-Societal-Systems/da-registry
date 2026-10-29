@@ -423,10 +423,10 @@ for role in "${REGISTRY_STAFF_CLIENT_ROLES[@]}"; do
   ensure_client_role "da-registry-staff-portal" "${role}"
 done
 
-# DA Services roles -> DA registry roles (DA-165; docs/rbac-registry-roles.md).
+# DA Services roles -> DA registry roles (docs/rbac-registry-roles.md).
 # A DA Services user is put in the group of their role; the group carries the
 # registry roles. Where a user may act (their Woreda / Zone / Region) is a
-# separate DP_ data-policy role (DA-166, scripts/da-scope-local.sh).
+# separate DP_ data-policy role (scripts/da-scope-local.sh).
 echo "[keycloak-init] Ensuring DA Services role groups ..."
 ensure_group_with_client_roles "DA Services - Development Agent" "da-registry-staff-portal" \
   "Data Editor"

@@ -17,6 +17,9 @@ Imports and DA Services pushes are not affected: they are format-checked only
 (see validation_rules.is_interactive), and they do not go through the intake
 form endpoints.
 
+The service also refuses the direct approval of a submission
+(direct_approval.py): a submission is approved only through its approval task.
+
 Installed with install_da_intake_guard(): the instance goes to the front of
 the platform's component registry, so G2PIntakeFormDataService.get_component()
 (what the controllers call) resolves to it. No platform code is changed.
@@ -26,9 +29,10 @@ from __future__ import annotations
 
 import logging
 
-from openg2p_fastapi_common.context import component_registry
 from openg2p_registry_core.services.intake_form_data_service import G2PIntakeFormDataService
 
+from .component_registration import register_ahead_of_platform
+from .direct_approval import DirectApprovalClosed
 from .domain_validation_utils import validation_error
 from .required_fields import missing_labels, required_fields_in_schema
 from .validation_rules import is_interactive
@@ -36,7 +40,7 @@ from .validation_rules import is_interactive
 _logger = logging.getLogger("da-intake-guard")
 
 
-class DAIntakeFormDataService(G2PIntakeFormDataService):
+class DAIntakeFormDataService(DirectApprovalClosed, G2PIntakeFormDataService):
     async def save_intake_form_submission_with_session(
         self, submission_id, section_id, section_payload, section_register_id, form_id, register_id,
         created_by, session, documents=None,
@@ -108,16 +112,8 @@ class DAIntakeFormDataService(G2PIntakeFormDataService):
         )
 
 
-_INSTALLED = "_da_intake_guard"
-
-
 def install_da_intake_guard() -> DAIntakeFormDataService:
     """Register the DA intake service ahead of the platform's."""
-    for component in component_registry:
-        if isinstance(component, DAIntakeFormDataService):
-            return component
-    service = DAIntakeFormDataService()
-    component_registry.remove(service)
-    component_registry.insert(0, service)
-    _logger.info("DA intake guard installed: required fields checked on save and finalize")
+    service = register_ahead_of_platform(DAIntakeFormDataService)
+    _logger.info("DA intake guard installed: required fields checked on save and finalize; no direct approval")
     return service

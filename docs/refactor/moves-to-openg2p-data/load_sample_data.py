@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Load the sample Development Agents from openg2p-data into the DA register.
 
-Run by the db-seed image when LOAD_SAMPLE_DATA=true (the platform entrypoint
-owns the hook, this file is the DA variant's loader). All sample data lives in
+To move to openg2p-data (see README.md in this folder); the db-seed image no
+longer carries it. The local compose stack runs it through
+docker/local-dev/data-loaders after the db-seed job. All sample data lives in
 the openg2p-data pack, nothing is generated here:
 
   packs/<PACK>/samples/development_agents.json  the DAs: DA-ID, Fayda FAN,

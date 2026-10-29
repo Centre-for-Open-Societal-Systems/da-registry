@@ -49,8 +49,8 @@ class TestDeriveState(unittest.TestCase):
                                     transformation_latest_error_code="Missing: first_name"), submission=None)
         self.assertEqual((out["state"], out["exception_type"]), (EXCEPTION, "MISSING_MANDATORY_FIELD"))
 
-    def test_duplicate_held_by_auto_approve(self):
-        remark = "Auto-approval skipped: Fayda ID 804512345611 is already registered as DA-5891503619."
+    def test_duplicate_held_pending(self):
+        remark = "Fayda ID 804512345611 is already registered as DA-5891503619."
         out = state(submission=dict(APPROVED, approval_status="PENDING", remarks=remark))
         self.assertEqual((out["state"], out["reason"], out["exception_type"]), (EXCEPTION, remark, "DUPLICATE_IDENTITY"))
 
@@ -71,7 +71,7 @@ class TestDeriveState(unittest.TestCase):
 class TestExceptionType(unittest.TestCase):
     def test_kinds(self):
         cases = {
-            "Auto-approval skipped: Fayda ID 1 is already in submission 2026OCT07-1.": "DUPLICATE_IDENTITY",
+            "Fayda ID 1 is already in submission 2026OCT07-1.": "DUPLICATE_IDENTITY",
             "Location 'kebele-X' not found in Master Data": "INVALID_KEBELE",
             "Required: Email": "MISSING_MANDATORY_FIELD",
             "Fayda ID (FAN) must be exactly 16 digits": "INVALID_FIELD",
