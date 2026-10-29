@@ -171,7 +171,7 @@ class CommittedProfileTests(unittest.TestCase):
     def test_profile_targets_the_live_da_release(self):
         pin = committed_pin()
         self.assertEqual(pin["name"], "openg2p-da-registry")
-        self.assertEqual(pin["version"], "1.0.0-dev.17")
+        self.assertEqual(pin["version"], "1.0.0-dev.18")
         self.assertEqual((pin["release"], pin["namespace"], pin["environment"]), ("da-registry", "da-registry", "dev"))
         self.assertEqual(pin["values"]["path"], "environments/dev/values/da.yaml")
 

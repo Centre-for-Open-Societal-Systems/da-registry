@@ -7,9 +7,9 @@ Open items found while bringing the DA registry in line with the OpenG2P standar
 | Item | Status | What to do |
 |---|---|---|
 | Release target | Done by this change. The pipeline upgrades the existing release `da-registry` in namespace `da-registry` (never an install). | Nothing. |
-| Chart and platform pin | Done by this change and oan-helm #39. The chart `openg2p-da-registry` 1.0.0-dev.17 is on registry-platform rc.557, the same as the images; `ci/deploy/oan-chart.json` pins its archive by SHA-256. | After #39 is released, fill in the placeholder fields of `ci/deploy/oan-chart.json` (see `ci/deploy/README.md`). |
+| Chart and platform pin | Done by this change and oan-helm #39 and #41. The chart `openg2p-da-registry` 1.0.0-dev.18 is on registry-platform rc.557, the same as the images, with appVersion 1.2.2-rc.557; `ci/deploy/oan-chart.json` pins its archive and the dev values (oan-helm 5d01cdc) by SHA-256. | None. |
 | Values | Done by this change and oan-helm #39. Public values are pinned in oan-helm (`environments/dev/values/da.yaml`) and applied with `--reset-values`; `deploy/dev/values-da.yaml` and the repository's chart copy are removed. | Nothing. |
-| Keycloak client | `da-registry-backend` (service account) and its secret `da-registry-backend-keycloak` / `client-secret` do not exist on the dev cluster. The references are optional, so the pods start; imports and DA Services pushes cannot open an approval until it exists. | Create the client and the secret (Keycloak admin). |
+| Keycloak client | Done by oan-helm #40. Imports and DA Services pushes take their approval token from `<release>-staff-portal`, the client the chart's keycloak-init already creates, with its Secret of the same name, as Crop Sown and Livestock do. No `da-registry-backend` client is needed. | None. |
 | Self-service scope | Scope `da-self-service` and attribute `da_id` in the `staff` realm are not created. | Create them before testing a Development Agent's own-record access. |
 | Master Data lists | The form's dropdowns read `DA_EDUCATION_LEVEL`, `DA_SPECIALISATION`, `DA_POSITION`, `DA_SOURCE`. | Merge openg2p-data PR 22 and re-run the Master Data seed (`PACK_DOMAINS=agriculture`). |
 
