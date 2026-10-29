@@ -11,8 +11,9 @@ Editor) plus data-policy roles, this module:
    policies to register search, record and tab reads and to change-request
    reads, so every one of those returns only the DA's own record
    (REG-ERR-012 RECORD_ACCESS_DENIED for any other record);
-2. restricts `create_change_request`, which the platform does not put under
-   data policies: the change must target the DA's own record and one of the
+2. restricts `create_change_request` (a subclass of the platform's change-request
+   controller service, registered ahead of it), which the platform does not put
+   under data policies: the change must target the DA's own record and one of the
    editable sections (contact, service, location; never the identity section).
 
 Any user with a wider role (Intake Officer, Validator, Supervisor, Operations
@@ -32,7 +33,10 @@ import json
 import logging
 import os
 
+from openg2p_registry_core.controller_services import G2PRegisterChangerequestControllerService
 from sqlalchemy import text
+
+from .component_registration import register_ahead_of_platform
 
 _logger = logging.getLogger("da-own-record")
 
@@ -173,16 +177,14 @@ def _wrap_dispatch(dispatch):
     return wrapper
 
 
-def _wrap_create_change_request(create):
-    @functools.wraps(create)
-    async def wrapper(self, change_request_request, *args, **kwargs):
+class DAOwnRecordChangeRequestControllerService(G2PRegisterChangerequestControllerService):
+    """Change-request creation for a Development Agent: own record, editable sections only."""
+
+    async def create_change_request(self, change_request_request, *args, **kwargs):
         da_id = self_service_da_id(kwargs.get("bearer_token"))
         if da_id:
             await check_own_change_request(change_request_request.request_body.request_payload, da_id)
-        return await create(self, change_request_request, *args, **kwargs)
-
-    setattr(wrapper, _INSTALLED_MARKER, True)
-    return wrapper
+        return await super().create_change_request(change_request_request, *args, **kwargs)
 
 
 def install_da_own_record_guard() -> None:
@@ -193,11 +195,5 @@ def install_da_own_record_guard() -> None:
         return
     if not getattr(DataPolicyMiddleware.dispatch, _INSTALLED_MARKER, False):
         DataPolicyMiddleware.dispatch = _wrap_dispatch(DataPolicyMiddleware.dispatch)
-    from openg2p_registry_core.controller_services import G2PRegisterChangerequestControllerService
-
-    method = getattr(G2PRegisterChangerequestControllerService, "create_change_request", None)
-    if method is None:
-        raise AttributeError("G2PRegisterChangerequestControllerService.create_change_request no longer exists; re-anchor the DA own-record guard")
-    if not getattr(method, _INSTALLED_MARKER, False):
-        G2PRegisterChangerequestControllerService.create_change_request = _wrap_create_change_request(method)
+    register_ahead_of_platform(DAOwnRecordChangeRequestControllerService)
     _logger.info("DA own-record guard installed (claim %s, client %s)", _claim_name(), _client_id())

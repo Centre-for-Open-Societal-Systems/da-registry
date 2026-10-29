@@ -83,3 +83,38 @@ class TestChangeRequestCheck:
 
     def test_editable_sections(self):
         assert m.EDITABLE_SECTIONS == {"da_contact_section_04", "da_service_section_02", "da_location_section_03"}
+
+
+class TestChangeRequestService:
+    def test_it_is_registered_ahead_of_the_platform_controller_service(self):
+        from openg2p_registry_core.controller_services import G2PRegisterChangerequestControllerService
+
+        pytest.importorskip("iam_core")
+        m.install_da_own_record_guard()
+        service = G2PRegisterChangerequestControllerService.get_component()
+        assert isinstance(service, m.DAOwnRecordChangeRequestControllerService)
+
+    def test_a_change_to_another_record_is_refused_before_the_platform_is_called(self):
+        import asyncio
+        from types import SimpleNamespace
+        from unittest import mock
+
+        service = m.DAOwnRecordChangeRequestControllerService()
+        payload = SimpleNamespace(section_id="da_identity_section_01", internal_record_id="r-1", change_payload=[])
+        request = SimpleNamespace(request_body=SimpleNamespace(request_payload=payload))
+        with mock.patch.object(m.G2PRegisterChangerequestControllerService, "create_change_request", mock.AsyncMock()) as platform:
+            with pytest.raises(Exception, match="contact, service and location"):
+                asyncio.run(service.create_change_request(request, bearer_token=roles_token(["Data Editor"])))
+        platform.assert_not_called()
+
+    def test_a_user_without_the_claim_goes_straight_to_the_platform(self):
+        import asyncio
+        from types import SimpleNamespace
+        from unittest import mock
+
+        service = m.DAOwnRecordChangeRequestControllerService()
+        request = SimpleNamespace(request_body=SimpleNamespace(request_payload=SimpleNamespace()))
+        with mock.patch.object(m.G2PRegisterChangerequestControllerService, "create_change_request", mock.AsyncMock(return_value="created")) as platform:
+            result = asyncio.run(service.create_change_request(request, bearer_token=roles_token(["Data Editor"], da_id=None)))
+        assert result == "created"
+        platform.assert_called_once()
