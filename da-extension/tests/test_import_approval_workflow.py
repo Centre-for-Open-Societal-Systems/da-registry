@@ -30,19 +30,22 @@ def test_there_is_no_automatic_approval_left():
     assert not hasattr(m, "auto_approve_if_unique")
 
 
-def _start(token_result, source="PARTNER", bearer=None, is_da=True):
+def _start(token_result, source="PARTNER", bearer=None, is_da=True, enabled=True, opens_request=True):
     seen = {}
 
     async def platform_start(self, session, submission, *args, **kwargs):
         seen["bearer_token"] = kwargs.get("bearer_token")
+        if opens_request:
+            submission.awe_request_id = "req-1"
         return "started"
 
     service = m.DAAweIntegrationService.__new__(m.DAAweIntegrationService)
-    submission = SimpleNamespace(submission_id="s-1", register_id="r-1", submission_source=source)
+    submission = SimpleNamespace(submission_id="s-1", register_id="r-1", submission_source=source, awe_request_id=None)
     token_patch = mock.patch.object(m, "get_service_token", token_result)
     da_patch = mock.patch.object(m, "_is_da_register", mock.AsyncMock(return_value=is_da))
     base_patch = mock.patch.object(m.G2PAweIntegrationService, "start_intake_submission_workflow", platform_start)
-    with token_patch, da_patch, base_patch:
+    enabled_patch = mock.patch.object(m.DAAweIntegrationService, "_awe_enabled", lambda self: enabled)
+    with token_patch, da_patch, base_patch, enabled_patch:
         result = asyncio.run(service.start_intake_submission_workflow(
             object(), submission, bearer_token=bearer, requester="x"))
     return result, seen
@@ -62,5 +65,23 @@ def test_a_web_submission_keeps_the_user_token():
 
 
 def test_a_missing_service_token_fails_the_row_with_a_clear_message():
-    with pytest.raises(RuntimeError, match="DA approval could not be started"):
+    with pytest.raises(RuntimeError, match="The approval could not be started: no client secret"):
         _start(mock.AsyncMock(side_effect=ServiceTokenUnavailable("no client secret")))
+
+
+def test_an_import_is_refused_when_approval_is_switched_off_in_the_process():
+    token = mock.AsyncMock(return_value="service-token")
+    with pytest.raises(RuntimeError, match="approval is switched off in this process"):
+        _start(token, enabled=False)
+    token.assert_not_called()
+
+
+def test_an_import_is_refused_when_no_approval_request_was_opened():
+    with pytest.raises(RuntimeError, match="no approval request was opened"):
+        _start(mock.AsyncMock(return_value="service-token"), opens_request=False)
+
+
+def test_a_web_submission_is_not_held_to_that_check():
+    result, _ = _start(mock.AsyncMock(return_value="x"), source="STAFF_PORTAL", bearer="user-token",
+                       enabled=False, opens_request=False)
+    assert result == "started"
