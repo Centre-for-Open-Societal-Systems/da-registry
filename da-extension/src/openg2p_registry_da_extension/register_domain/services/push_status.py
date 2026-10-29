@@ -3,7 +3,7 @@
 The registry answers a push with a correlation_id only; validation, the Fayda
 duplicate check and the DA-ID happen afterwards in the celery pipeline. This
 reads that pipeline's own tables and reports one of the issuance states the
-DA-28 acceptance criteria name:
+DA Services panel shows:
 
   QUEUED        received, still being processed (or waiting for approval)
   GENERATED     registered; da_id is set

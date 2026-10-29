@@ -1,4 +1,4 @@
-# DA Services roles in the DA registry (DA-165, DA-166)
+# DA Services roles in the DA registry
 
 This page covers what a DA Services user can do in the DA registry staff API,
 and which DAs they can see.
@@ -8,7 +8,7 @@ and which DAs they can see.
 - **Which DAs they see** comes from data policies. A data policy is a filter on
   DA records, held as a client role `DP_<mnemonic>`.
 
-## 1. Roles (DA-165)
+## 1. Roles
 
 Each DA Services role is a Keycloak group in the `staff` realm. A user joins the
 group of their role, and the group carries the registry roles.
@@ -48,7 +48,7 @@ two DA policies in the AWE admin portal and replaces the example users, for
 instance with a `role` rule (a Keycloak client role such as Operations
 Administrator or Intake Validator on `da-registry-staff-portal`; AWE's service
 account needs `view-users` and `view-clients`) or with named users. Routing a
-Woreda's submissions to its own supervisor (DA-33) is the same kind of
+Woreda's submissions to its own supervisor is the same kind of
 configuration once the approver roles exist per Woreda.
 
 Bulk import (file) and the DA Services push go through the same two stages.
@@ -81,9 +81,9 @@ was scoped to Woreda ET010101 and the Executive to Region ET04.
   the claim `da_id` (section 5). Without that claim a Development Agent can
   read every DA; use the claim, or a narrow data policy.
 - **Login:** these roles work with a staff Keycloak token. How DA Services
-  users sign in (OAN auth service or Keycloak) is still open (DA-167).
+  users sign in (OAN auth service or Keycloak) is still open.
 - **Approver routing:** who approves a Woreda's submissions is the approval
-  workflow's job (DA-33), not the data policies'.
+  workflow's job, not the data policies'.
 - A Woreda code is unique, but Woreda names are not (23 names repeat). Always
   scope by code.
 

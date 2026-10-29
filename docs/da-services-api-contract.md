@@ -247,7 +247,7 @@ Results are paged, 10 by default; add `"pagination": {"page_size": 50,
 
 ### Mapping `get_da_list()` to a DCI query
 
-DA Services' client (`DARegistryClient.get_da_list()`, DA-225) takes
+DA Services' client (`DARegistryClient.get_da_list()`) takes
 business names; the registry filters on these fields:
 
 | `get_da_list()` parameter | DCI query field | Value |
