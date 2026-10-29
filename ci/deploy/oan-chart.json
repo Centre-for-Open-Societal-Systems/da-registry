@@ -1,6 +1,6 @@
 {
   "registry": {
-    "repository": "https://raw.githubusercontent.com/Centre-for-Open-Societal-Systems/oan-helm/93edce5ab9f431a35d8bd9f9488a8808e0dd9cbd/repository/",
+    "repository": "https://raw.githubusercontent.com/Centre-for-Open-Societal-Systems/oan-helm/9425fb72a1be7beed432f3f7811461e6eeae5672/repository/",
     "name": "openg2p-da-registry",
     "version": "1.0.0-dev.20",
     "sha256": "4ce4edd6bdb10fbc48b9e0ca52e72f9dc2d9cf3e49eb3ae66ac1456dab869247",
@@ -10,8 +10,8 @@
     "promotionReady": true,
     "values": {
       "path": "environments/dev/values/da.yaml",
-      "sha256": "2791bac26cb3ab5a19fb2d47f2bc8aff1bfc7c90f8ad36dc339890533655f7bf",
-      "url": "https://raw.githubusercontent.com/Centre-for-Open-Societal-Systems/oan-helm/93edce5ab9f431a35d8bd9f9488a8808e0dd9cbd/environments/dev/values/da.yaml"
+      "sha256": "bf0ae9562e2e4e0990e0fc220e5ecbd94c57876696ca31d823dc71116427de60",
+      "url": "https://raw.githubusercontent.com/Centre-for-Open-Societal-Systems/oan-helm/9425fb72a1be7beed432f3f7811461e6eeae5672/environments/dev/values/da.yaml"
     },
     "platformVersion": "1.2.2-rc.614"
   }
