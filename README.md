@@ -127,11 +127,17 @@ Seeding, in order: the geo-seed job loads the Ethiopia geo hierarchy into
 Master Data; the codelist-seed job loads the dropdown code lists from the
 openg2p-data pack (`packs/ETH-OAN`: `GENDER`, `MARITAL_STATUS`, `PREFIX` and the
 `agriculture` domain's `DA_*` lists) into Master Data; db-seed loads the DA
-metadata and AWE seed and, with `LOAD_SAMPLE_DATA=true` (default locally),
-submits the pack's sample DAs (`samples/development_agents.json`) through the
-intake API with a service account (`docker/db-seed/load_sample_data.py`). They
-wait in the approval queue like any web-form submission; re-running skips the
-ones already submitted. All sample and reference data comes from the COSS fork
+metadata and AWE seed and, with `LOAD_SAMPLE_DATA=true`, enters the pack's
+sample DAs (`samples/development_agents.json`) through the intake API with a
+service account (`docker/db-seed/load_sample_data.py`) and approves each one
+like any other register change: stage 1 as `alex.carter`, stage 2 as
+`nina.patel`, signed in through the staff portal's sign-in (staff IAM, the
+Keycloak login form, IAM's callback) with the sample users' password; never the
+password grant, never a Keycloak change. Re-running skips the ones already
+submitted. The sign-in follows the browser-facing IAM and Keycloak addresses,
+which the local compose publishes as `localhost` and a container cannot reach,
+so sample loading stays off locally (`LOAD_SAMPLE_DATA=false`) and runs on a
+cluster. All sample and reference data comes from the COSS fork
 of [openg2p-data](https://github.com/Centre-for-Open-Societal-Systems/openg2p-data)
 at a pinned commit (`OPENG2P_DATA_REF`, a commit SHA in the Dockerfiles and the
 compose file, never a branch). Nothing is generated or hardcoded in this repo.
@@ -148,9 +154,12 @@ OPENG2P_DATA_PATH=/path/to/openg2p-data OPENG2P_DATA_DIR=/openg2p-data-local \
 On a cluster the Master Data db-seed image (openg2p-data's
 `docker/master-data-db-seed`, `PACK_LOAD=codelists`, `PACK_DOMAINS=agriculture`)
 loads the lists; with `dbSeed.loadSampleData=true` the registry's db-seed job
-submits the sample DAs with the settings the platform chart already gives it
-(`STAFF_*`, `MDS_*`); the registry's Keycloak client then needs the client role
-Intake Officer.
+enters and approves the sample DAs with the settings the platform chart already
+gives it (`STAFF_*`, `MDS_*`, the intake-seed approvers and
+`INTAKE_SEED_PASSWORD` from `global.aweApproverUserPassword`) plus
+`STAFF_IAM_URL`, the staff IAM the approvers' browser would use; without
+`STAFF_IAM_URL` or the password nothing is submitted and the job fails. The
+registry's Keycloak client needs the client role Intake Officer.
 
 Validation is metadata-driven: required fields are the form's `widget-required`
 flags (checked on section save and before a submission can be finalized), and

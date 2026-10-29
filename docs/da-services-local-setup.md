@@ -23,9 +23,12 @@ curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8101/docs   # 200
 ```
 
 The seed loads the Ethiopia geo hierarchy and the dropdown code lists, and
-submits the **sample DAs** of the openg2p-data pack (`packs/ETH-OAN`) through the
-intake form; they wait for approval (stage 1 `alex.carter` or `admin`, stage 2
-`nina.patel` or `admin`) and get their DA-ID when approved. No real personal
+can enter the **sample DAs** of the openg2p-data pack (`packs/ETH-OAN`) through the
+intake form and approve them (stage 1 `alex.carter`, stage 2 `nina.patel`), after
+which they get their DA-ID. That sign-in needs the browser-facing IAM and Keycloak
+addresses, which locally are `localhost`, so the local stack keeps
+`LOAD_SAMPLE_DATA=false`; enter a DA on the staff portal and approve it as
+`alex.carter` (or `admin`), then `nina.patel` (or `admin`). No real personal
 data is used.
 
 Stop with `docker compose stop`; `docker compose down -v` also deletes the data.
