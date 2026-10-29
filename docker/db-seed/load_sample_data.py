@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
-"""Submit the sample Development Agents from openg2p-data through the intake API.
+"""Enter the sample Development Agents from openg2p-data and approve them at both stages.
 
 Run by the platform's db-seed entrypoint when LOAD_SAMPLE_DATA=true (the
 platform owns the hook; this is the DA variant's loader). Nothing is written
 to the register tables: every sample DA is entered the way a person enters one
-on the web form, through the staff API, and waits for the approvers. The
-loader never signs in as an approver, never approves, and uses no password
-grant: it calls the staff API with a service account (client credentials).
+on the web form, through the staff API with a service account (client
+credentials), and approved the way every register change is approved: the
+approval request's stage 1 as INTAKE_SEED_APPROVER_1 (alex.carter) and its
+stage 2 as INTAKE_SEED_APPROVER_2 (nina.patel), through the staff API's AWE
+proxy. The approvers sign in as in the staff portal (staff IAM, then the
+Keycloak login form, then IAM's callback) with the sample users' password the
+chart passes (global.aweApproverUserPassword); no password grant, no Keycloak
+change.
 
 Data (openg2p-data, the COSS fork baked into the image at a pinned commit, or
 a local checkout via OPENG2P_DATA_DIR):
@@ -34,6 +39,10 @@ dbSeed.loadSampleData is on, so a deployment needs nothing extra:
       the staff API and the registry's Keycloak client (global.authClientId);
       its service-account user needs the client role Intake Officer on the
       staff portal client
+  STAFF_IAM_URL, INTAKE_SEED_PASSWORD, INTAKE_SEED_APPROVER_1 (alex.carter),
+  INTAKE_SEED_APPROVER_2 (nina.patel), INTAKE_SEED_APPROVE_TIMEOUT (300)
+      the approvers' sign-in (STAFF_IAM_URL: the staff IAM the approvers' browser
+      would use, reachable from the job); without them nothing is submitted
   MDS_API_URL, MDS_TOKEN_URL, MDS_CLIENT_ID, MDS_CLIENT_SECRET
       Master Data API, read only (geography)
   AWE_PGHOST, AWE_PGPORT, AWE_PGDATABASE, AWE_PGUSER, AWE_PGPASSWORD
@@ -43,8 +52,11 @@ dbSeed.loadSampleData is on, so a deployment needs nothing extra:
 
 import csv
 import glob
+import html
+import http.cookiejar
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -64,6 +76,7 @@ SECTIONS = {
 }
 GEO_LEVELS = ("region", "zone", "woreda", "kebele")
 CSRF = uuid.uuid4().hex
+INTAKE_ARTIFACT = "registry.intake_form"
 
 
 def log(msg: str) -> None:
@@ -253,13 +266,117 @@ def submit(client: Client, fields: dict, geo: dict) -> tuple[str, str]:
     return ("submitted", submission_id) if ok else ("failed", f"finalize: {err}")
 
 
+# ------------------------------------------------------------- approval
+
+
+class StaffSession:
+    """One staff user signed in like the staff portal: IAM, the Keycloak login form, IAM's callback."""
+
+    def __init__(self, iam_url: str, api_url: str, username: str, password: str):
+        self.iam_url, self.api_url = iam_url.rstrip("/"), api_url.rstrip("/")
+        self.username, self._password = username, password
+        self._token = None
+        self.sign_in()
+
+    @staticmethod
+    def _open(opener, request) -> tuple[int, object, bytes]:
+        """Status, headers (looked up case-insensitively) and body, without following redirects."""
+        try:
+            with opener.open(request, timeout=60) as response:
+                return response.status, response.headers, response.read()
+        except urllib.error.HTTPError as exc:
+            return exc.code, exc.headers, exc.read()
+
+    def sign_in(self) -> None:
+        class NoRedirect(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self, *args, **kwargs):
+                return None
+
+        jar = http.cookiejar.CookieJar()
+        opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar), NoRedirect)
+        status, _, body = self._open(opener, urllib.request.Request(
+            f"{self.iam_url}/auth/start_authentication_transaction?id=1&redirect_uri=/en", data=b"", method="POST"))
+        if status != 200:
+            raise RuntimeError(f"staff IAM did not start a sign-in for {self.username} ({status})")
+        status, _, body = self._open(opener, urllib.request.Request(json.loads(body)["redirectUrl"] + "&prompt=login"))
+        form = re.search(r'<form[^>]+id="kc-form-login"[^>]+action="([^"]+)"', body.decode("utf-8", "replace"))
+        if status != 200 or not form:
+            raise RuntimeError(f"no Keycloak login form for {self.username} ({status})")
+        login = urllib.parse.urlencode({"username": self.username, "password": self._password, "credentialId": ""})
+        status, headers, body = self._open(opener, urllib.request.Request(
+            html.unescape(form.group(1)), data=login.encode(), method="POST",
+            headers={"Content-Type": "application/x-www-form-urlencoded"}))
+        callback = headers.get("Location") or ""
+        if not callback.startswith(f"{self.iam_url}/auth/callback"):
+            said = " ".join(re.findall(r'kc-feedback-text[^>]*>([^<]+)', body.decode("utf-8", "replace")))
+            raise RuntimeError(f"Keycloak refused the sign-in of {self.username} ({status}): {said.strip()[:200]}")
+        status, _, _ = self._open(opener, urllib.request.Request(callback))
+        token = next((c.value for c in jar if c.name == "X-Access-Token"), None)
+        if status not in (302, 303, 307) or not token:
+            raise RuntimeError(f"staff IAM issued no session for {self.username} ({status})")
+        self._token = token
+        log(f"signed in as {self.username}")
+
+    def post(self, path: str, payload: dict) -> dict:
+        envelope = {
+            "request_header": {"request_id": uuid.uuid4().hex,
+                               "request_timestamp": datetime.now(timezone.utc).isoformat(),
+                               "sender_app_mnemonic": "da-registry-sample-data", "sender_app_url": "http://da-registry"},
+            "request_body": {"request_payload": payload, "pagination_request": {"current_page": 1, "page_size": 100}},
+        }
+        for attempt in (1, 2):
+            csrf = uuid.uuid4().hex
+            code, body = http(self.api_url + path, json.dumps(envelope).encode(), {
+                "Content-Type": "application/json", "Authorization": f"Bearer {self._token}",
+                "X-CSRF-Token": csrf, "Cookie": f"X-CSRF-Token={csrf}"})
+            try:
+                data = json.loads(body)
+            except ValueError:
+                data = {}
+            header = data.get("response_header") or {}
+            if attempt == 1 and (code == 401 or str(header.get("response_error_code") or "").endswith("401")):
+                self.sign_in()  # the session ended during a long run
+                continue
+            if code != 200 or header.get("response_status") != "SUCCESS":
+                raise RuntimeError(f"{path} as {self.username}: {code} {header.get('response_error_code')} "
+                                   f"{header.get('response_error_message')}")
+            return (data.get("response_body") or {}).get("response_payload") or {}
+        return {}
+
+
+def approve(approvers: list, submission_id: str, timeout: int) -> None:
+    """Stage 1 as the first approver, then stage 2 as the second, each once its task opens."""
+    deadline = time.monotonic() + timeout
+    for stage, approver in enumerate(approvers, 1):
+        while True:
+            tasks = approver.post("/awe/list_my_tasks", {"status": "open", "artifact_type": INTAKE_ARTIFACT,
+                                                         "page": 1, "page_size": 100})
+            task = next((t for t in (tasks.get("data") or {}).get("items") or []
+                         if t.get("artifact_id") == submission_id and int(t.get("stage_order") or 0) == stage), None)
+            if task:
+                break
+            if time.monotonic() > deadline:
+                raise RuntimeError(f"no stage {stage} task for {approver.username} on intake {submission_id} "
+                                   f"within {timeout}s")
+            time.sleep(3)
+        approver.post("/awe/claim_task", {"task_id": task["id"]})
+        approver.post("/awe/submit_task_decision", {
+            "task_id": task["id"], "action": "approve", "comment": "Sample data (db-seed)",
+            "artifact_id": submission_id, "artifact_type": INTAKE_ARTIFACT, "current_stage": stage})
+        log(f"  stage {stage} approved as {approver.username}")
+
+
+# ------------------------------------------------------------- main
+
+
 def main() -> int:
     pack_dir = os.path.join(env("OPENG2P_DATA_DIR", "/openg2p-data"), "packs", env("PACK", "ETH-OAN"))
     fixture = os.path.join(pack_dir, "samples", "development_agents.json")
     if not os.path.exists(fixture):
         log(f"no sample DAs in this openg2p-data ({fixture}): nothing to submit.")
         return 0
-    missing = [n for n in ("STAFF_API_URL", "STAFF_TOKEN_URL", "STAFF_CLIENT_ID", "MDS_API_URL") if not env(n)]
+    missing = [n for n in ("STAFF_API_URL", "STAFF_TOKEN_URL", "STAFF_CLIENT_ID", "MDS_API_URL", "STAFF_IAM_URL",
+                           "INTAKE_SEED_PASSWORD") if not env(n)]
     if missing:
         log("missing settings " + ", ".join(missing) + ": sample DAs not submitted.")
         return 1
@@ -277,8 +394,12 @@ def main() -> int:
         log(f"staff API not reachable at {client.staff}: sample DAs not submitted.")
         return 1
     seed_approval_policies()
+    approvers = [StaffSession(env("STAFF_IAM_URL"), client.staff, env(name, default), env("INTAKE_SEED_PASSWORD"))
+                 for name, default in (("INTAKE_SEED_APPROVER_1", "alex.carter"),
+                                       ("INTAKE_SEED_APPROVER_2", "nina.patel"))]
+    approve_timeout = int(env("INTAKE_SEED_APPROVE_TIMEOUT", "300"))
     index = geo_index(client)
-    tally = {"submitted": 0, "skipped": 0, "failed": 0}
+    tally = {"approved": 0, "skipped": 0, "failed": 0}
     for da in das or []:
         geo = location(index, id_map, da.get("geo_pcode") or "")
         if geo is None:
@@ -286,11 +407,18 @@ def main() -> int:
             log(f"{da.get('da_id')}: kebele {da.get('geo_pcode')} not in Master Data")
             continue
         outcome, detail = submit(client, sections_for(da, people.get(da.get("individual_id")) or {}), geo)
-        tally[outcome] += 1
         log(f"{da.get('da_id')}: {outcome} {detail}")
-    log(f"{tally['submitted']} submitted for approval, {tally['skipped']} already present, {tally['failed']} failed "
+        if outcome == "submitted":
+            try:
+                approve(approvers, detail, approve_timeout)
+                outcome = "approved"
+            except RuntimeError as exc:
+                outcome = "failed"
+                log(f"{da.get('da_id')}: approval failed: {exc}")
+        tally[outcome] += 1
+    log(f"{tally['approved']} entered and approved, {tally['skipped']} already present, {tally['failed']} failed "
         f"(of {len(das or [])} in pack {env('PACK', 'ETH-OAN')}).")
-    return 1 if tally["failed"] and not tally["submitted"] and not tally["skipped"] else 0
+    return 1 if tally["failed"] else 0
 
 
 if __name__ == "__main__":
