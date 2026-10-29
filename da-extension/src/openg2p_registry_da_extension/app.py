@@ -37,13 +37,11 @@ class Initializer(BaseInitializer):
         super().initialize()
         CoreInitializer().initialize()
 
-        self._patch_filter_builder()
+        # The temporary in-process workarounds for platform gaps, all in one
+        # module; see register_domain/temporary_platform_overrides.py.
+        from .register_domain.temporary_platform_overrides import install_temporary_platform_overrides
 
-        # Two platform bugs fixed in-process instead of patching the image;
-        # see platform_overrides.py.
-        from .platform_overrides import install_platform_overrides
-
-        install_platform_overrides()
+        install_temporary_platform_overrides()
 
         # File import / partner ingestion: open the approval workflow with a
         # service token, since no user token exists. Approval itself stays
@@ -65,44 +63,6 @@ class Initializer(BaseInitializer):
 
         G2PRegisterDomainFactory()
         G2PRegisterDomainServiceDA()
-
-    def _patch_filter_builder(self):
-        """Accept "true"/"false" strings for boolean filters (the staff UI sends
-        strings; the platform's FilterBuilder expects real booleans)."""
-        try:
-            from openg2p_registry_core.services.filter_builder import FilterBuilder
-            from sqlalchemy import Boolean
-
-            orig_build_field_conditions = FilterBuilder._build_field_conditions
-            orig_validate_value = FilterBuilder._validate_value
-
-            def _to_bool(v):
-                if isinstance(v, str) and v.lower() == "true":
-                    return True
-                if isinstance(v, str) and v.lower() == "false":
-                    return False
-                return v
-
-            def patched_validate_value(this, field_config, operator, value):
-                if field_config.get("filter_type") == "boolean":
-                    if isinstance(value, str) and value.lower() in ("true", "false"):
-                        return
-                return orig_validate_value(this, field_config, operator, value)
-
-            def patched_build_field_conditions(this, column, field_name, operators, field_config):
-                is_bool_col = hasattr(column, "type") and isinstance(column.type, Boolean)
-                if is_bool_col and isinstance(operators, dict):
-                    operators = {
-                        op: ([_to_bool(v) for v in val] if isinstance(val, list) else _to_bool(val))
-                        for op, val in operators.items()
-                    }
-                return orig_build_field_conditions(this, column, field_name, operators, field_config)
-
-            FilterBuilder._validate_value = patched_validate_value
-            FilterBuilder._build_field_conditions = patched_build_field_conditions
-            _logger.info("FilterBuilder boolean handling patched successfully")
-        except Exception as e:
-            _logger.warning(f"Failed to patch FilterBuilder: {e}")
 
     async def fastapi_app_startup(self, app):
         # Also run the idempotent migration on startup, not only on the CLI

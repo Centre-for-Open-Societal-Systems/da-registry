@@ -6,7 +6,8 @@ into the access token as the claim `da_id`. For such a user, when the only
 roles they hold on the registry client are the Development Agent ones (Data
 Editor) plus data-policy roles, this module:
 
-1. replaces the request's data policies with one ALLOW policy on the DA
+1. replaces the request's data policies (applied by the DataPolicyMiddleware override in
+   ../temporary_platform_overrides.py) with one ALLOW policy on the DA
    register, `functional_record_id = <da_id>`. The platform applies data
    policies to register search, record and tab reads and to change-request
    reads, so every one of those returns only the DA's own record
@@ -28,7 +29,6 @@ Settings (environment):
 """
 
 import base64
-import functools
 import json
 import logging
 import os
@@ -43,7 +43,6 @@ _logger = logging.getLogger("da-own-record")
 DA_REGISTER_MNEMONIC = "DA"
 SELF_SERVICE_ROLES = {"Data Editor"}  # the Development Agent's registry roles
 EDITABLE_SECTIONS = {"da_contact_section_04", "da_service_section_02", "da_location_section_03"}
-_INSTALLED_MARKER = "_da_own_record_guard"
 _register_id_cache: dict = {}
 
 
@@ -161,22 +160,6 @@ async def check_own_change_request(payload, da_id: str) -> None:
         raise _access_denied("A Development Agent may change only their own record")
 
 
-def _wrap_dispatch(dispatch):
-    @functools.wraps(dispatch)
-    async def wrapper(self, request, call_next):
-        async def call_next_with_self_policy(req):
-            try:
-                await apply_self_policy(req, self.policies_state_key, self.auth_state_key)
-            except Exception:  # never block a request because of the guard itself
-                _logger.exception("DA self-service policy could not be applied")
-            return await call_next(req)
-
-        return await dispatch(self, request, call_next_with_self_policy)
-
-    setattr(wrapper, _INSTALLED_MARKER, True)
-    return wrapper
-
-
 class DAOwnRecordChangeRequestControllerService(G2PRegisterChangerequestControllerService):
     """Change-request creation for a Development Agent: own record, editable sections only."""
 
@@ -188,12 +171,7 @@ class DAOwnRecordChangeRequestControllerService(G2PRegisterChangerequestControll
 
 
 def install_da_own_record_guard() -> None:
-    """Idempotent. Staff API only: the partner API has no user tokens."""
-    try:
-        from iam_core.user_auth.middleware.data_policy import DataPolicyMiddleware
-    except ImportError:
-        return
-    if not getattr(DataPolicyMiddleware.dispatch, _INSTALLED_MARKER, False):
-        DataPolicyMiddleware.dispatch = _wrap_dispatch(DataPolicyMiddleware.dispatch)
+    """Idempotent. Registers the change-request check. The data-policy half is
+    installed with the other temporary overrides (temporary_platform_overrides.py)."""
     register_ahead_of_platform(DAOwnRecordChangeRequestControllerService)
-    _logger.info("DA own-record guard installed (claim %s, client %s)", _claim_name(), _client_id())
+    _logger.info("DA own-record change-request check installed (claim %s, client %s)", _claim_name(), _client_id())

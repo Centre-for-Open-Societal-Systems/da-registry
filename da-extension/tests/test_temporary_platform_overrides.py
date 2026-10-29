@@ -1,4 +1,4 @@
-"""In-process fixes for two platform bugs (platform_overrides.py).
+"""Temporary in-process workarounds for platform gaps (temporary_platform_overrides.py).
 
 Each test skips when the platform package it targets is not installed in the
 process running the tests (the worker fix needs the celery image); the staff-API image covers the IAM one.
@@ -15,7 +15,7 @@ import pytest
 # the alias that their container entrypoint creates; create it here too.
 sys.modules.setdefault("openg2p_registry_extensions", importlib.import_module("openg2p_registry_da_extension"))
 
-from openg2p_registry_da_extension import platform_overrides as po
+from openg2p_registry_da_extension.register_domain import temporary_platform_overrides as po
 
 
 def test_permissions_for_application_keeps_only_this_client():
@@ -77,7 +77,7 @@ def test_worker_engine_uses_null_pool(monkeypatch):
     monkeypatch.setattr(Engine, "_async_engine", None)
     monkeypatch.setattr(Engine, "construct_async_db_datasource", staticmethod(lambda: "postgresql+asyncpg://u:p@db/x"))
     monkeypatch.setattr(po, "install_worker_null_pool", po.install_worker_null_pool)
-    import openg2p_registry_da_extension.platform_overrides as module
+    import openg2p_registry_da_extension.register_domain.temporary_platform_overrides as module
     monkeypatch.setattr("sqlalchemy.ext.asyncio.create_async_engine", lambda ds, **kw: seen.update(ds=ds, **kw) or "engine")
     # the override captured create_async_engine at install time; re-install against the patched symbol
     Engine.get_async_engine = Engine.get_async_engine.__func__ if hasattr(Engine.get_async_engine, "__func__") else Engine.get_async_engine
@@ -85,3 +85,24 @@ def test_worker_engine_uses_null_pool(monkeypatch):
     assert module.install_worker_null_pool() is True
     assert Engine.get_async_engine() == "engine"
     assert seen["poolclass"] is NullPool
+
+
+def test_filter_builder_accepts_boolean_strings():
+    pytest.importorskip("openg2p_registry_core.services.filter_builder")
+    from openg2p_registry_core.services.filter_builder import FilterBuilder
+
+    assert po.install_filter_builder_booleans() is True
+    assert po.install_filter_builder_booleans() is True  # idempotent
+    builder = FilterBuilder([])
+    # no exception for "true"/"false" on a boolean field
+    assert builder._validate_value({"filter_type": "boolean"}, "eq", "true") is None
+    assert builder._validate_value({"filter_type": "boolean"}, "eq", "FALSE") is None
+
+
+def test_data_policy_middleware_applies_the_own_record_policy():
+    pytest.importorskip("iam_core")
+    from iam_core.user_auth.middleware.data_policy import DataPolicyMiddleware
+
+    assert po.install_own_record_data_policy() is True
+    assert po.install_own_record_data_policy() is True  # idempotent
+    assert getattr(DataPolicyMiddleware.dispatch, po._INSTALLED) is True

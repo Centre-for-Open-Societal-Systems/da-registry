@@ -410,7 +410,7 @@ services:
       context: .
       dockerfile: docker/local-dev/data-loaders/Dockerfile
       args:
-        OPENG2P_DATA_REF: ${OPENG2P_DATA_REF:-develop}
+        OPENG2P_DATA_REF: ${OPENG2P_DATA_REF:-dc7e7bf69087b4684a3608fdd4bf98100aab77a8}
     image: da-registry-local/data-loaders:dev
     container_name: da-registry-codelist-seed
     depends_on:
@@ -768,7 +768,7 @@ services:
       context: .
       dockerfile: docker/local-dev/data-loaders/Dockerfile
       args:
-        OPENG2P_DATA_REF: ${OPENG2P_DATA_REF:-develop}
+        OPENG2P_DATA_REF: ${OPENG2P_DATA_REF:-dc7e7bf69087b4684a3608fdd4bf98100aab77a8}
     image: da-registry-local/data-loaders:dev
     container_name: da-registry-sample-data
     depends_on:

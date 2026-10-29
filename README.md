@@ -132,7 +132,7 @@ pack's nine sample DAs (`samples/development_agents.json`; skip it with
 `LOAD_SAMPLE_DATA=false`). All sample and reference data comes from the COSS
 fork of [openg2p-data](https://github.com/Centre-for-Open-Societal-Systems/openg2p-data);
 the two local-only jobs (`docker/local-dev/data-loaders`) clone it when they
-are built (`OPENG2P_DATA_REF`, default `develop`) and are not part of any
+are built (`OPENG2P_DATA_REF`, a commit SHA pinned in the Dockerfile and compose file, never a branch) and are not part of any
 deployable image. Nothing is generated or hardcoded in this repo. No real
 personal data is used. To seed from a local openg2p-data checkout (for example
 while a data PR is open), point the jobs at it:
@@ -196,7 +196,8 @@ registries. Keep the component Dockerfiles and chart dependency in step:
 
 When the version moves, re-check:
 
-- `da-extension/.../platform_overrides.py`: three platform bugs (partner ingest
-  response datetime, IAM permission lookup across registries, worker NullPool)
-  fixed in-process at start-up; the platform image is not modified. Drop an
-  installer once the fix is in the pinned platform image.
+- `da-extension/.../register_domain/temporary_platform_overrides.py`: the four
+  temporary in-process workarounds (IAM permission lookup across registries,
+  worker NullPool, FilterBuilder boolean strings, DataPolicyMiddleware
+  own-record policy); the platform image is not modified. Drop each one once
+  OpenG2P fixes it in the pinned platform image.
