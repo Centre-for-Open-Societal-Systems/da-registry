@@ -36,7 +36,7 @@ needs:
 ### Who approves a DA
 
 Every submitted DA and every change request goes through the platform's
-two-level approval: Stage 1 Officers, then Stage 2 Officers. Each stage is
+two-level approval: Stage 1 officers, then Stage 2 officers. Each stage is
 completed by any one of its approvers (mode `any-n`, one decision). The
 repository seeds the same approvers in every OAN registry (`awe_meta_data/`):
 Stage 1 = `alex.carter` or `admin`, Stage 2 = `nina.patel` or `admin`; the two
