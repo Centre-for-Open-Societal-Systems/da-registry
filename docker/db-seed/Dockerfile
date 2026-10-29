@@ -24,16 +24,8 @@ COPY da-extension/src/openg2p_registry_da_extension/awe_meta_data/ /seed/awe_met
 COPY da-extension/src/openg2p_registry_da_extension/templates/ /seed/templates/
 COPY docker/db-seed/load_sample_data.py /seed/load_sample_data.py
 # OAN theme: the staff-portal theme (palette and background image) is data in
-# openg2p-data (themes/oan_theme). Render this registry's entry into the seed
-# tree; it runs after the registry configuration and points it at oan_theme.
-# The ref is a commit SHA; move the repository to the COSS copy once merged there.
-ARG OAN_THEME_DATA_REPO=https://github.com/asmitonweb/openg2p-data.git
-ARG OAN_THEME_DATA_REF=3c44950dac7d7752054057d1f3500784af596c10
-RUN mkdir -p /tmp/oan-theme-data /seed/meta_data/zz-oan \
- && cd /tmp/oan-theme-data \
- && git init -q \
- && git fetch -q --depth 1 "${OAN_THEME_DATA_REPO}" "${OAN_THEME_DATA_REF}" \
- && git checkout -q FETCH_HEAD \
- && python3 scripts/themes/build_theme_sql.py da > /seed/meta_data/zz-oan/90_oan_theme.sql \
- && cd / && rm -rf /tmp/oan-theme-data
+# openg2p-data (themes/oan_theme), rendered from the same pinned checkout into
+# the seed tree; it runs after the registry configuration and points it at oan_theme.
+RUN mkdir -p /seed/meta_data/zz-oan \
+ && python3 /openg2p-data/scripts/themes/build_theme_sql.py da > /seed/meta_data/zz-oan/90_oan_theme.sql
 ENTRYPOINT ["/seed/entrypoint.sh"]
