@@ -57,14 +57,18 @@ pipeline {
         }
 
         stage('ECR Login') {
+            environment { DOCKER_CONFIG = "${env.WORKSPACE}/.docker-${env.BUILD_TAG}" }
             steps {
                 withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-ecr-creds']]) {
+                    // Keep the buildx/compose CLI plugins visible from the per-build config dir.
+                    sh 'mkdir -p "$DOCKER_CONFIG"; chmod 700 "$DOCKER_CONFIG"; if [ -d "$HOME/.docker/cli-plugins" ]; then ln -sfn "$HOME/.docker/cli-plugins" "$DOCKER_CONFIG/cli-plugins"; fi'
                     sh "aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}"
                 }
             }
         }
 
         stage('Build & Push') {
+            environment { DOCKER_CONFIG = "${env.WORKSPACE}/.docker-${env.BUILD_TAG}" }
             steps {
                 script {
                     env.IMAGE_TAG = env.GIT_COMMIT.take(12)
@@ -122,7 +126,7 @@ pipeline {
         }
         always {
             sh 'docker image prune -f || true'
-            sh "docker logout ${ECR_REGISTRY} || true"
+            sh 'rm -rf "${WORKSPACE}/.docker-${BUILD_TAG}"'
         }
     }
 }
