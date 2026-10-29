@@ -137,3 +137,24 @@ class TestGuard(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestSectionName(unittest.TestCase):
+    """Messages name a section by the title staff see on the form."""
+
+    def test_title_of_the_form_wins_over_the_description(self):
+        from types import SimpleNamespace
+        section = SimpleNamespace(section_description="DA personal details", section_mnemonic="da_identity",
+                                  section_ui_schema={"section-title": "Personal details"})
+        self.assertEqual(rf.section_name_of(section), "Personal details")
+
+    def test_title_in_a_json_string(self):
+        from types import SimpleNamespace
+        section = SimpleNamespace(section_description="x", section_mnemonic="m",
+                                  section_ui_schema='{"section-title": "Contact details"}')
+        self.assertEqual(rf.section_name_of(section), "Contact details")
+
+    def test_falls_back_to_the_description_then_a_plain_word(self):
+        from types import SimpleNamespace
+        self.assertEqual(rf.section_name_of(SimpleNamespace(section_description="Contact details")), "Contact details")
+        self.assertEqual(rf.section_name_of(SimpleNamespace(section_ui_schema={"section-title": "a_key"})), "Section")

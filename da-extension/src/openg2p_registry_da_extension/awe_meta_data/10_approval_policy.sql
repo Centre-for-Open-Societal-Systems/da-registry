@@ -3,8 +3,8 @@
 -- policy_key+version), then refresh the fields this seed owns.
 WITH v("id","policy_key","version","name","description","status","artifact_type",
        "created_by","forbid_self_approval","forbid_repeat_approvers") AS (VALUES
-    ('6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3fc0', 'registry.change_request.da', 1, 'Policy for DA Change Request', NULL::text, 'active', 'registry.change_request', 'seed', FALSE, FALSE),
-    ('6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3fc1', 'registry.intake_form.da', 1, 'Policy for DA Intake Form', NULL::text, 'active', 'registry.intake_form', 'seed', FALSE, FALSE)
+    ('6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3fc0', 'registry.change_request.da', 1, 'Approval of development agent changes', NULL::text, 'active', 'registry.change_request', 'seed', FALSE, FALSE),
+    ('6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3fc1', 'registry.intake_form.da', 1, 'Approval of development agent registration', NULL::text, 'active', 'registry.intake_form', 'seed', FALSE, FALSE)
 ),
 inserted AS (
     INSERT INTO "public"."approval_policy" (

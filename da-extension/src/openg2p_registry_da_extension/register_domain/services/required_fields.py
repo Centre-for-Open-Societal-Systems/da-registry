@@ -26,6 +26,7 @@ widget {"value": "<register_id>.geo_lowest_level_value_id", "hierarchy": ...}.
 
 from __future__ import annotations
 
+import json
 import time
 from typing import Any
 
@@ -75,7 +76,7 @@ def required_fields_in_schema(section_ui_schema: Any) -> dict[str, str]:
             continue
         label = str(widget.get("widget-label") or "").strip()
         for field in _fields_of(widget.get("widget-data-path")):
-            out.setdefault(field, label or field.replace("_", " ").title())
+            out.setdefault(field, label or field.replace("_", " ").capitalize())
     return out
 
 
@@ -190,7 +191,7 @@ def is_required(static: Any, options: Any, record: dict) -> bool:
 
 
 def _title(key: str) -> str:
-    return key.replace("_", " ").replace("-", " ").strip().title()
+    return key.replace("_", " ").replace("-", " ").strip().capitalize()
 
 
 def _widgets(schema: Any):
@@ -220,7 +221,7 @@ def has_requirements(schema: Any) -> bool:
 
 def problems(schema: Any, record: dict, *, absent_is_missing: bool) -> list[str]:
     """What a record leaves unfilled in a section, as readable phrases:
-    "fill in Mobile Number", "add at least one Contacts row",
+    "fill in Phone number", "add at least one Contacts row",
     "Contacts row 2: fill in Phone". Hidden widgets are skipped.
     absent_is_missing as in missing_labels."""
     fill: list[str] = []
@@ -261,8 +262,23 @@ def describe(section_name: str, phrases: list[str]) -> str:
     return f"{section_name}: " + "; ".join(phrases)
 
 
+def _section_title(schema: Any) -> str:
+    """The section-title a staff member sees on the form, when the UI schema has one."""
+    if isinstance(schema, str):
+        try:
+            schema = json.loads(schema)
+        except ValueError:
+            return ""
+    title = str(schema.get("section-title") or "").strip() if isinstance(schema, dict) else ""
+    return "" if "_" in title else title
+
+
 def section_name_of(section: Any) -> str:
-    """A readable section name from its description or mnemonic."""
+    """The section's title as shown on the form (its UI schema's section-title),
+    else its description or mnemonic."""
+    title = _section_title(getattr(section, "section_ui_schema", None))
+    if title:
+        return title
     text = str(getattr(section, "section_description", "") or getattr(section, "section_mnemonic", "") or "")
     return text.strip() or "Section"
 
