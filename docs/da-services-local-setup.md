@@ -56,7 +56,8 @@ TCP 9000.
 | Need in DA Services | API | Document |
 |---|---|---|
 | Bulk import (Excel) | Partner `POST /partner/ingest_data` | [contract §1](da-services-api-contract.md#1-push-an-approved-da) |
-| Result of each pushed DA | Partner `GET /partner/da/status` | [contract §3](da-services-api-contract.md#3-status-of-a-push) |
+| Result of each pushed DA | Staff `POST /da/get_push_status` (token with `incomingMessage:view`) | [contract §3](da-services-api-contract.md#3-status-of-a-push) |
+| Exceptions panel (stuck pushes and import rows) | Staff `POST /da/search_exceptions` (same) | [contract §4](da-services-api-contract.md#4-exceptions-list) |
 | Look DAs up (DA-ID, Fayda ID, name, Woreda) | Partner `POST /dci/sync/search` | [contract §2](da-services-api-contract.md#2-read-das-dci-search) and §4 below |
 | Single DA form, approval, search and view as a user | Staff API | [da-services-staff-api.md](da-services-staff-api.md) |
 

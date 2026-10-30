@@ -7,23 +7,23 @@ DA Services talks to the registry in two ways:
 
 - **Partner API** (this document), server to server, signed by DA Services:
   - **Bulk import:** push each DA from the Admin's Excel file. The registry
-    validates it, checks the Fayda ID is unique, approves it automatically
-    and gives it a DA-ID.
-  - **Status of a push**, the **exceptions list** (every stuck DA, for the
-    exceptions panel), and **DCI search** to look DAs up by DA-ID, Fayda ID
-    or name.
-- **Staff API**, with the signed-in user's Keycloak token: the single DA form,
-  approving or rejecting a new DA, search and view, and a DA editing their
-  profile (change request). Roles and Woreda scope are checked by the
-  registry, and approvals happen in the registry. See
-  [da-services-staff-api.md](da-services-staff-api.md).
+    validates it, checks the Fayda ID is unique, sends it through the
+    two-stage approval and, once approved, gives it a DA-ID.
+  - **DCI search** to look DAs up by DA-ID, Fayda ID or name.
+- **Staff API**, with a Keycloak token: the single DA form, approving or
+  rejecting a new DA, search and view, a DA editing their profile (change
+  request), and the **status of a push** and the **exceptions list** (§3, §4
+  below; they return names and Fayda IDs, so they need a token). Roles and
+  Woreda scope are checked by the registry, and approvals happen in the
+  registry. See [da-services-staff-api.md](da-services-staff-api.md).
 
 The browser never calls the registry directly; the Frappe backend makes
 these calls.
 
 | | Local stack | Deployment |
 |---|---|---|
-| Partner API | `http://localhost:8106` | TODO(devops) |
+| Partner API (push, DCI search) | `http://localhost:8106` | TODO(devops) |
+| Staff API (status of a push, exceptions list) | `http://localhost:8101` | TODO(devops) |
 | Signature / consent checks | off | on (see [Security](#security)) |
 
 ---
@@ -304,13 +304,24 @@ def dci_query(**filters) -> dict:
 
 ## 3. Status of a push
 
+**Staff API**, with a Keycloak token whose roles include the permission
+`incomingMessage:view` (registry role Operations Administrator or Integration
+Manager; DA Services' service account gets Integration Manager). Envelope,
+token and CSRF header as in
+[da-services-staff-api.md §1](da-services-staff-api.md#1-calling-the-staff-api).
+
 ```
-GET /partner/da/status?correlation_id=<from the push response>
-GET /partner/da/status?reference_id=<your record id>
+POST /da/get_push_status
+request_payload: {"correlation_id": "<from the push response>"}
+             or: {"reference_id": "<your record id>"}
 ```
 
 One of the two. With `reference_id` the latest push of that record is
-returned. Answers 404 when nothing is found, 400 when neither is given.
+returned. When nothing is found, or neither is given, the answer has
+`response_status: ERROR` and the reason in `response_error_message`. Without a
+token the staff API answers 401; with a token that lacks the permission, 403.
+
+`response_payload`:
 
 ```json
 {
@@ -354,26 +365,34 @@ few minutes before it settles as `EXCEPTION`. A valid record usually reaches
 
 ## 4. Exceptions list
 
+**Staff API**, same token and permission as §3.
+
 ```
-GET /partner/da/exceptions?source=&exception_type=&state=&page_number=1&page_size=50
+POST /da/search_exceptions
+request_payload: {"source": "file_import", "exception_type": null, "state": null}
+pagination_request: {"current_page": 1, "page_size": 50}
 ```
 
 Every DA that is stuck, newest first: DA Services pushes and rows of a file
-imported in the registry portal. All filters are optional:
+imported in the registry portal or through the staff API. All filters are
+optional:
 
-| Parameter | Values |
+| Field | Values |
 |---|---|
 | `source` | `da_services`, `file_import` |
 | `exception_type` | as in §3 |
 | `state` | `EXCEPTION`, `FAILED_RETRY` |
-| `page_number`, `page_size` | from 1; `page_size` 1–200, default 50 |
+| `pagination_request` `current_page`, `page_size` | from 1; `page_size` 1–200; default page 1 of 50 |
+
+`response_payload` is the list; `pagination_response` gives `number_of_items`
+(all stuck DAs that match) and `number_of_pages`:
 
 ```json
 {
-  "total_count": 2,
-  "page_number": 1,
-  "page_size": 50,
-  "exceptions": [
+  "response_header": {"response_status": "SUCCESS", "...": "..."},
+  "response_body": {
+    "pagination_response": {"number_of_items": 2, "number_of_pages": 1},
+    "response_payload": [
     {
       "source": "file_import",
       "correlation_id": "0d9ad8dfee1a4efe956a1ca69be39d0f",
@@ -400,11 +419,12 @@ imported in the registry portal. All filters are optional:
       "received_at": "2026-10-07T07:04:55.793904",
       "updated_at": "2026-10-07T07:05:29.894349"
     }
-  ]
+    ]
+  }
 }
 ```
 
-Each entry reads exactly as `GET /partner/da/status` would report that record.
+Each entry reads exactly as `POST /da/get_push_status` would report that record.
 Only the latest attempt of a record is listed: once DA Services sends the same
 `reference_id` again (or a file row with the same Fayda ID is imported again)
 and it goes through, the old entry drops off. `correlation_id` works with §3.
@@ -427,15 +447,16 @@ In deployments the push and the search are checked:
 
 Both are off in the local stack. TODO(devops): register DA Services as a
 partner and agree the consent set-up per environment. The status lookup (§3)
-returns no personal data beyond the DA-ID; the exceptions list (§4) returns
-Fayda IDs and names. Neither checks a signature, so in deployments both must
-only be reachable by DA Services (network policy or gateway).
+and the exceptions list (§4) return Fayda IDs and names, so they are on the
+staff API: every call needs a Keycloak token with `incomingMessage:view`
+(earlier they were `GET /partner/da/status` and `/partner/da/exceptions` on
+the partner API, which checks no caller; those paths no longer exist).
 
 ## Open items
 
 1. **Updates** (a DA edits their profile): these go through the registry staff
-   API as change requests, with the DA's Keycloak token, not through this
-   partner API. See [da-services-staff-api.md](da-services-staff-api.md).
+   API as change requests, with DA Services' service account, not through
+   this partner API. See [da-services-staff-api.md §5.1](da-services-staff-api.md).
 2. **Bulk import:** push one request per DA and pace them (e.g. 1,000–2,000 at a time).
    Load test (local stack, 500 DAs by file import, default settings): all 500
    got a DA-ID in 49 minutes, about 10 a minute. The pipeline takes 4 records
