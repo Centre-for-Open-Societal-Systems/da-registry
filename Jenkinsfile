@@ -1,13 +1,13 @@
 // DA Registry (OpenG2P) -- CI/CD pipeline.
 //
 // Every branch: build the five images and push them to ECR.
-// develop:      deploy them to the dev cluster (untick DEPLOY_TO_DEV to build only): an upgrade of the
+// develop:      deploy them to the dev cluster, every build, no button: an upgrade of the
 //               existing release `da-registry` in namespace `da-registry`, with the chart archive
 //               and public values pinned in ci/deploy/oan-chart.json (oan-helm, verified by
 //               SHA-256) and `--reset-values`. Never an install, never an uninstall. If the
 //               upgrade or the rollout fails, diagnostics are saved and the release is rolled
-//               back to the last revision that was deployed. Moving the chart pin is a pull
-//               request (python3 ci/deploy/bump_pin.py), never part of a build.
+//               back to the last revision that was deployed. The last stage opens a pull
+//               request when oan-helm main has a newer chart or changed values; a person merges it.
 // staging/main: build and push only; no deploy target yet.
 pipeline {
     // The agent that reaches the dev cluster (as the livestock pipeline uses).
@@ -16,13 +16,6 @@ pipeline {
     options {
         // Overlapping runs collide on the helm upgrade ("another operation in progress").
         disableConcurrentBuilds()
-    }
-
-    parameters {
-        // On by default for develop: the release, the pinned values and the Keycloak
-        // client secret exist on the new dev cluster. Untick for a build-only run.
-        booleanParam(name: 'DEPLOY_TO_DEV', defaultValue: true,
-                     description: 'Deploy this develop build to the dev cluster (rolls back on failure)')
     }
 
     environment {
@@ -119,7 +112,7 @@ pipeline {
             // renders them with this commit's images, and runs `helm upgrade
             // --reset-values`. On a failed upgrade or rollout it saves pods, events and
             // logs (deploy-failure-<build>.txt), then rolls back to the last deployed revision.
-            when { allOf { branch 'develop'; expression { params.DEPLOY_TO_DEV } } }
+            when { branch 'develop' }
             steps {
                 withCredentials([file(credentialsId: "${DEV_KUBECONFIG_CRED_ID}", variable: 'KUBECONFIG')]) {
                     sh 'bash ci/deploy-dev.sh "${IMAGE_TAG}"'

@@ -1,6 +1,6 @@
 # Follow-ups to fix or review later
 
-Open items found while bringing the DA registry in line with the OpenG2P standards (29 October 2026). None of them blocks building and pushing the images; the dev deploy stays off (`DEPLOY_TO_DEV`, default false) until the open deployment items are done and the chart pin is filled in.
+Open items found while bringing the DA registry in line with the OpenG2P standards (29 October 2026). None of them blocks building and pushing the images; the dev deploy now runs on every `develop` build with the pinned chart (no parameter).
 
 ## Deployment (before turning the dev deploy on)
 
