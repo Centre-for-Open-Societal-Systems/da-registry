@@ -70,14 +70,16 @@ class Initializer(BaseInitializer):
         # which can fire more than once per process.
         await self._migrate_extension_tables()
 
-        # DA push status and exceptions list for DA Services, partner API only.
+        # DA push status and exceptions list, staff API only: they return DA
+        # names and Fayda IDs, so they sit behind the staff token and its
+        # permissions, not on the partner API, which checks no caller.
         # Mounted here because every initializer builds its own FastAPI app and
-        # the partner API's is the one served; this hook receives that app.
-        if "openg2p_registry_partner_api" in sys.modules:
-            from .partner_api import DAPushStatusController
+        # the staff API's is the one served; this hook receives that app.
+        if "openg2p_registry_staff_api" in sys.modules:
+            from .staff_api import DAIngestStatusController
 
-            app.include_router(DAPushStatusController().router)
-            _logger.info("Mounted GET /partner/da/status and /partner/da/exceptions")
+            app.include_router(DAIngestStatusController().router)
+            _logger.info("Mounted POST /da/get_push_status and /da/search_exceptions")
 
     def migrate_database(self, args):
         asyncio.run(self._migrate_extension_tables())
@@ -166,7 +168,7 @@ class Initializer(BaseInitializer):
                         )
                     )
 
-            # GET /partner/da/status looks a push up by DA Services' reference_id,
+            # POST /da/get_push_status looks a push up by DA Services' reference_id,
             # which only exists inside the stored request body.
             # A platform table: skipped if the platform has not created it yet.
             await conn.execute(

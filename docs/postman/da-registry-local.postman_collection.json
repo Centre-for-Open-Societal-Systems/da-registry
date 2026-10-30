@@ -1507,6 +1507,96 @@
           "response": []
         },
         {
+          "name": "S17b. Status of a push (by reference_id or correlation_id)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "X-CSRF-Token",
+                "value": "{{csrf}}"
+              },
+              {
+                "key": "Cookie",
+                "value": "X-CSRF-Token={{csrf}}"
+              }
+            ],
+            "url": {
+              "raw": "{{staff_api}}/da/get_push_status",
+              "host": [
+                "{{staff_api}}"
+              ],
+              "path": [
+                "da",
+                "get_push_status"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_header\": {\n    \"request_id\": \"{{$guid}}\",\n    \"request_timestamp\": \"{{$isoTimestamp}}\",\n    \"sender_app_mnemonic\": \"da-services\",\n    \"sender_app_url\": \"http://localhost\"\n  },\n  \"request_body\": {\n    \"request_payload\": {\n      \"reference_id\": \"FR-DA-0001\"\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Where a DA pushed by DA Services stands: QUEUED, GENERATED (with da_id), EXCEPTION (with reason) or FAILED_RETRY. Give reference_id (latest push of that record) or correlation_id (from the push response). Needs a token with incomingMessage:view (Operations Administrator or Integration Manager). Contract §3."
+          },
+          "response": []
+        },
+        {
+          "name": "S17c. Exceptions list (stuck pushes and import rows, newest first)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "X-CSRF-Token",
+                "value": "{{csrf}}"
+              },
+              {
+                "key": "Cookie",
+                "value": "X-CSRF-Token={{csrf}}"
+              }
+            ],
+            "url": {
+              "raw": "{{staff_api}}/da/search_exceptions",
+              "host": [
+                "{{staff_api}}"
+              ],
+              "path": [
+                "da",
+                "search_exceptions"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_header\": {\n    \"request_id\": \"{{$guid}}\",\n    \"request_timestamp\": \"{{$isoTimestamp}}\",\n    \"sender_app_mnemonic\": \"da-services\",\n    \"sender_app_url\": \"http://localhost\"\n  },\n  \"request_body\": {\n    \"request_payload\": {\n      \"source\": null,\n      \"exception_type\": null,\n      \"state\": null\n    },\n    \"pagination_request\": {\n      \"current_page\": 1,\n      \"page_size\": 20\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Every stuck DA from DA Services pushes and file imports. Optional filters: source (da_services, file_import), exception_type, state (EXCEPTION, FAILED_RETRY). Pagination in pagination_request (page_size 1-200). Same permission as S17b. Contract §4."
+          },
+          "response": []
+        },
+        {
           "name": "S18. Upload an import file (Excel / CSV)",
           "request": {
             "method": "POST",
@@ -1639,78 +1729,6 @@
               "raw": "{\n  \"header\": {\n    \"version\": \"1.0.0\",\n    \"message_id\": \"{{$guid}}\",\n    \"message_ts\": \"{{$isoTimestamp}}\",\n    \"sender_id\": \"da-services\",\n    \"data_model\": \"DA_SERVICES\"\n  },\n  \"signature\": \"local-dev\",\n  \"message\": {\n    \"reference_id\": \"FR-DA-0001\",\n    \"source\": \"CSV_IMPORT\",\n    \"approved_by\": \"Admin\",\n    \"da\": {\n      \"first_name\": \"Frehiwot\",\n      \"father_name\": \"Assefa\",\n      \"grandfather_name\": \"Bekele\",\n      \"fayda_id\": \"8045123456990001\",\n      \"gender\": \"Female\",\n      \"phone_number\": \"0911556677\",\n      \"education_level\": \"Masters\",\n      \"specialisation\": \"Agronomy\",\n      \"position\": \"Senior DA\",\n      \"kebele_id\": \"kebele-ET010101101001\",\n      \"marital_status\": \"MARRIED\",\n      \"birth_month_ec\": 4,\n      \"birth_year_ec\": 1985,\n      \"email\": \"abebe.kebede@example.org\"\n    }\n  }\n}"
             }
           }
-        },
-        {
-          "name": "18. Status of a push",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{partner_api}}/partner/da/status?reference_id=FR-DA-0001",
-              "host": [
-                "{{partner_api}}"
-              ],
-              "path": [
-                "partner",
-                "da",
-                "status"
-              ],
-              "query": [
-                {
-                  "key": "reference_id",
-                  "value": "FR-DA-0001"
-                }
-              ]
-            }
-          }
-        },
-        {
-          "name": "18b. Exceptions list (stuck DAs, newest first)",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{partner_api}}/partner/da/exceptions?page_number=1&page_size=20",
-              "host": [
-                "{{partner_api}}"
-              ],
-              "path": [
-                "partner",
-                "da",
-                "exceptions"
-              ],
-              "query": [
-                {
-                  "key": "page_number",
-                  "value": "1"
-                },
-                {
-                  "key": "page_size",
-                  "value": "20"
-                },
-                {
-                  "key": "source",
-                  "value": "da_services",
-                  "disabled": true,
-                  "description": "da_services | file_import"
-                },
-                {
-                  "key": "exception_type",
-                  "value": "DUPLICATE_IDENTITY",
-                  "disabled": true,
-                  "description": "DUPLICATE_IDENTITY | INVALID_KEBELE | MISSING_MANDATORY_FIELD | INVALID_FIELD | REJECTED | FAILED_SYNC"
-                },
-                {
-                  "key": "state",
-                  "value": "EXCEPTION",
-                  "disabled": true,
-                  "description": "EXCEPTION | FAILED_RETRY"
-                }
-              ]
-            },
-            "description": "Every DA that is stuck (DA Services pushes and file-import rows), with reason and exception_type. Only the latest attempt per record. correlation_id works with 18."
-          },
-          "response": []
         },
         {
           "name": "19. DCI search by DA-ID",

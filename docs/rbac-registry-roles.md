@@ -32,6 +32,7 @@ needs:
 | `change-requests/create_change_request` | `changeRequest:create` |
 | `change-requests/search_in_change_request` | `changeRequest:view` |
 | `register-data/get_export_queue_records` (the register list screen polls it) | `register:export` |
+| `da/get_push_status`, `da/search_exceptions` (DA extension: status of a push, exceptions list) | `incomingMessage:view` (Operations Administrator, Integration Manager) |
 
 ### Who approves a DA
 
@@ -110,10 +111,11 @@ the registry **server to server with its service account**:
 - **Service account:** a confidential Keycloak client in realm `staff` with
   service accounts on (local: `da-services-backend`, secret
   `dev-da-services-secret`, created by `keycloak-init.sh`); its service-account
-  user gets the client role `Data Editor` on `da-registry-staff-portal`
-  (view the register, create and view change requests, nothing else; it cannot
-  approve). Token: `POST /realms/staff/protocol/openid-connect/token` with
-  `grant_type=client_credentials`.
+  user gets the client roles `Data Editor` (view the register, create and view
+  change requests) and `Integration Manager` (read what came in, for the status
+  of its pushes and the exceptions list) on `da-registry-staff-portal`; it
+  cannot approve. Token: `POST /realms/staff/protocol/openid-connect/token`
+  with `grant_type=client_credentials`.
 - **Who may see or change which record is DA Services' rule**, not the
   registry's: the registry trusts the service account, so DA Services must
   never pass a DA-ID the signed-in user does not own. The registry records the

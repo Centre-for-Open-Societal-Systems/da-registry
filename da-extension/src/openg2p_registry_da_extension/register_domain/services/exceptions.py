@@ -2,7 +2,7 @@
 
 Covers both partner intake routes: DA Services pushes and file import (CSV /
 XLSX) rows. Each record is judged with push_status.derive_state, so a row here
-reads exactly as GET /partner/da/status would report it; only EXCEPTION and
+reads exactly as POST /da/get_push_status would report it; only EXCEPTION and
 FAILED_RETRY rows are listed.
 
 Only the latest attempt of a record counts, so a record that was sent again
