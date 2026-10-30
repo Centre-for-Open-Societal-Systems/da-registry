@@ -52,8 +52,8 @@ While the commit and the two SHA-256 values are all zeros, every chart operation
 
 ## Deploy
 
-`ci/deploy-dev.sh <12-char-commit>` (run by the Jenkinsfile's "Deploy to Development" stage when
-`DEPLOY_TO_DEV` is ticked on `develop`) downloads and verifies the archive and values, requires the
+`ci/deploy-dev.sh <12-char-commit>` (run by the Jenkinsfile's "Deploy to Development" stage on
+every `develop` build) downloads and verifies the archive and values, requires the
 release to exist, renders the manifests, and runs `helm upgrade --reset-values` with the pinned
 values and this build's six images (`staff-api`, `partner-api`, `celery` for worker and beat,
 `staff-ui`, `db-seed`, each with `enabled: true`) on top. It never installs, never uninstalls and
