@@ -1,10 +1,13 @@
 // DA Registry (OpenG2P) -- CI/CD pipeline.
 //
 // Every branch: build the five images and push them to ECR.
-// develop:      deploy them to the dev cluster only when DEPLOY_TO_DEV is ticked: an upgrade of the
+// develop:      deploy them to the dev cluster (untick DEPLOY_TO_DEV to build only): an upgrade of the
 //               existing release `da-registry` in namespace `da-registry`, with the chart archive
 //               and public values pinned in ci/deploy/oan-chart.json (oan-helm, verified by
-//               SHA-256) and `--reset-values`. Never an install, never an uninstall.
+//               SHA-256) and `--reset-values`. Never an install, never an uninstall. If the
+//               upgrade or the rollout fails, diagnostics are saved and the release is rolled
+//               back to the last revision that was deployed. Moving the chart pin is a pull
+//               request (python3 ci/deploy/bump_pin.py), never part of a build.
 // staging/main: build and push only; no deploy target yet.
 pipeline {
     // The agent that reaches the dev cluster (as the livestock pipeline uses).
@@ -16,12 +19,10 @@ pipeline {
     }
 
     parameters {
-        // Off by default: a develop build only builds and pushes the images. The
-        // dev deploy waits until the release target, the pinned values and the
-        // Keycloak client secret the values reference exist; then a person ticks
-        // this on a develop build.
-        booleanParam(name: 'DEPLOY_TO_DEV', defaultValue: false,
-                     description: 'Deploy this develop build to the dev cluster')
+        // On by default for develop: the release, the pinned values and the Keycloak
+        // client secret exist on the new dev cluster. Untick for a build-only run.
+        booleanParam(name: 'DEPLOY_TO_DEV', defaultValue: true,
+                     description: 'Deploy this develop build to the dev cluster (rolls back on failure)')
     }
 
     environment {
@@ -39,8 +40,9 @@ pipeline {
 
         // Dev deployment. The chart, its version, the public values, the release and
         // the namespace are all read from ci/deploy/oan-chart.json by ci/deploy-dev.sh.
-        // Kubeconfig (Jenkins "Secret file") allowed to upgrade the release in its namespace.
-        DEV_KUBECONFIG_CRED_ID = "da-dev-kubeconfig"
+        // Kubeconfig (Jenkins "Secret file") for ServiceAccount da-registry-ci, which can
+        // act in namespace da-registry only (k8s/da-registry-newdev-rbac.yaml).
+        DEV_KUBECONFIG_CRED_ID = "da-registry-newdev-kubeconfig"
     }
 
     stages {
@@ -53,6 +55,14 @@ pipeline {
             // included: no network, no cluster.
             steps {
                 sh 'docker run --rm --network none --entrypoint python -v "$PWD:/work:ro" -w /work openg2p/openg2p-registry-staff-api:${RP_VERSION} -m unittest discover -s test -p test_oan_chart.py -v'
+            }
+        }
+
+        stage('Check deploy script') {
+            // Rollback behaviour and the pin updater, with stand-in helm/kubectl:
+            // no network, no cluster.
+            steps {
+                sh 'python3 -m unittest discover -s test -p "test_deploy_ci.py" -v'
             }
         }
 
@@ -104,8 +114,8 @@ pipeline {
             // name or namespace fails instead of creating a second release.
             // ci/deploy-dev.sh verifies the pinned chart archive and public values,
             // renders them with this commit's images, and runs `helm upgrade
-            // --reset-values`. No --atomic: a failing db-seed hook should leave the
-            // release inspectable, not roll it back.
+            // --reset-values`. On a failed upgrade or rollout it saves pods, events and
+            // logs (deploy-failure-<build>.txt), then rolls back to the last deployed revision.
             when { allOf { branch 'develop'; expression { params.DEPLOY_TO_DEV } } }
             steps {
                 withCredentials([file(credentialsId: "${DEV_KUBECONFIG_CRED_ID}", variable: 'KUBECONFIG')]) {
@@ -114,7 +124,7 @@ pipeline {
             }
             post {
                 always {
-                    archiveArtifacts artifacts: 'dev-values-before-*.yaml, dev-rendered-*.yaml', allowEmptyArchive: true
+                    archiveArtifacts artifacts: 'dev-values-before-*.yaml, dev-rendered-*.yaml, deploy-failure-*.txt', allowEmptyArchive: true
                 }
             }
         }
@@ -122,7 +132,7 @@ pipeline {
 
     post {
         failure {
-            echo "DA registry ${env.BRANCH_NAME} build/deploy failed. For a deploy failure, 'helm history da-registry -n da-registry' shows the release state."
+            echo "DA registry ${env.BRANCH_NAME} build/deploy failed. A failed deploy is rolled back automatically; see the archived deploy-failure-${env.BUILD_NUMBER}.txt and 'helm history da-registry -n da-registry'."
         }
         always {
             sh 'docker image prune -f || true'

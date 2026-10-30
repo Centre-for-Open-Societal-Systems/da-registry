@@ -205,3 +205,4 @@ docker/db-seed/openg2p-data-local/
 # Files the dev deploy writes into the workspace for Jenkins to archive.
 dev-rendered-*.yaml
 dev-values-before-*.yaml
+deploy-failure-*.txt

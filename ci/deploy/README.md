@@ -18,6 +18,12 @@ moving branch URL and no `--reuse-values`.
 
 ## Moving the pin to a new oan-helm release
 
+**Script:** `python3 ci/deploy/bump_pin.py <40-hex oan-helm commit>` does steps 2 to 5 below (it also reads the
+chart version from `releases/current.yaml` at that commit, or take `--version`). It cross-checks the archive against
+`repository/SHA256SUMS` at that commit and prints old -> new; add `--write` to update `oan-chart.json`, then run
+step 6 and open the pull request. If the platform version changes, it reminds you to move `RP_VERSION` in the
+Jenkinsfile and the Dockerfiles in the same PR. A build never moves the pin.
+
 1. Merge the oan-helm change; its release workflow publishes the chart and commits it to
    `repository/` on `main`. Note that commit (the one that contains the archive and the
    `repository/index.yaml` entry for the version).
@@ -47,3 +53,15 @@ The deploy node needs `python3`; PyYAML is vendored under `ci/deploy/vendor` (ve
 `requirements.txt`) for an agent without it. Archives and values can be pre-downloaded into
 `.central-charts/` (`oan_chart.py prefetch registry`); a corrupt cached archive fails closed with no
 network fallback.
+
+## Rollback
+
+If `helm upgrade` fails or one of the three application Deployments does not roll out, `ci/deploy-dev.sh` first writes
+`deploy-failure-<build>.txt` (release history, pods, warning events, logs, jobs; Jenkins archives it), then runs
+`helm rollback` to the last revision that was `deployed` before the build, and fails the build. It does not use
+`--atomic`, so the evidence is saved before the pods are removed. A rollback restores the chart and values only: it
+cannot undo database changes made by an init or db-seed hook. If the release has no earlier `deployed` revision, the
+build fails with no rollback.
+
+Tests (no network or cluster): `python3 -m unittest discover -s test -p test_deploy_ci.py -v`; the Jenkinsfile runs
+them in the "Check deploy script" stage.
