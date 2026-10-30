@@ -43,6 +43,9 @@ pipeline {
         // Kubeconfig (Jenkins "Secret file") for ServiceAccount da-registry-ci, which can
         // act in namespace da-registry only (k8s/da-registry-newdev-rbac.yaml).
         DEV_KUBECONFIG_CRED_ID = "da-registry-newdev-kubeconfig"
+        // Used only by the last stage, to open a chart-pin pull request: a Jenkins GitHub App
+        // (or "Username with password") credential with Contents and Pull requests write on this repository.
+        PIN_PR_CRED_ID = "oan-ci-app"
     }
 
     stages {
@@ -125,6 +128,23 @@ pipeline {
             post {
                 always {
                     archiveArtifacts artifacts: 'dev-values-before-*.yaml, dev-rendered-*.yaml, deploy-failure-*.txt', allowEmptyArchive: true
+                }
+            }
+        }
+
+        stage('Propose chart pin update') {
+            // After a successful build and deploy: compare the pinned oan-helm chart and public
+            // values with oan-helm main and, when they differ, open a pull request that moves the
+            // pin (ci/deploy/propose_pin_pr.py). A person merges it; the merge deploys. This stage
+            // never deploys and never fails the build: if the credential is missing or GitHub
+            // refuses, the stage turns UNSTABLE and says why.
+            when { branch 'develop' }
+            steps {
+                catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
+                    sh 'python3 ci/deploy/bump_pin.py --latest'
+                    withCredentials([usernamePassword(credentialsId: "${PIN_PR_CRED_ID}", usernameVariable: 'GH_USER', passwordVariable: 'GH_TOKEN')]) {
+                        sh 'python3 ci/deploy/propose_pin_pr.py'
+                    }
                 }
             }
         }
