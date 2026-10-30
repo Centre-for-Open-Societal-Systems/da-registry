@@ -111,11 +111,13 @@ the registry **server to server with its service account**:
 - **Service account:** a confidential Keycloak client in realm `staff` with
   service accounts on (local: `da-services-backend`, secret
   `dev-da-services-secret`, created by `keycloak-init.sh`); its service-account
-  user gets the client roles `Data Editor` (view the register, create and view
+  user gets the client roles `Intake Officer` (form layout, register a DA,
+  start a file import), `Data Editor` (view the register, create and view
   change requests) and `Integration Manager` (read what came in, for the status
   of its pushes and the exceptions list) on `da-registry-staff-portal`; it
   cannot approve. Token: `POST /realms/staff/protocol/openid-connect/token`
-  with `grant_type=client_credentials`.
+  with `grant_type=client_credentials`. In other environments DevOps creates
+  the client with the same three roles.
 - **Who may see or change which record is DA Services' rule**, not the
   registry's: the registry trusts the service account, so DA Services must
   never pass a DA-ID the signed-in user does not own. The registry records the

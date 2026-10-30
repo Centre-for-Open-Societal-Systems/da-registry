@@ -371,11 +371,12 @@ done
 # client's service account (client credentials). A Development Agent signs in to
 # DA Services only; DA Services fetches and changes only that DA's record (found
 # by DA-ID) and the change request goes through the normal two-stage approval
-# (docs/rbac-registry-roles.md section 5). Role Data Editor: view the register,
-# create and view change requests. Role Integration Manager: read what came in,
-# so DA Services can ask the status of its pushes and the exceptions list
-# (staff API /da/get_push_status, /da/search_exceptions). It cannot approve.
-# Local value of the secret only.
+# (docs/rbac-registry-roles.md section 5). Role Intake Officer: read the form
+# layout, register a DA (save and finalize) and start a file import. Role Data
+# Editor: view the register, create and view change requests. Role Integration
+# Manager: read what came in, so DA Services can ask the status of its pushes
+# and the exceptions list (staff API /da/get_push_status, /da/search_exceptions).
+# It cannot approve. Local value of the secret only.
 KEYCLOAK_DA_SERVICES_CLIENT_SECRET="${KEYCLOAK_DA_SERVICES_CLIENT_SECRET:-dev-da-services-secret}"
 ensure_client "da-services-backend" \
   -s enabled=true \
@@ -384,6 +385,7 @@ ensure_client "da-services-backend" \
   -s serviceAccountsEnabled=true \
   -s standardFlowEnabled=false \
   -s directAccessGrantsEnabled=false
+assign_client_role "service-account-da-services-backend" "da-registry-staff-portal" "Intake Officer"
 assign_client_role "service-account-da-services-backend" "da-registry-staff-portal" "Data Editor"
 assign_client_role "service-account-da-services-backend" "da-registry-staff-portal" "Integration Manager"
 # The db-seed sample loader submits the pack's sample DAs through the intake
