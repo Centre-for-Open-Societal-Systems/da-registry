@@ -208,5 +208,272 @@ class BumpPinTests(unittest.TestCase):
             self.bump.new_pin(self.COMMIT, version="0.0.0-develop.1", fetch=self.fetch)
 
 
+class ProposePinTests(unittest.TestCase):
+    """--latest: what the scheduled workflow uses to decide whether to open a pin pull request."""
+    HEAD = "c" * 40
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.bump = load_bump()
+        self.root = Path(self.tmp.name)
+        (self.root / "ci/deploy").mkdir(parents=True)
+        (self.root / "test").mkdir()
+        (self.root / "docker/staff-api").mkdir(parents=True)
+        (self.root / "docker/local-dev/data-loaders").mkdir(parents=True)
+        shutil.copy(ROOT / "ci/deploy/oan-chart.json", self.root / "ci/deploy/oan-chart.json")
+        shutil.copy(ROOT / "test/test_oan_chart.py", self.root / "test/test_oan_chart.py")
+        shutil.copy(ROOT / "Jenkinsfile", self.root / "Jenkinsfile")
+        for name in ("docker/staff-api/Dockerfile", "docker/local-dev/data-loaders/Dockerfile"):
+            shutil.copy(ROOT / "docker/staff-api/Dockerfile", self.root / name)
+        self.bump.PROFILE = self.root / "ci/deploy/oan-chart.json"
+        self.bump.ROOT = self.root
+        self.old = json.loads(self.bump.PROFILE.read_text(encoding="utf-8"))
+        self.pinned = self.old["registry"]
+        self.files = {}
+
+    def publish(self, version, app, values=b"registry: {}\n"):
+        archive = fake_archive(version=version, app=app)
+        name = "openg2p-da-registry-%s.tgz" % version
+        self.files = {
+            "releases/current.yaml": ("charts:\n  openg2p-da-registry: %s\n" % version).encode(),
+            "repository/" + name: archive,
+            "repository/SHA256SUMS": ("%s  %s\n" % (hashlib.sha256(archive).hexdigest(), name)).encode(),
+            "environments/dev/values/da.yaml": values,
+        }
+        return hashlib.sha256(archive).hexdigest()
+
+    def fetch(self, uri):
+        return self.files[uri.split("/oan-helm/" + self.HEAD + "/")[1]]
+
+    def propose(self):
+        return self.bump.proposal(self.old, fetch=self.fetch, head=lambda: self.HEAD)
+
+    def test_version_order(self):
+        key = self.bump.version_key
+        self.assertLess(key("1.0.0-dev.9"), key("1.0.0-dev.10"))     # numeric, not text order
+        self.assertLess(key("1.0.0-dev.20"), key("1.0.0-dev.21"))
+        self.assertLess(key("1.0.0-dev.99"), key("1.0.0"))
+        with self.assertRaises(ValueError):
+            key("latest")
+
+    def test_newer_chart_is_proposed(self):
+        self.publish("1.0.0-dev.21", "1.2.2-rc.700")
+        new, why = self.propose()
+        self.assertIsNotNone(new)
+        self.assertIn("newer chart 1.0.0-dev.21", why)
+        self.assertTrue(new["registry"]["repository"].endswith("/oan-helm/" + self.HEAD + "/repository/"))
+
+    def test_same_chart_and_values_is_up_to_date(self):
+        digest = self.publish(self.pinned["version"], self.pinned["platformVersion"])
+        self.pinned["sha256"] = digest                      # as if the archive were the pinned one
+        self.pinned["values"]["sha256"] = hashlib.sha256(self.files["environments/dev/values/da.yaml"]).hexdigest()
+        new, why = self.propose()
+        self.assertIsNone(new)
+        self.assertIn("up to date", why)
+
+    def test_values_only_change_is_proposed_with_the_same_chart(self):
+        digest = self.publish(self.pinned["version"], self.pinned["platformVersion"], values=b"registry: {changed: true}\n")
+        self.pinned["sha256"] = digest
+        new, why = self.propose()
+        self.assertIsNotNone(new)
+        self.assertIn("public values changed", why)
+        self.assertEqual(new["registry"]["version"], self.pinned["version"])
+
+    def test_older_chart_is_never_proposed(self):
+        self.publish("1.0.0-dev.19", "1.2.2-rc.600")
+        with self.assertRaisesRegex(ValueError, "downgrade"):
+            self.propose()
+
+    def test_changed_archive_for_the_same_version_is_refused(self):
+        self.publish(self.pinned["version"], "1.2.2-rc.999")  # different bytes, same version
+        with self.assertRaisesRegex(ValueError, "immutable"):
+            self.propose()
+
+    def test_head_commit_is_read_with_git_ls_remote(self):
+        out = "%s\trefs/heads/main\n" % self.HEAD
+        self.assertEqual(self.bump.head_commit(run=lambda cmd: out), self.HEAD)
+        with self.assertRaises(ValueError):
+            self.bump.head_commit(run=lambda cmd: "")
+
+    def test_files_that_must_agree_are_updated_with_the_pin(self):
+        self.publish("1.0.0-dev.21", "1.2.2-rc.700")
+        new, _ = self.propose()
+        changed = self.bump.update_companions(self.pinned, new["registry"], root=self.root)
+        text = lambda rel: (self.root / rel).read_text(encoding="utf-8")
+        self.assertIn('RP_VERSION     = "1.2.2-rc.700"', text("Jenkinsfile"))
+        self.assertIn('self.assertEqual(pin["version"], "1.0.0-dev.21")', text("test/test_oan_chart.py"))
+        self.assertIn("ARG RP_VERSION=1.2.2-rc.700", text("docker/staff-api/Dockerfile"))
+        self.assertIn("ARG RP_VERSION=1.2.2-rc.700", text("docker/local-dev/data-loaders/Dockerfile"))
+        self.assertEqual(sorted(changed), sorted(["Jenkinsfile", "test/test_oan_chart.py", "docker/staff-api/Dockerfile",
+                                                  "docker/local-dev/data-loaders/Dockerfile"]))
+
+    def test_values_only_change_leaves_platform_files_alone(self):
+        digest = self.publish(self.pinned["version"], self.pinned["platformVersion"], values=b"registry: {x: 1}\n")
+        self.pinned["sha256"] = digest
+        new, _ = self.propose()
+        self.assertEqual(self.bump.update_companions(self.pinned, new["registry"], root=self.root), [])
+
+
+def load_propose():
+    spec = importlib.util.spec_from_file_location("propose_under_test", ROOT / "ci/deploy/propose_pin_pr.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class ProposePullRequestTests(unittest.TestCase):
+    """The last Jenkins stage: opens the pin pull request, with a stand-in git and GitHub."""
+    TOKEN = "tok-SECRET-123"
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        for rel in ("ci/deploy", "test", "docker/staff-api"):
+            (self.root / rel).mkdir(parents=True)
+        shutil.copy(ROOT / "ci/deploy/oan-chart.json", self.root / "ci/deploy/oan-chart.json")
+        shutil.copy(ROOT / "test/test_oan_chart.py", self.root / "test/test_oan_chart.py")
+        shutil.copy(ROOT / "Jenkinsfile", self.root / "Jenkinsfile")
+        shutil.copy(ROOT / "docker/staff-api/Dockerfile", self.root / "docker/staff-api/Dockerfile")
+        self.mod = load_propose()
+        self.bump = load_bump()
+        self.bump.PROFILE = self.root / "ci/deploy/oan-chart.json"
+        self.bump.ROOT = self.root
+        old = json.loads(self.bump.PROFILE.read_text(encoding="utf-8"))
+        new = json.loads(json.dumps(old))
+        pin = new["registry"]
+        pin["version"] = "1.0.0-dev.21"
+        pin["platformVersion"] = "1.2.2-rc.700"
+        pin["sha256"] = "a" * 64
+        pin["values"]["sha256"] = "b" * 64
+        pin["repository"] = "https://raw.githubusercontent.com/Centre-for-Open-Societal-Systems/oan-helm/" + "e" * 40 + "/repository/"
+        pin["values"]["url"] = pin["repository"][:-len("repository/")] + pin["values"]["path"]
+        self.new = new
+        self.proposal_result = (new, "newer chart 1.0.0-dev.21 released (pinned 1.0.0-dev.20)")
+        self.bump.proposal = lambda old_profile: self.proposal_result
+        self.cmds = []
+        self.calls = []
+        self.exists = ""          # what `git ls-remote` prints
+        self.pulls = (200, [])    # answer to the pull request list
+        self.create = (201, {"html_url": "https://github.com/o/r/pull/7"})
+        self.fail_on = None       # a label whose command should fail
+
+    def runner(self, cmd, label=None, cwd=None, env=None, check=True):
+        self.cmds.append((label or cmd[0], cmd))
+        if label == self.fail_on:
+            raise RuntimeError("%s failed (exit 1):\nboom" % label)
+        if label == "git remote get-url":
+            return "https://github.com/o/r.git\n"
+        if label == "git rev-parse":
+            return "f" * 40 + "\n"
+        if label == "git ls-remote":
+            return self.exists
+        return ""
+
+    def call(self, method, path, token, payload=None):
+        self.calls.append((method, path, payload))
+        return self.pulls if method == "GET" else self.create
+
+    def go(self, token=None):
+        out = io.StringIO()
+        import contextlib
+        with contextlib.redirect_stdout(out):
+            code = self.mod.propose(self.TOKEN if token is None else token, bump=self.bump, runner=self.runner,
+                                    call=self.call, root=self.root)
+        return code, out.getvalue()
+
+    def labels(self):
+        return [label for label, _ in self.cmds]
+
+    def test_nothing_to_do_touches_neither_git_nor_github(self):
+        self.proposal_result = (None, "up to date: chart 1.0.0-dev.20 and its values are unchanged on oan-helm main")
+        code, out = self.go()
+        self.assertEqual((code, self.cmds, self.calls), (0, [], []))
+        self.assertIn("up to date", out)
+
+    def test_a_needed_update_without_a_credential_proposes_nothing(self):
+        code, out = self.go(token="")
+        self.assertEqual(code, 3)
+        self.assertEqual((self.cmds, self.calls), ([], []))
+        self.assertIn("no GitHub credential", out)
+
+    def test_full_proposal_flow(self):
+        code, out = self.go()
+        self.assertEqual(code, 0, out)
+        labels = self.labels()
+        order = ["git rev-parse", "the pin tests", "verified prefetch of the new pin", "git checkout -b", "git add",
+                 "git commit", "git push", "git checkout", "git branch -D"]
+        positions = [labels.index(name) for name in order]
+        self.assertEqual(positions, sorted(positions))
+        # the pin and the files that must agree with it were rewritten on disk
+        self.assertIn("1.0.0-dev.21", (self.root / "ci/deploy/oan-chart.json").read_text())
+        self.assertIn('RP_VERSION     = "1.2.2-rc.700"', (self.root / "Jenkinsfile").read_text())
+        add = next(cmd for label, cmd in self.cmds if label == "git add")
+        self.assertIn("ci/deploy/oan-chart.json", add)
+        # the pull request goes to develop from a branch named for the version and values
+        method, path, payload = self.calls[-1]
+        self.assertEqual((method, path), ("POST", "/repos/o/r/pulls"))
+        self.assertEqual(payload["base"], "develop")
+        self.assertEqual(payload["head"], "bot/oan-chart-pin-1.0.0-dev.21-" + "b" * 8)
+        self.assertIn("Merging this deploys to dev", payload["body"])
+        self.assertIn("opened https://github.com/o/r/pull/7", out)
+        # the workspace is restored to the commit the build checked out
+        restore = next(cmd for label, cmd in self.cmds if label == "git checkout")
+        self.assertEqual(restore[-1], "f" * 40)
+
+    def test_the_token_is_never_printed_or_used_as_a_label(self):
+        code, out = self.go()
+        self.assertNotIn(self.TOKEN, out)
+        self.assertNotIn(self.TOKEN, " ".join(self.labels()))
+        push = next(cmd for label, cmd in self.cmds if label == "git push")
+        self.assertNotIn(self.TOKEN, " ".join(push))                  # sent only as a base64 basic-auth header
+        self.assertTrue(any(a.startswith("http.extraheader=AUTHORIZATION: basic ") for a in push))
+
+    def test_an_existing_pull_request_is_not_proposed_again(self):
+        self.pulls = (200, [{"html_url": "https://github.com/o/r/pull/3", "state": "closed"}])
+        code, out = self.go()
+        self.assertEqual(code, 0)
+        self.assertIn("Already proposed", out)
+        self.assertNotIn("git push", self.labels())
+        self.assertEqual([c[0] for c in self.calls], ["GET"])
+
+    def test_an_existing_branch_without_a_pull_request_only_opens_the_pull_request(self):
+        self.exists = "abc\trefs/heads/bot/x\n"
+        code, out = self.go()
+        self.assertEqual(code, 0)
+        self.assertNotIn("git push", self.labels())
+        self.assertEqual(self.calls[-1][0], "POST")
+
+    def test_failed_verification_pushes_nothing_and_restores_the_workspace(self):
+        self.fail_on = "the pin tests"
+        with self.assertRaisesRegex(RuntimeError, "the pin tests failed"):
+            self.go()
+        self.assertNotIn("git push", self.labels())
+        self.assertIn("git checkout", self.labels())
+        self.assertEqual([c[0] for c in self.calls], ["GET"])
+
+    def test_github_refusing_to_list_pull_requests_is_reported(self):
+        self.pulls = (403, {"message": "Resource not accessible by integration"})
+        code, out = self.go()
+        self.assertEqual(code, 4)
+        self.assertIn("Pull requests write", out)
+        self.assertNotIn("git push", self.labels())
+
+    def test_github_refusing_to_create_the_pull_request_is_reported(self):
+        self.create = (403, {"message": "Resource not accessible by integration"})
+        code, out = self.go()
+        self.assertEqual(code, 4)
+        self.assertIn("is pushed; open the pull request", out)
+
+    def test_repository_slug(self):
+        slug = self.mod.slug_of
+        self.assertEqual(slug("https://github.com/Centre-for-Open-Societal-Systems/da-registry.git\n"),
+                         "Centre-for-Open-Societal-Systems/da-registry")
+        self.assertEqual(slug("git@github.com:o/r.git"), "o/r")
+        with self.assertRaises(ValueError):
+            slug("https://gitlab.com/o/r.git")
+
+
 if __name__ == "__main__":
     unittest.main()
