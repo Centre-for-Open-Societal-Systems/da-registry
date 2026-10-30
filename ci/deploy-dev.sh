@@ -16,6 +16,11 @@
 #      pinned public values and this build's images on top. Nothing is carried over
 #      from the live release, so the release is exactly what the pin and this build say.
 #   5. Wait for the application Deployments to roll out.
+#   6. If the upgrade or the rollout fails: save pods, events and logs to
+#      deploy-failure-<build>.txt (Jenkins archives it), then `helm rollback` to the last
+#      revision that was `deployed` before this build, and fail the build. A rollback
+#      restores the chart and values only; it cannot undo database changes made by a
+#      db-seed or init hook, so a failure that already migrated data still needs a look.
 #
 # Env:
 #   IMAGE_TAG        first argument: the 12-character commit the images were built from  required
@@ -109,26 +114,61 @@ echo "rendered $(wc -l < "$WORK/rendered.yaml") lines of manifests"
 cp "$WORK/rendered.yaml" "dev-rendered-${BUILD_NUMBER:-manual}.yaml"
 helm get values "$HELM_RELEASE" "${NS[@]}" -a -o yaml > "dev-values-before-${BUILD_NUMBER:-manual}.yaml"
 
+# Revision to go back to: the last one Helm recorded as `deployed` before this build.
+PREV="$(helm history "$HELM_RELEASE" "${NS[@]}" -o json 2>/dev/null | python3 -c '
+import json, sys
+try:
+    rows = json.load(sys.stdin)
+except ValueError:
+    rows = []
+done = [r["revision"] for r in rows if r.get("status") == "deployed"]
+print(done[-1] if done else "")
+')"
+if [ -n "$PREV" ]; then echo "rollback target: revision ${PREV}"; else echo "rollback target: none (no deployed revision found)"; fi
+
+# Save what an operator needs, then put the release back and fail the build.
+fail_and_rollback() {
+  local why="$1" report="deploy-failure-${BUILD_NUMBER:-manual}.txt"
+  say "FAILED: ${why}" >&2
+  {
+    echo "== failure: ${why}"
+    echo "== helm history"; helm history "$HELM_RELEASE" "${NS[@]}" --max 6 || true
+    echo "== pods"; kubectl get pods "${NS[@]}" -l "app.kubernetes.io/instance=${HELM_RELEASE}" -o wide || true
+    echo "== pods not Running/Succeeded"; kubectl get pods "${NS[@]}" --field-selector=status.phase!=Running,status.phase!=Succeeded || true
+    echo "== warning events"; kubectl get events "${NS[@]}" --field-selector type=Warning --sort-by=.lastTimestamp | tail -40 || true
+    for D in staff-portal-api staff-portal-ui partner-api; do
+      echo "== logs ${HELM_RELEASE}-${D}"
+      kubectl logs "deploy/${HELM_RELEASE}-${D}" "${NS[@]}" --all-containers --prefix --tail=60 2>&1 || true
+    done
+    echo "== jobs"; kubectl get jobs "${NS[@]}" || true
+  } > "$report" 2>&1 || true
+  echo "diagnostics saved to ${report}" >&2
+  if [ -n "$PREV" ]; then
+    say "rolling back ${HELM_RELEASE} to revision ${PREV}" >&2
+    if helm rollback "$HELM_RELEASE" "$PREV" "${NS[@]}" --wait --timeout "$HELM_TIMEOUT"; then
+      say "rolled back to revision ${PREV}; the previous release is running again" >&2
+    else
+      say "ROLLBACK FAILED: the release needs attention: helm -n ${HELM_NAMESPACE} history ${HELM_RELEASE}" >&2
+    fi
+  else
+    say "no earlier deployed revision to roll back to" >&2
+  fi
+  exit 1
+}
+
 say "helm upgrade started $(date -u +%H:%M:%S) UTC (timeout ${HELM_TIMEOUT})"
-# No --install, no --atomic: a failing db-seed hook leaves the release inspectable
-# instead of rolling it back.
+# No --install, no --atomic: on failure fail_and_rollback saves diagnostics first, then
+# rolls back, so the evidence is kept (a plain --atomic would delete it with the pods).
 if ! helm upgrade "$HELM_RELEASE" "$CHART_ARCHIVE" "${NS[@]}" \
       --reset-values "${VALUES[@]}" --cleanup-on-fail --timeout "$HELM_TIMEOUT"; then
-  say "release history" >&2
-  helm history "$HELM_RELEASE" "${NS[@]}" --max 5 >&2 || true
-  say "recent warning events" >&2
-  kubectl get events "${NS[@]}" --field-selector type=Warning --sort-by=.lastTimestamp 2>/dev/null | tail -20 >&2 || true
-  exit 1
+  fail_and_rollback "helm upgrade did not complete"
 fi
 say "helm upgrade finished $(date -u +%H:%M:%S) UTC"
 
 say "Rollout"
 for D in staff-portal-api staff-portal-ui partner-api; do
   if ! kubectl rollout status "deployment/${HELM_RELEASE}-${D}" "${NS[@]}" --timeout="$ROLLOUT_TIMEOUT"; then
-    echo "ERROR: ${HELM_RELEASE}-${D} did not roll out within ${ROLLOUT_TIMEOUT}." >&2
-    kubectl get pods "${NS[@]}" -l "app.kubernetes.io/instance=${HELM_RELEASE}" -o wide >&2 || true
-    kubectl logs "deploy/${HELM_RELEASE}-${D}" "${NS[@]}" --all-containers --prefix --tail=60 >&2 || true
-    exit 1
+    fail_and_rollback "${HELM_RELEASE}-${D} did not roll out within ${ROLLOUT_TIMEOUT}"
   fi
 done
 
