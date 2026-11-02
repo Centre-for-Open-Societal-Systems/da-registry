@@ -206,3 +206,6 @@ docker/db-seed/openg2p-data-local/
 dev-rendered-*.yaml
 dev-values-before-*.yaml
 deploy-failure-*.txt
+
+# CI scratch (digests and the oan-helm pull request URL written by the pipeline)
+/.build/

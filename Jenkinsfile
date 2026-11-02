@@ -6,8 +6,10 @@
 //               and public values pinned in ci/deploy/oan-chart.json (oan-helm, verified by
 //               SHA-256) and `--reset-values`. Never an install, never an uninstall. If the
 //               upgrade or the rollout fails, diagnostics are saved and the release is rolled
-//               back to the last revision that was deployed. The last stage opens a pull
-//               request when oan-helm main has a newer chart or changed values; a person merges it.
+//               back to the last revision that was deployed. Then two stages open pull requests into
+//               oan-helm and never fail the build: one when oan-helm main has a newer chart or changed values
+//               (the chart pin), and, last, one that records this build's image tags and digests in the oan-helm
+//               DA chart (from the fork of oan-helm, ci/deploy/release_images.py). A person merges them.
 // staging/main: build and push only; no deploy target yet.
 pipeline {
     // The agent that reaches the dev cluster (as the livestock pipeline uses).
@@ -39,6 +41,9 @@ pipeline {
         // Used only by the last stage, to open a chart-pin pull request: a Jenkins GitHub App
         // (or "Username with password") credential with Contents and Pull requests write on this repository.
         PIN_PR_CRED_ID = "oan-ci-app"
+        // Used only by the very last stage: "Username with password" = the GitHub account that owns the fork of oan-helm
+        // and its classic token (public_repo). The image pull request goes from that fork into oan-helm main.
+        OAN_HELM_FORK_CRED_ID = "oan-helm-fork-token"
     }
 
     stages {
@@ -89,6 +94,10 @@ pipeline {
                         [name: 'db-seed',     dockerfile: 'docker/db-seed/Dockerfile',     args: "--build-arg RP_VERSION=${RP_VERSION}"],
                     ]
 
+                    // The ECR digest of each image, for the oan-helm image pull request (last stage): read from the
+                    // push output, so no extra AWS permission is needed. component<TAB>sha256:...
+                    sh 'mkdir -p .build && rm -f .build/image-digests.tsv .build/oan-helm-pr.txt'
+
                     // Each environment branch also moves a tag of its own name.
                     def movingTag = (env.BRANCH_NAME in ['develop', 'staging', 'main']) ? env.BRANCH_NAME : null
                     components.each { c ->
@@ -97,7 +106,11 @@ pipeline {
                         sh """
                             docker build ${c.args} \
                                 -f ${c.dockerfile} -t ${image} ${latest ? "-t ${latest}" : ''} .
-                            docker push ${image}
+                            docker push ${image} > .build/push-${c.name}.log 2>&1 || { cat .build/push-${c.name}.log; exit 1; }
+                            cat .build/push-${c.name}.log
+                            d=\$(grep -oE 'digest: sha256:[0-9a-f]{64}' .build/push-${c.name}.log | tail -n 1 | cut -d' ' -f2)
+                            case "\$d" in sha256:*) ;; *) echo "no digest in the push output of ${c.name}" >&2; exit 1 ;; esac
+                            printf '%s\\t%s\\n' "${c.name}" "\$d" >> .build/image-digests.tsv
                             ${latest ? "docker push ${latest}" : ''}
                         """
                     }
@@ -137,6 +150,31 @@ pipeline {
                     sh 'python3 ci/deploy/bump_pin.py --latest'
                     withCredentials([usernamePassword(credentialsId: "${PIN_PR_CRED_ID}", usernameVariable: 'GH_USER', passwordVariable: 'GH_TOKEN')]) {
                         sh 'python3 ci/deploy/propose_pin_pr.py'
+                    }
+                }
+            }
+        }
+
+        stage('Open oan-helm image PR') {
+            // The last stage. After the images were pushed AND deployed to New Dev (a failed deploy is rolled back and fails
+            // the build, so this stage never runs for it): put this build's image repository, tags and digests into the
+            // oan-helm DA chart (charts/openg2p-da-registry/values.yaml) through a pull request from the fork of oan-helm
+            // (GH_USER/oan-helm) into Centre-for-Open-Societal-Systems/oan-helm main (ci/deploy/release_images.py). The
+            // stage does not wait for the merge and ends green once the pull request is open; a person with write access
+            // merges it and oan-helm's release workflow then publishes the chart and updates CHANGELOG.md. If the pull
+            // request cannot be opened the stage is UNSTABLE and says why. One pull request per commit merged to develop:
+            // a re-run of a commit that oan-helm main already carries opens nothing.
+            when { branch 'develop' }
+            options { timeout(time: 15, unit: 'MINUTES') }
+            steps {
+                script {
+                    def subject = sh(returnStdout: true, script: 'git log -1 --pretty=%s').trim()
+                    catchError(buildResult: 'UNSTABLE', stageResult: 'UNSTABLE') {
+                        withCredentials([usernamePassword(credentialsId: "${OAN_HELM_FORK_CRED_ID}", usernameVariable: 'GH_USER', passwordVariable: 'GH_TOKEN')]) {
+                            withEnv(["COMMIT_SUBJECT=${subject}", "SOURCE_COMMIT=${env.GIT_COMMIT}"]) {
+                                sh 'python3 ci/deploy/release_images.py'
+                            }
+                        }
                     }
                 }
             }
