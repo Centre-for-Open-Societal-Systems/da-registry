@@ -3,6 +3,8 @@
 No network, no cluster. Standard library only (runs on the Jenkins agent's stock Python).
     python3 -m unittest discover -s test -p test_deploy_ci.py -v
 """
+import base64
+import contextlib
 import hashlib
 import importlib.util
 import io
@@ -473,6 +475,399 @@ class ProposePullRequestTests(unittest.TestCase):
         self.assertEqual(slug("git@github.com:o/r.git"), "o/r")
         with self.assertRaises(ValueError):
             slug("https://gitlab.com/o/r.git")
+
+
+# ---- the images go into the oan-helm chart ----------------------------------------------------------------------
+
+def load_release():
+    spec = importlib.util.spec_from_file_location("release_images_under_test", ROOT / "ci/deploy/release_images.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+REG = "123456789012.dkr.ecr.ap-south-1.amazonaws.com"
+REPO = "openg2p/da-registry"
+REPOSITORY = "%s/%s" % (REG, REPO)
+NEW_TAG = "0123456789ab"
+
+
+def sample_values():
+    """The shape of charts/openg2p-da-registry/values.yaml in oan-helm, reduced: every registry image is empty."""
+    def img():
+        return "    image:\n      repository: ''\n      tag: ''\n"
+    return (
+        "global:\n  baseDomain: development.oanstaging.com\n"
+        "registry:\n"
+        "  staffApi:\n    envVars:\n      A: 'b'\n" + img() + "    enabled: false\n"
+        "# a comment at column 0 inside the registry block\n"
+        "  partnerApi:\n" + img() + "    enabled: false\n"
+        "  celeryWorker:\n" + img() + "    enabled: false\n"
+        "  celeryBeat:\n" + img() + "    enabled: false\n"
+        "  dbSeed:\n" + img() + "    loadSampleData: false\n    enabled: false\n"
+        "  staffUi:\n" + img() + "    enabled: false\n"
+        "  keycloak-init:\n    image:\n      repository: docker.io/x/y\n      tag: 1.0.0\n"
+        "dashboardApi:\n  enabled: false\n  image:\n    repository: ''\n    tag: ''\n    digest: ''\n"
+        "dashboardUi:\n  image:\n    repository: ''\n    tag: ''\n")
+
+
+def release_digests():
+    return dict((c, "sha256:" + ("%x" % (i + 1)) * 64) for i, c in enumerate(
+        ["staff-api", "partner-api", "celery", "db-seed", "staff-ui"]))
+
+
+class ImageValuesTests(unittest.TestCase):
+    def setUp(self):
+        self.r = load_release()
+        self.tags = self.r.wanted(NEW_TAG, release_digests())
+
+    def test_only_the_image_lines_of_the_six_components_change(self):
+        old = sample_values()
+        new = self.r.rewrite_values(old, self.tags, REPOSITORY)
+        changed = [(a, b) for a, b in zip(old.split("\n"), new.split("\n")) if a != b]
+        self.assertEqual(len(old.split("\n")), len(new.split("\n")))
+        self.assertEqual(len(changed), 12)                         # repository + tag of six registry components
+        self.assertTrue(all(b.lstrip().startswith(("repository:", "tag:")) for _, b in changed))
+        self.assertIn("      repository: '%s'" % REPOSITORY, new)
+        self.assertIn("      tag: 'staff-api-%s@%s'" % (NEW_TAG, release_digests()["staff-api"]), new)
+        self.assertIn("      tag: 'staff-ui-%s@%s'" % (NEW_TAG, release_digests()["staff-ui"]), new)
+        # untouched: the comment, the enabled flags, the init image, the dashboards (this repository does not build them)
+        for kept in ("# a comment at column 0 inside the registry block", "tag: 1.0.0", "      A: 'b'", "repository: docker.io/x/y"):
+            self.assertIn(kept, new)
+        self.assertEqual(new.count("enabled: false"), old.count("enabled: false"))
+        self.assertNotIn("enabled: true", new)
+        self.assertEqual(new.split("dashboardApi:")[1], old.split("dashboardApi:")[1])
+
+    def test_the_values_stay_valid_yaml_and_the_tags_are_strings(self):
+        try:
+            import yaml
+        except ModuleNotFoundError:
+            import sys
+            sys.path.append(str(ROOT / "ci/deploy/vendor"))     # the deploy node's pure-Python PyYAML
+            import yaml
+        document = yaml.safe_load(self.r.rewrite_values(sample_values(), self.tags, REPOSITORY))
+        for section, component in self.r.REGISTRY:
+            image = document["registry"][section]["image"]
+            self.assertEqual(image["repository"], REPOSITORY)
+            self.assertEqual(image["tag"], "%s-%s@%s" % (component, NEW_TAG, release_digests()[component]))
+            self.assertIs(document["registry"][section]["enabled"], False)
+
+    def test_both_celery_workloads_get_the_celery_digest(self):
+        new = self.r.rewrite_values(sample_values(), self.tags, REPOSITORY)
+        self.assertEqual(new.count("celery-%s@%s" % (NEW_TAG, release_digests()["celery"])), 2)
+
+    def test_rewriting_twice_changes_nothing(self):
+        once = self.r.rewrite_values(sample_values(), self.tags, REPOSITORY)
+        self.assertEqual(self.r.rewrite_values(once, self.tags, REPOSITORY), once)
+        self.assertTrue(self.r.released_before(once, NEW_TAG))
+        self.assertFalse(self.r.released_before(sample_values(), NEW_TAG))
+        self.assertFalse(self.r.released_before(once, "ffffffffffff"))
+
+    def test_a_missing_section_is_an_error_not_a_silent_skip(self):
+        with self.assertRaises(ValueError):
+            self.r.rewrite_values(sample_values().replace("  dbSeed:", "  dbSeedX:"), self.tags, REPOSITORY)
+
+    def test_digests_are_read_and_validated(self):
+        text = "".join("%s\t%s\n" % kv for kv in release_digests().items())
+        self.assertEqual(self.r.read_digests(text), release_digests())
+        for bad in ("staff-api\tlatest\n", "staff-api sha256:" + "a" * 64 + "\n"):
+            with self.assertRaises(ValueError):
+                self.r.read_digests(bad)
+
+    def test_every_component_needs_a_digest_and_the_tag_a_commit(self):
+        partial = dict(release_digests())
+        del partial["db-seed"]
+        with self.assertRaisesRegex(ValueError, "db-seed"):
+            self.r.wanted(NEW_TAG, partial)
+        with self.assertRaises(ValueError):
+            self.r.wanted("latest", release_digests())
+
+
+FORK = "fork-owner/oan-helm"
+
+
+class FakeGitHub(object):
+    """oan-helm as the stage sees it: the org repo (main, pull requests) and the fork (branch, commit)."""
+
+    def __init__(self, release):
+        self.r = release
+        self.main_sha = "a" * 40
+        self.text = sample_values()                 # values.yaml on the org repo's main
+        self.branches = {}                          # fork branch -> text
+        self.knows_commit = True                    # False: the fork cannot see main's head until it is synced
+        self.pulls = []                             # open pull requests on the org repo
+        self.calls = []
+        self.refuse = {}                            # (method, path-prefix) -> status
+        self.synced = False
+
+    def __call__(self, method, path, token, payload=None):
+        self.calls.append((method, path, payload))
+        for (m, prefix), status in self.refuse.items():
+            if method == m and prefix in path:
+                return status, {"message": "refused"}
+        org, fork = "/repos/%s" % self.r.SLUG, "/repos/%s" % FORK
+        if path.startswith(org):
+            rest = path[len(org):]
+            if method == "GET" and rest == "/git/ref/heads/main":
+                return 200, {"object": {"sha": self.main_sha}}
+            if method == "GET" and rest.startswith("/contents/") and rest.endswith("?ref=main"):
+                return 200, {"content": base64.b64encode(self.text.encode()).decode(), "sha": "blob1"}
+            if method == "GET" and rest.startswith("/pulls?"):
+                return 200, list(self.pulls)
+            if method == "POST" and rest == "/pulls":
+                pull = {"number": 11, "html_url": "https://github.com/%s/pull/11" % self.r.SLUG, "payload": payload}
+                self.pulls.append(pull)
+                return 201, pull
+            if method == "PATCH" and rest.startswith("/pulls/"):
+                self.pulls[0]["payload"] = payload
+                return 200, {}
+        elif path.startswith(fork):
+            rest = path[len(fork):]
+            if method == "POST" and rest == "/merge-upstream":
+                self.synced = self.knows_commit = True
+                return 200, {}
+            if method == "POST" and rest == "/git/refs":
+                name = payload["ref"][len("refs/heads/"):]
+                if name in self.branches:
+                    return 422, {"message": "Reference already exists"}
+                if not self.knows_commit:
+                    return 422, {"message": "Object does not exist"}
+                self.branches[name] = self.text
+                return 201, {}
+            if method == "PATCH" and rest.startswith("/git/refs/heads/"):
+                self.branches[rest[len("/git/refs/heads/"):]] = self.text
+                return 200, {}
+            if method == "GET" and rest.startswith("/contents/"):
+                return 200, {"content": base64.b64encode(self.branches[rest.split("?ref=")[1]].encode()).decode(), "sha": "blob1"}
+            if method == "PUT" and rest.startswith("/contents/"):
+                self.branches[payload["branch"]] = base64.b64decode(payload["content"]).decode()
+                return 200, {}
+        raise AssertionError("unexpected call %s %s" % (method, path))
+
+
+BRANCH = "bot/da-registry-images-" + NEW_TAG
+
+
+class ImagePullRequestTests(unittest.TestCase):
+    """ci/deploy/release_images.py opens the pull request and stops."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        (self.root / ".build").mkdir()
+        (self.root / ".build/image-digests.tsv").write_text("".join("%s\t%s\n" % kv for kv in release_digests().items()))
+        self.r = load_release()
+        self.gh = FakeGitHub(self.r)
+        self.out = []
+        self.env = {"IMAGE_TAG": NEW_TAG, "ECR_REGISTRY": REG, "ECR_REPO": REPO, "COMMIT_SUBJECT": "Add a field",
+                    "SOURCE_COMMIT": NEW_TAG + "f" * 28, "BUILD_URL": "https://jenkins/job/7/"}
+        self.tags = self.r.wanted(NEW_TAG, release_digests())
+
+    def proposal(self):
+        return self.r.Proposal("tok", "fork-owner", "oan-helm", call=self.gh, out=self.out.append)
+
+    def run_stage(self, **overrides):
+        env = dict(self.env, **overrides)
+        return self.proposal().run(env, self.root, (self.root / ".build/image-digests.tsv").read_text())
+
+    def methods(self):
+        return [(m, p.split("?")[0].replace("/repos/%s" % self.r.SLUG, "ORG").replace("/repos/%s" % FORK, "FORK"))
+                for m, p, _ in self.gh.calls]
+
+    def test_the_branch_goes_to_the_fork_and_the_pull_request_to_the_org_main(self):
+        url = self.run_stage()
+        self.assertEqual(url, "https://github.com/%s/pull/11" % self.r.SLUG)
+        calls = self.methods()
+        order = [("POST", "FORK/git/refs"), ("PUT", "FORK/contents/charts/openg2p-da-registry/values.yaml"),
+                 ("POST", "ORG/pulls")]
+        positions = [calls.index(c) for c in order]
+        self.assertEqual(positions, sorted(positions))
+        self.assertIn("staff-api-%s@%s" % (NEW_TAG, release_digests()["staff-api"]), self.gh.branches[BRANCH])
+        _, _, body = next(c for c in self.gh.calls if c[0] == "POST" and c[1].endswith("/pulls"))
+        self.assertEqual((body["base"], body["head"]), ("main", "fork-owner:" + BRANCH))
+        self.assertIn("DA registry images %s: Add a field" % NEW_TAG, body["title"])
+        self.assertIn("https://jenkins/job/7/", body["body"])
+        # nothing in the org repo is written, merged or waited for
+        self.assertEqual([m for m, p in calls if p.startswith("ORG") and m not in ("GET", "POST")], [])
+        self.assertFalse([c for c in calls if "merge" in c[1] and "merge-upstream" not in c[1] or "check-runs" in c[1]])
+
+    def test_only_the_image_lines_of_the_chart_are_changed_on_the_branch(self):
+        self.run_stage()
+        old = sample_values().split("\n")
+        new = self.gh.branches[BRANCH].split("\n")
+        changed = [b for a, b in zip(old, new) if a != b]
+        self.assertEqual(len(old), len(new))
+        self.assertEqual(len(changed), 12)
+        self.assertTrue(all(c.lstrip().startswith(("repository:", "tag:")) for c in changed))
+
+    def test_a_commit_that_oan_helm_main_already_carries_opens_nothing(self):
+        self.gh.text = self.r.rewrite_values(sample_values(), self.tags, REPOSITORY)
+        proposal = self.proposal()
+        self.assertIsNone(proposal.run(dict(self.env), self.root, (self.root / ".build/image-digests.tsv").read_text()))
+        calls = self.methods()
+        self.assertNotIn(("POST", "ORG/pulls"), calls)
+        self.assertNotIn(("POST", "FORK/git/refs"), calls)
+        self.assertIn("already in oan-helm main", proposal.note)
+
+    def test_the_commit_that_merges_a_chart_pin_pull_request_opens_nothing(self):
+        proposal = self.proposal()
+        for files in ("ci/deploy/oan-chart.json\n", "ci/deploy/oan-chart.json"):
+            self.assertIsNone(proposal.run(dict(self.env, CHANGED_FILES=files), self.root,
+                                           (self.root / ".build/image-digests.tsv").read_text()))
+            self.assertIn("only moves the chart pin", proposal.note)
+        self.assertNotIn(("POST", "ORG/pulls"), self.methods())
+        self.assertNotIn(("POST", "FORK/git/refs"), self.methods())
+
+    def test_a_commit_with_code_or_a_pin_plus_anything_else_gets_its_pull_request(self):
+        for files in ("ci/deploy/oan-chart.json\ndocker/staff-api/Dockerfile\n", "Jenkinsfile\n", ""):
+            self.gh.branches.clear()
+            self.gh.pulls.clear()
+            self.assertTrue(self.run_stage(CHANGED_FILES=files), files)
+
+    def test_the_changed_files_are_read_from_git_when_not_given(self):
+        subprocess.run("git init -q . && git config user.email a@b && git config user.name n && mkdir -p ci/deploy"
+                       " && echo 1 > ci/deploy/oan-chart.json && echo 1 > x && git add . && git commit -qm one"
+                       " && echo 2 > ci/deploy/oan-chart.json && git commit -qam two", shell=True, cwd=str(self.root), check=True)
+        self.assertEqual(self.r.changed_files(self.root, {}), ["ci/deploy/oan-chart.json"])
+        self.assertIsNone(self.run_stage_in(self.root))
+
+    def run_stage_in(self, root):
+        return self.proposal().run(dict(self.env), root, (root / ".build/image-digests.tsv").read_text())
+
+    def test_a_rebuild_with_new_digests_for_the_same_commit_is_still_skipped(self):
+        other = dict(release_digests(), **{"staff-api": "sha256:" + "9" * 64})
+        self.gh.text = self.r.rewrite_values(sample_values(), self.r.wanted(NEW_TAG, other), REPOSITORY)
+        self.assertIsNone(self.run_stage())
+        self.assertNotIn(("POST", "ORG/pulls"), self.methods())
+
+    def test_the_next_commit_gets_its_own_pull_request(self):
+        self.gh.text = self.r.rewrite_values(sample_values(), self.tags, REPOSITORY)    # the previous commit is merged
+        url = self.run_stage(IMAGE_TAG="fedcba987654")
+        self.assertTrue(url)
+        self.assertIn("staff-api-fedcba987654@", self.gh.branches["bot/da-registry-images-fedcba987654"])
+
+    def test_a_left_over_branch_is_reset_and_the_open_pull_request_is_updated_not_duplicated(self):
+        self.gh.branches[BRANCH] = "stale"
+        self.gh.pulls.append({"number": 5, "html_url": "https://github.com/%s/pull/5" % self.r.SLUG, "payload": {}})
+        url = self.run_stage()
+        self.assertEqual(url, "https://github.com/%s/pull/5" % self.r.SLUG)
+        calls = self.methods()
+        self.assertIn(("PATCH", "FORK/git/refs/heads/" + BRANCH), calls)
+        self.assertIn(("PATCH", "ORG/pulls/5"), calls)
+        self.assertNotIn(("POST", "ORG/pulls"), calls)
+        self.assertIn(NEW_TAG, self.gh.branches[BRANCH])
+
+    def test_a_fork_that_has_not_seen_main_yet_is_synced_first(self):
+        self.gh.knows_commit = False
+        self.run_stage()
+        self.assertTrue(self.gh.synced)
+        self.assertIn(("POST", "ORG/pulls"), self.methods())
+        self.assertIn("syncing", "\n".join(self.out))
+
+    def test_a_fork_that_cannot_be_synced_is_reported(self):
+        self.gh.knows_commit = False
+        self.gh.refuse[("POST", "/merge-upstream")] = 409
+        with self.assertRaises(self.r.Stop) as caught:
+            self.run_stage()
+        self.assertEqual(caught.exception.code, 4)
+        self.assertIn("Sync fork", str(caught.exception))
+
+    def test_a_token_without_access_is_reported_as_such(self):
+        self.gh.refuse[("POST", "/git/refs")] = 403
+        with self.assertRaises(self.r.Stop) as caught:
+            self.run_stage()
+        self.assertEqual(caught.exception.code, 4)
+        self.assertIn("public_repo", str(caught.exception))
+        self.assertNotIn("tok", str(caught.exception).replace("token", ""))
+
+    def test_refused_pull_request_is_reported(self):
+        self.gh.refuse[("POST", "/pulls")] = 403
+        with self.assertRaises(self.r.Stop) as caught:
+            self.run_stage()
+        self.assertEqual(caught.exception.code, 4)
+
+    def test_dry_run_changes_nothing(self):
+        self.assertIsNone(self.run_stage(DRY_RUN="1"))
+        self.assertEqual([m for m, _ in self.methods() if m != "GET"], [])
+
+    def test_main_writes_the_pull_request_url_and_nothing_else(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = self.r.main(env=dict(self.env, GH_TOKEN="tok", GH_USER="fork-owner"), root=self.root, call=self.gh)
+        self.assertEqual(code, 0, out.getvalue())
+        self.assertEqual((self.root / ".build/oan-helm-pr.txt").read_text().strip(), "https://github.com/%s/pull/11" % self.r.SLUG)
+        self.assertNotIn("tok", out.getvalue().replace("token", ""))
+
+    def test_main_without_a_credential_is_exit_3_and_opens_nothing(self):
+        for env in (dict(self.env), dict(self.env, GH_TOKEN="tok"), dict(self.env, GH_USER="fork-owner")):
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                code = self.r.main(env=env, root=self.root, call=self.gh)
+            self.assertEqual(code, 3)
+        self.assertEqual(self.gh.calls, [])
+        self.assertFalse((self.root / ".build/oan-helm-pr.txt").exists())
+
+    def test_main_leaves_no_pull_request_file_when_the_commit_was_already_taken(self):
+        self.gh.text = self.r.rewrite_values(sample_values(), self.tags, REPOSITORY)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = self.r.main(env=dict(self.env, GH_TOKEN="tok", GH_USER="fork-owner"), root=self.root, call=self.gh)
+        self.assertEqual(code, 0)
+        self.assertFalse((self.root / ".build/oan-helm-pr.txt").exists())
+
+
+class PipelineWiringTests(unittest.TestCase):
+    """Jenkinsfile: build (digests) -> deploy with rollback -> pin pull request -> oan-helm image pull request, last."""
+
+    def setUp(self):
+        self.text = (ROOT / "Jenkinsfile").read_text()
+
+    def test_the_image_pull_request_is_the_last_stage_and_follows_the_deploy_and_the_pin(self):
+        order = [self.text.index("stage('%s')" % n) for n in
+                 ("Build & Push", "Deploy to Development", "Propose chart pin update", "Open oan-helm image PR")]
+        self.assertEqual(order, sorted(order))
+        self.assertEqual(self.text.count("stage('"), 8)
+        self.assertLess(self.text.index("stage('Open oan-helm image PR')"), self.text.index("\n    post {"))
+
+    def test_the_deploy_stage_still_fails_the_build(self):
+        stage = self.text.split("stage('Deploy to Development')", 1)[1].split("stage('Propose chart pin update')", 1)[0]
+        self.assertIn("bash ci/deploy-dev.sh", stage)
+        self.assertNotIn("catchError(", stage)
+
+    def test_digests_are_captured_from_the_push_output_for_every_component(self):
+        build = self.text.split("stage('Build & Push')", 1)[1].split("stage('Deploy to Development')", 1)[0]
+        self.assertIn(".build/image-digests.tsv", build)
+        self.assertLess(build.index("docker push ${image}"), build.index("image-digests.tsv\n"))
+        self.assertIn("grep -oE 'digest: sha256:[0-9a-f]{64}'", build)
+        self.assertNotIn("aws ecr describe-images", self.text)          # no extra AWS permission is needed
+        self.assertNotIn("\\{", build)                                    # an invalid Groovy escape
+
+    def test_the_pull_request_stage_cannot_fail_the_build_and_needs_only_the_fork_credential(self):
+        stage = self.text.split("stage('Open oan-helm image PR')", 1)[1].split("\n    post {", 1)[0]
+        self.assertIn("catchError(buildResult: 'UNSTABLE', stageResult: 'UNSTABLE')", stage)
+        self.assertIn("python3 ci/deploy/release_images.py", stage)
+        self.assertIn("when { branch 'develop' }", stage)
+        self.assertIn("OAN_HELM_FORK_CRED_ID", stage)
+        for absent in ("KUBECONFIG", "helm upgrade", "kubectl", "docker "):
+            self.assertNotIn(absent, stage)
+        self.assertIn('OAN_HELM_FORK_CRED_ID = "oan-helm-fork-token"', self.text)
+        self.assertIn('PIN_PR_CRED_ID = "oan-ci-app"', self.text)
+
+    def test_the_stage_is_built_for_this_pipelines_names(self):
+        self.assertIn('ECR_REPO       = "openg2p/da-registry"', self.text)
+        release = (ROOT / "ci/deploy/release_images.py").read_text()
+        self.assertIn('CHART = "openg2p-da-registry"', release)
+        deploy = (ROOT / "ci/deploy-dev.sh").read_text()
+        for section, component in load_release().REGISTRY:
+            self.assertIn("tag: '%s-${TAG}'" % component, deploy)         # the tag the deploy sets is the tag the PR records
+
+    def test_every_component_the_pipeline_builds_has_a_digest_line(self):
+        for component in load_release().COMPONENTS:
+            self.assertIn("name: '%s'," % component, self.text)
+
+    def test_braces_balance(self):
+        self.assertEqual(self.text.count("{"), self.text.count("}"))
 
 
 if __name__ == "__main__":
