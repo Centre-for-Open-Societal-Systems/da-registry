@@ -76,5 +76,36 @@ If `helm upgrade` fails or one of the three application Deployments does not rol
 cannot undo database changes made by an init or db-seed hook. If the release has no earlier `deployed` revision, the
 build fails with no rollback.
 
+## oan-helm image pull request (last stage)
+
+The last stage, **Open oan-helm image PR** (`ci/deploy/release_images.py`), runs on `develop` only after the build, the
+deploy (and its rollback, if one was needed) and the pin stage. It never fails the build and never deploys.
+
+- **Digests.** Build & Push records the ECR digest of each image from the `docker push` output
+  (`.build/image-digests.tsv`: `staff-api`, `partner-api`, `celery`, `staff-ui`, `db-seed`), so no extra AWS permission is
+  needed.
+- **What changes.** In `charts/openg2p-da-registry/values.yaml` of oan-helm, for `staffApi`, `partnerApi`, `celeryWorker`,
+  `celeryBeat`, `staffUi` and `dbSeed`: `image.repository` (`<ECR registry>/openg2p/da-registry`) and `image.tag`
+  (`<component>-<commit12>@sha256:<digest>`). Twelve lines; the `enabled` flags and everything else stay as they are.
+  The chart carried empty images until now: `ci/deploy-dev.sh` sets the images (and `enabled: true`) of the build it
+  deploys on top of the pinned chart, so what the chart records never decides what is deployed.
+- **How.** The change goes on the branch `bot/da-registry-images-<commit12>` of the fork of oan-helm and a pull request
+  is opened from it into `Centre-for-Open-Societal-Systems/oan-helm` `main` (the open one for the same commit is
+  updated). The stage does not wait for the merge and is green once the pull request is open; with no token, or if
+  GitHub refuses, it is UNSTABLE and says why. A person with write access merges it (checks `protected-paths` and
+  `validate`); oan-helm's release workflow then publishes the next `openg2p-da-registry` version and writes the
+  `CHANGELOG.md` entry, and the pin stage of a later build proposes moving the pin to it.
+- **One pull request per commit.** A commit whose images oan-helm `main` already carries opens nothing (re-run, Replay,
+  rebuild). The commit that merges a chart-pin pull request (only `ci/deploy/oan-chart.json` changed) opens nothing
+  either: otherwise image pull request, release, pin pull request and the next build would follow each other forever.
+
+Credential `oan-helm-fork-token` (Jenkins "Username with password", global): the username is the GitHub account that
+owns the fork of oan-helm, the password a classic token of that account with the `public_repo` scope (a fine-grained
+token cannot open a pull request on the org repository). The fork must exist. Check a token with
+`curl -sI -H "Authorization: Bearer $TOKEN" https://api.github.com/user | grep -i x-oauth-scopes`.
+
+`DRY_RUN=1 IMAGE_TAG=<commit12> ECR_REGISTRY=<registry> python3 ci/deploy/release_images.py` (with
+`.build/image-digests.tsv`) prints the tags it would write and changes nothing.
+
 Tests (no network or cluster): `python3 -m unittest discover -s test -p test_deploy_ci.py -v`; the Jenkinsfile runs
 them in the "Check deploy script" stage.
