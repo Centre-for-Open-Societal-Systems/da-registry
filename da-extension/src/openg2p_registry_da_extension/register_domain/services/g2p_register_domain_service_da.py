@@ -24,7 +24,9 @@ from .validation_rules import (
 
 _logger = logging.getLogger("g2p-register-domain-service")
 
-# The same minimum the birth-year widget declares (widget-data-validation.min).
+# The earliest year of birth the form accepts, in the Ethiopian calendar. The
+# date of birth widget states the same limit as its minDate, 1 Meskerem 1920
+# (12 September 1927).
 MIN_BIRTH_YEAR_EC = 1920
 
 
@@ -44,6 +46,7 @@ class G2PRegisterDomainServiceDA(G2PRegisterDomainService):
             self._validate_fayda_fan(record)
             self._validate_phones(record)
             self._validate_email(record)
+            self._derive_birth_ec(record)
             self._validate_birth_ec(record)
             self._validate_joined_date(record)
             self._validate_required(record, sections)
@@ -118,6 +121,32 @@ class G2PRegisterDomainServiceDA(G2PRegisterDomainService):
         if not matches(EMAIL_PATTERN, text):
             validation_error("Email: enter a valid email address, for example name@example.org.")
         record["email"] = text.lower()
+
+    @staticmethod
+    def _derive_birth_ec(record: dict) -> None:
+        """The form takes one date of birth on the Ethiopian calendar picker;
+        the stored value is the Gregorian birth_date. The month and year of
+        birth in the Ethiopian calendar follow from it, so the DCI output,
+        reports and month-and-year imports read the same two columns."""
+        if "birth_date" not in record:
+            return
+        raw = record.get("birth_date")
+        if raw in (None, ""):
+            record["birth_date"] = None
+            return
+        born = parse_date(raw)
+        if born is None:
+            validation_error("Date of birth: enter a valid date.")
+        if born > date.today():
+            validation_error("Date of birth: the date is in the future. Enter a date that has passed.")
+        year, month, _ = gregorian_to_ethiopic(born)
+        if year < MIN_BIRTH_YEAR_EC:
+            validation_error(
+                f"Date of birth: enter a date in {MIN_BIRTH_YEAR_EC} of the Ethiopian calendar or later."
+            )
+        record["birth_date"] = born.isoformat()
+        record["birth_month_ec"] = month
+        record["birth_year_ec"] = year
 
     @staticmethod
     def _validate_birth_ec(record: dict) -> None:
