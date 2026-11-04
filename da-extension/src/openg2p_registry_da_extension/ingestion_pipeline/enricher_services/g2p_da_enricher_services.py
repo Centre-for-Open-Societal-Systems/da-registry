@@ -131,6 +131,22 @@ class _MasterDataGeo:
     API (master_data_api.geo_index: every unit of every level, cached): the
     platform's geo service looks units up by id, and a file names them."""
 
+    @classmethod
+    def _ancestors(cls, index: dict, value_id: str) -> list:
+        """Entries above a unit, root first (Ethiopia above a region).
+
+        The intake form's geo widget saves the chain from the root level down
+        and shows a stored location only when it starts at the root, so an
+        imported record carries the same chain; without the country entry the
+        location section looks empty."""
+        above, current, seen = [], (index.get(value_id) or {}).get("parent_level_value_id"), {value_id}
+        while current and current not in seen and current in index:
+            seen.add(current)
+            above.append(cls._entry(index[current]))
+            current = index[current]["parent_level_value_id"]
+        above.reverse()
+        return above
+
     @staticmethod
     def _entry(node: dict) -> dict:
         level = node["level_mnemonic"]
@@ -157,7 +173,8 @@ class _MasterDataGeo:
         """names: {"region": .., "zone": .., "woreda": .., "kebele": ..}.
         Walks the chain so a kebele name repeated in another woreda never
         matches the wrong one."""
-        by_name = cls._by_name(master_data_api.geo_index())
+        index = master_data_api.geo_index()
+        by_name = cls._by_name(index)
         hierarchy, parent_id, trail = [], None, []
         for level in GEO_LEVELS:
             name = str(names[level] or "").strip().lower()
@@ -170,12 +187,13 @@ class _MasterDataGeo:
             hierarchy.append(cls._entry(rows[0]))
             trail.append(rows[0]["level_value_mnemonic"])
             parent_id = rows[0]["level_value_id"]
+        hierarchy = cls._ancestors(index, hierarchy[0]["level_value_id"]) + hierarchy
         return {"hierarchy": hierarchy, "lowest_level_value_id": parent_id}
 
     @classmethod
     def resolve_by_id(cls, kebele_id: str) -> dict:
         """Hierarchy for a Master Data kebele id (e.g. kebele-ET010101101001),
-        walking up its parents to the region."""
+        walking up its parents to the root."""
         index = master_data_api.geo_index()
         chain, current, seen = [], kebele_id, set()
         while current and current not in seen:
@@ -189,7 +207,8 @@ class _MasterDataGeo:
             current = node["parent_level_value_id"]
         if (chain[0]["level_mnemonic"] or "").lower() != "kebele":
             raise ValueError(f"Location '{kebele_id}' is a {chain[0]['level_mnemonic']}, not a kebele. Give the ID of a kebele.")
-        chain = [c for c in chain if (c["level_mnemonic"] or "").lower() in GEO_LEVELS]
+        # Keep the whole chain up to the root (Ethiopia): the form's geo widget
+        # reads the stored hierarchy from its root level down.
         chain.reverse()
         return {"hierarchy": chain, "lowest_level_value_id": kebele_id}
 

@@ -168,6 +168,32 @@ class Initializer(BaseInitializer):
                         )
                     )
 
+            # Imports saved before this release stored the location chain from the
+            # region down; the form's geo widget reads it from the root level
+            # (Ethiopia) and shows nothing without it. Put the root entry the
+            # form saves in front of those chains. Only chains that start at a
+            # region are touched, and only once a form-saved chain provides the
+            # root entry, so this is a no-op after the first run.
+            root_source = " UNION ALL ".join(
+                f'SELECT geo_code_hierarchy_json::jsonb->\'hierarchy\' AS h FROM "public"."{name}"'
+                for name in DA_TABLES
+            )
+            for table_name in DA_TABLES:
+                await conn.execute(
+                    text(
+                        f"WITH root AS (SELECT h->0 AS entry FROM ({root_source}) s "
+                        "WHERE jsonb_typeof(h) = 'array' "
+                        "AND lower(coalesce(h->0->>'level_mnemonic', h->0->>'level')) = 'country' LIMIT 1) "
+                        f'UPDATE "public"."{table_name}" t SET geo_code_hierarchy_json = jsonb_set('
+                        "t.geo_code_hierarchy_json::jsonb, '{hierarchy}', "
+                        "jsonb_build_array(root.entry) || (t.geo_code_hierarchy_json::jsonb->'hierarchy')) "
+                        "FROM root "
+                        "WHERE jsonb_typeof(t.geo_code_hierarchy_json::jsonb->'hierarchy') = 'array' "
+                        "AND lower(coalesce(t.geo_code_hierarchy_json::jsonb->'hierarchy'->0->>'level_mnemonic', "
+                        "t.geo_code_hierarchy_json::jsonb->'hierarchy'->0->>'level')) = 'region'"
+                    )
+                )
+
             # POST /da/get_push_status looks a push up by DA Services' reference_id,
             # which only exists inside the stored request body.
             # A platform table: skipped if the platform has not created it yet.
