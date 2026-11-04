@@ -11,10 +11,11 @@ sys.modules.setdefault("openg2p_registry_extensions", importlib.import_module("o
 from openg2p_registry_da_extension.ingestion_pipeline.enricher_services import master_data_api as api  # noqa: E402
 from openg2p_registry_da_extension.ingestion_pipeline.enricher_services import g2p_da_enricher_services as enr  # noqa: E402
 
-LEVELS = [{"level_id": "level-region", "level_mnemonic": "region"}, {"level_id": "level-zone", "level_mnemonic": "zone"},
+LEVELS = [{"level_id": "level-country", "level_mnemonic": "country"}, {"level_id": "level-region", "level_mnemonic": "region"}, {"level_id": "level-zone", "level_mnemonic": "zone"},
           {"level_id": "level-woreda", "level_mnemonic": "woreda"}, {"level_id": "level-kebele", "level_mnemonic": "kebele"}]
 VALUES = {
-    "level-region": [{"level_value_id": "R1", "level_value_mnemonic": "Tigray", "parent_level_value_id": None}],
+    "level-country": [{"level_value_id": "C1", "level_value_mnemonic": "Ethiopia", "parent_level_value_id": None}],
+    "level-region": [{"level_value_id": "R1", "level_value_mnemonic": "Tigray", "parent_level_value_id": "C1"}],
     "level-zone": [{"level_value_id": "Z1", "level_value_mnemonic": "North Western", "parent_level_value_id": "R1"}],
     "level-woreda": [{"level_value_id": "W1", "level_value_mnemonic": "Tahtay Adiyabo", "parent_level_value_id": "Z1"},
                      {"level_value_id": "W2", "level_value_mnemonic": "Laelay Adiyabo", "parent_level_value_id": "Z1"}],
@@ -50,8 +51,11 @@ class TestGeo(unittest.TestCase):
     def test_resolve_by_names_follows_the_chain(self):
         geo = enr._MasterDataGeo.resolve({"region": "tigray", "zone": "North Western", "woreda": "Tahtay Adiyabo", "kebele": "ADI HAGERAY"})
         self.assertEqual(geo["lowest_level_value_id"], "K1")  # not K2: same name under another woreda
-        self.assertEqual([h["level_value_id"] for h in geo["hierarchy"]], ["R1", "Z1", "W1", "K1"])
-        self.assertEqual(geo["hierarchy"][3], {"level": "kebele", "level_id": "level-kebele", "level_mnemonic": "kebele",
+        # From the root down, as the form's geo widget saves it: the widget shows
+        # nothing for a chain that does not start at the root level.
+        self.assertEqual([h["level_value_id"] for h in geo["hierarchy"]], ["C1", "R1", "Z1", "W1", "K1"])
+        self.assertEqual(geo["hierarchy"][0]["level_mnemonic"], "country")
+        self.assertEqual(geo["hierarchy"][4], {"level": "kebele", "level_id": "level-kebele", "level_mnemonic": "kebele",
                                                "level_value_id": "K1", "level_value_mnemonic": "Adi Hageray"})
 
     def test_resolve_errors_name_the_place(self):
@@ -63,7 +67,7 @@ class TestGeo(unittest.TestCase):
 
     def test_resolve_by_id(self):
         geo = enr._MasterDataGeo.resolve_by_id("K2")
-        self.assertEqual([h["level_value_id"] for h in geo["hierarchy"]], ["R1", "Z1", "W2", "K2"])
+        self.assertEqual([h["level_value_id"] for h in geo["hierarchy"]], ["C1", "R1", "Z1", "W2", "K2"])
         with self.assertRaisesRegex(ValueError, "Location 'X' not found in Master Data"):
             enr._MasterDataGeo.resolve_by_id("X")
         with self.assertRaisesRegex(ValueError, "is a woreda, not a kebele"):
