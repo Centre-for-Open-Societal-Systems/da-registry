@@ -26,6 +26,7 @@ def validate(record: dict) -> dict:
     Service._validate_fayda_fan(record)
     Service._validate_phones(record)
     Service._validate_email(record)
+    Service._derive_birth_ec(record)
     Service._validate_birth_ec(record)
     Service._validate_joined_date(record)
     Service._validate_required(record, REQUIRED)
@@ -84,3 +85,29 @@ class TestRequired(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestDateOfBirth(unittest.TestCase):
+    """The form's one date of birth (Ethiopian calendar picker, Gregorian
+    value) gives the month and year of birth in the Ethiopian calendar."""
+
+    def test_month_and_year_follow_the_date(self):
+        record = validate({"birth_date": "1993-01-09"})
+        self.assertEqual(record["birth_date"], "1993-01-09")
+        self.assertEqual((record["birth_month_ec"], record["birth_year_ec"]), (5, 1985))
+
+    def test_first_day_of_1920_is_accepted_and_the_day_before_is_not(self):
+        validate({"birth_date": "1927-09-12"})
+        with self.assertRaises(G2PRegistryException) as ctx:
+            validate({"birth_date": "1927-09-11"})
+        self.assertIn("Date of birth: enter a date in 1920 of the Ethiopian calendar or later.", str(ctx.exception))
+
+    def test_future_date_is_refused(self):
+        with self.assertRaises(G2PRegistryException) as ctx:
+            validate({"birth_date": "2999-01-01"})
+        self.assertIn("Date of birth: the date is in the future.", str(ctx.exception))
+
+    def test_month_and_year_alone_still_work(self):
+        record = validate({"birth_month_ec": 4, "birth_year_ec": 1985})
+        self.assertNotIn("birth_date", record)
+
