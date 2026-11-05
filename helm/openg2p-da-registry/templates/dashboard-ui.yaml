@@ -1,0 +1,69 @@
+{{- $component := .Values.dashboardUi -}}
+{{- if $component.enabled }}
+{{- $name := $component.nameOverride | default (printf "%s-dashboard-ui" .Release.Name) -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: {{ .Chart.Name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: dashboard-ui
+spec:
+  replicas: {{ $component.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: dashboard-ui
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: dashboard-ui
+    spec:
+      automountServiceAccountToken: false
+      {{- with $component.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: dashboard-ui
+          image: {{ include "coss.image" $component.image | quote }}
+          imagePullPolicy: {{ $component.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ $component.containerPort }}
+          {{- with $component.env }}
+          env:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $component.envFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          resources:
+            {{- toYaml $component.resources | nindent 12 }}
+          readinessProbe:
+            tcpSocket:
+              port: http
+          livenessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: dashboard-ui
+  ports:
+    - name: http
+      port: {{ $component.servicePort }}
+      targetPort: http
+{{- end }}

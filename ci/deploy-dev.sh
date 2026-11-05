@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Upgrade the DA registry release on the dev cluster with the pinned central chart.
+# Upgrade the DA registry release on the dev cluster with the chart this build packaged.
 #
 # The Jenkinsfile's "Deploy to Development" stage runs this on the vpn-agent2 node
 # with the da-dev-kubeconfig credential. A deploy by hand is the same command:
@@ -28,6 +28,7 @@
 #   KUBECONFIG       kubeconfig for the dev cluster                                      required
 #   AWS_REGION       default ap-south-1
 #   ECR_BASE         default openg2p/da-registry
+#   BUILT_CHART_DIR  folder with the archive this build packaged (Jenkins sets it); else the pinned chart
 #   HELM_TIMEOUT     default 20m
 #   ROLLOUT_TIMEOUT  per-Deployment rollout wait, default 420s
 # Release, namespace, chart version and values come from ci/deploy/oan-chart.json only.
@@ -57,9 +58,14 @@ WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
 say "Verified central chart"
-CHART_ARCHIVE="$(python3 ci/deploy/oan_chart.py fetch registry "$WORK/chart")"
+# A develop build installs the chart it packaged; a deploy by hand uses the pinned archive.
+if [ -n "${BUILT_CHART_DIR:-}" ]; then
+  CHART_ARCHIVE="$(ls "$BUILT_CHART_DIR"/*.tgz)"
+else
+  CHART_ARCHIVE="$(python3 ci/deploy/oan_chart.py fetch registry "$WORK/chart")"
+fi
 CENTRAL_VALUES="$(python3 ci/deploy/oan_chart.py values registry "$WORK/public-values.yaml")"
-echo "chart:     $(python3 ci/deploy/oan_chart.py version registry) (platform $(python3 ci/deploy/oan_chart.py platform registry))"
+echo "chart:     $(basename "$CHART_ARCHIVE") (platform $(python3 ci/deploy/oan_chart.py platform registry))"
 echo "release:   ${HELM_RELEASE}"
 echo "namespace: ${HELM_NAMESPACE}"
 echo "images:    ${IMAGE_REPOSITORY}/<component>:${TAG}"

@@ -1,0 +1,2 @@
+# This Helm repository commits locked, bundled dependencies.
+# Environment files are excluded by the repository root and .helmignore.

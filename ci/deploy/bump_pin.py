@@ -14,7 +14,7 @@ It never touches a cluster. A build does not run it: the pin changes in a review
 file changes in its own pull requests, without a chart release, so the commit that published the archive would
 silently drop those changes. A proposal is made only when the chart version, the archive digest or the values
 digest differs from the current pin, and never for an older chart version (no downgrade).
-The last stage of the develop Jenkins build (ci/deploy/propose_pin_pr.py) runs it after every successful deploy and opens the
+A develop build deploys the chart it packaged, so this only serves a deploy by hand. It used to run after every successful deploy and opens the
 pull request.
 
 With --write, when the version or the platform version changes, the files that must agree with the pin are
