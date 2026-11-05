@@ -21,7 +21,7 @@ follows the same build model as the farmer registry.
 | `docker/local-dev/` | Config for the local stack (Keycloak, IAM, AWE, ID generator, Postgres, geo seed) |
 | `import-templates/` | Blank CSV and Excel templates for bulk import |
 | `docker-compose.yml` | Self-contained local stack |
-| `Jenkinsfile` | CI/CD: builds and pushes images to ECR (`openg2p/da-registry/<component>`, tag `<commit>`); on `develop`, also upgrades the existing dev release `da-registry` (namespace `da-registry`) |
+| `Jenkinsfile`, `ci/pipelines/` | CI/CD: builds and pushes images to ECR (`openg2p/da-registry/<component>`, tag `<commit>`); on `develop`, also upgrades the existing dev release `da-registry` (namespace `da-registry`) |
 | `ci/deploy/` | The pinned central chart: `oan-chart.json` (oan-helm commit, chart version, archive and public-values SHA-256), `oan_chart.py` (download and verification), see `ci/deploy/README.md` |
 | `ci/deploy-dev.sh` | The dev deploy the Jenkinsfile runs: verified chart and values, `helm upgrade --reset-values` on the existing release, never an install |
 | `test/` | Unit tests of the chart pin consumer |
@@ -190,7 +190,7 @@ Platform images come from Docker Hub (`openg2p/openg2p-registry-*`), pinned to
 registries. Keep the component Dockerfiles and chart dependency in step:
 
 - `ARG RP_VERSION` in `docker/*/Dockerfile`
-- `RP_VERSION` in the `Jenkinsfile`
+- `RP_VERSION` in `ci/pipelines/dev.groovy`
 - the upstream staff-ui source revision in `ui/staff-ui/deps.json`
 - `platformVersion` in `ci/deploy/oan-chart.json`, which must equal the `openg2p-registry`
   dependency of the pinned oan-helm chart (CI checks the archive); moving it means a new
