@@ -24,9 +24,8 @@ pipeline {
         AWS_ACCOUNT_ID = "379220350808"
         AWS_REGION     = "ap-south-1"
         ECR_REGISTRY   = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
-        // One ECR repository for all components; the component is the tag
-        // prefix (staff-api-<commit>, staff-api-develop, ...).
-        ECR_REPO       = "openg2p/da-registry"
+        // One ECR repository per component: openg2p/da-registry/<component>.
+        ECR_BASE       = "openg2p/da-registry"
 
         // Must match ARG RP_VERSION in the component Dockerfiles
         // and "platformVersion" in ci/deploy/oan-chart.json (the pinned chart's openg2p-registry).
@@ -101,8 +100,8 @@ pipeline {
                     // Each environment branch also moves a tag of its own name.
                     def movingTag = (env.BRANCH_NAME in ['develop', 'staging', 'main']) ? env.BRANCH_NAME : null
                     components.each { c ->
-                        def image  = "${ECR_REGISTRY}/${ECR_REPO}:${c.name}-${env.IMAGE_TAG}"
-                        def latest = movingTag ? "${ECR_REGISTRY}/${ECR_REPO}:${c.name}-${movingTag}" : null
+                        def image  = "${ECR_REGISTRY}/${ECR_BASE}/${c.name}:${env.IMAGE_TAG}"
+                        def latest = movingTag ? "${ECR_REGISTRY}/${ECR_BASE}/${c.name}:${movingTag}" : null
                         sh """
                             docker build ${c.args} \
                                 -f ${c.dockerfile} -t ${image} ${latest ? "-t ${latest}" : ''} .

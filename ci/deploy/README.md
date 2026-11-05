@@ -85,8 +85,8 @@ deploy (and its rollback, if one was needed) and the pin stage. It never fails t
   (`.build/image-digests.tsv`: `staff-api`, `partner-api`, `celery`, `staff-ui`, `db-seed`), so no extra AWS permission is
   needed.
 - **What changes.** In `charts/openg2p-da-registry/values.yaml` of oan-helm, for `staffApi`, `partnerApi`, `celeryWorker`,
-  `celeryBeat`, `staffUi` and `dbSeed`: `image.repository` (`<ECR registry>/openg2p/da-registry`) and `image.tag`
-  (`<component>-<commit12>@sha256:<digest>`). Twelve lines; the `enabled` flags and everything else stay as they are.
+  `celeryBeat`, `staffUi` and `dbSeed`: `image.repository` (`<ECR registry>/openg2p/da-registry/<component>`) and `image.tag`
+  (`<commit12>@sha256:<digest>`). Twelve lines; the `enabled` flags and everything else stay as they are.
   The chart carried empty images until now: `ci/deploy-dev.sh` sets the images (and `enabled: true`) of the build it
   deploys on top of the pinned chart, so what the chart records never decides what is deployed.
 - **How.** The change goes on the branch `bot/da-registry-images-<commit12>` of the fork of oan-helm and a pull request
