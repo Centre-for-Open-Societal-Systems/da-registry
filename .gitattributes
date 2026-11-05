@@ -1,0 +1,18 @@
+# Shell scripts and Dockerfiles are executed by /bin/sh inside Linux images.
+#
+# With core.autocrlf=true (the Git for Windows default) a checkout rewrites
+# LF to CRLF, and the trailing \r becomes part of the token: `set -eu` turns
+# into `set -eu\r` and BusyBox sh aborts with "set: illegal option -".
+# docker/staff-ui/rehash-patched-assets.sh failed exactly this way, so the
+# staff-ui image could not build at all on a Windows clone.
+#
+# Forcing LF for these files makes the working tree match what the container
+# runs, regardless of anyone's local autocrlf setting.
+*.sh text eol=lf
+Dockerfile text eol=lf
+*/Dockerfile text eol=lf
+docker/**/Dockerfile text eol=lf
+docker-entrypoint.sh text eol=lf
+
+# SQL is piped into psql inside Linux pods.
+ci/commons-services/**/*.sql text eol=lf

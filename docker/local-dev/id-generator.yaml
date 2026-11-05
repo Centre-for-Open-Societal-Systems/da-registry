@@ -1,0 +1,22 @@
+# Local OpenG2P ID Generator configuration for the DA Registry.
+# id_type keys must match register mnemonics lowercased.
+
+id_generator:
+  sequence_limit: 3
+  repeating_limit: 2
+  repeating_block_limit: 2
+  conjugative_even_digits_limit: 3
+  digits_group_limit: 5
+  reverse_digits_group_limit: 5
+  not_start_with: ["0", "1"]
+  restricted_numbers: []
+
+  pool_min_threshold: 1000
+  pool_generation_batch_size: 5000
+  pool_check_interval_seconds: 30
+  exhaustion_max_attempts: 1000
+  sub_batch_size: 10000
+
+  id_types:
+    da:
+      id_length: 10

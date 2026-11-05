@@ -1,0 +1,7 @@
+
+values-live.yaml
+values-dev.yaml
+private-values*.yaml
+.env*
+
+values-new-dev.yaml

@@ -1,0 +1,31 @@
+# CI deploy identity for the NEW dev sandbox, namespace `da-registry` only.
+#   sudo -E /var/lib/rancher/rke2/bin/kubectl apply -f da-registry-newdev-rbac.yaml
+# Cannot touch other namespaces, Nodes, ClusterRoles or CRDs.
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: da-registry-ci, namespace: da-registry}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: da-registry-ci, namespace: da-registry}
+rules:
+  # The kinds the openg2p-da-registry chart and its subcharts can render (HPA, Role/RoleBinding,
+  # ServiceMonitor/PodMonitor/PrometheusRule, PDB, NetworkPolicy, Istio), whether or not enabled.
+  - apiGroups: ["", "apps", "batch", "autoscaling", "networking.k8s.io", "policy",
+                "networking.istio.io", "rbac.authorization.k8s.io", "monitoring.coreos.com"]
+    resources: ["*"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: da-registry-ci, namespace: da-registry}
+subjects: [{kind: ServiceAccount, name: da-registry-ci, namespace: da-registry}]
+roleRef: {kind: Role, name: da-registry-ci, apiGroup: rbac.authorization.k8s.io}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: da-registry-ci-token
+  namespace: da-registry
+  annotations: {kubernetes.io/service-account.name: da-registry-ci}
+type: kubernetes.io/service-account-token

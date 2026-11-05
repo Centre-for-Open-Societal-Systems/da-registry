@@ -1,0 +1,23 @@
+[
+  {
+    "id": 1,
+    "provider_name": "Keycloak Staff",
+    "description": "Local Keycloak staff realm",
+    "client_id": "iam-staff-portal",
+    "client_secret": "dev-iam-staff-secret",
+    "token_endpoint_auth_method": "client_secret_post",
+    "server_metadata_url": "http://keycloak:8080/realms/staff/.well-known/openid-configuration",
+    "jwks_uri": "http://keycloak:8080/realms/staff/protocol/openid-connect/certs",
+    "authorization_endpoint": "http://localhost:8090/realms/staff/protocol/openid-connect/auth",
+    "token_endpoint": "http://localhost:8090/realms/staff/protocol/openid-connect/token",
+    "userinfo_endpoint": "http://localhost:8090/realms/staff/protocol/openid-connect/userinfo",
+    "issuer": "http://localhost:8090/realms/staff",
+    "oauth_callback_url": "http://localhost:8120/auth/callback",
+    "default_redirect_uri": "http://localhost:3101/",
+    "scope": "openid profile email",
+    "enable_pkce": true,
+    "active": true,
+    "audiences": "[]",
+    "adapter_name": "keycloak"
+  }
+]
