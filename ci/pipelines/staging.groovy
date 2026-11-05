@@ -1,0 +1,41 @@
+// The staging branch builds nothing. A merge into staging promotes the chart that develop built from this source tree
+// (the same image digests, under an rc version), deploys it and publishes it. See scripts/ci/deliver_staging.sh of oan-helm.
+// The build fails if develop never built this tree: staging only runs what New Dev ran first.
+def call() {
+    pipeline {
+        agent { label 'vpn-agent2' }
+        options {
+            timestamps()
+            disableConcurrentBuilds()
+            buildDiscarder(logRotator(numToKeepStr: '30'))
+            timeout(time: 60, unit: 'MINUTES')
+        }
+        parameters {
+            booleanParam(name: 'DEPLOY_STAGING', defaultValue: true,
+                description: 'Promote and deploy. Clear it to run the build without touching staging.')
+        }
+        stages {
+            stage('Promote and deploy') {
+                when { allOf { branch 'staging'; not { changeRequest() }; expression { params.DEPLOY_STAGING } } }
+                steps {
+                    checkout scm
+                    withCredentials([
+                        file(credentialsId: 'staging-rke2-kubeconfig', variable: 'KUBECONFIG'),
+                        [$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-ecr-creds'],
+                        usernamePassword(credentialsId: 'oan-helm-fork-token', usernameVariable: 'GH_USER', passwordVariable: 'GH_TOKEN')
+                    ]) {
+                        sh '''
+                          set -eu
+                          rm -rf .oan-helm
+                          git clone --quiet --depth 1 --filter=blob:none --sparse \\
+                            https://github.com/Centre-for-Open-Societal-Systems/oan-helm.git .oan-helm
+                          git -C .oan-helm sparse-checkout set scripts/ci environments/staging/values
+                          bash .oan-helm/scripts/ci/deliver_staging.sh openg2p-da-registry da-registry da-registry da.yaml
+                        '''
+                    }
+                }
+            }
+        }
+    }
+}
+return this

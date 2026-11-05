@@ -220,12 +220,13 @@ class ProposePinTests(unittest.TestCase):
         self.bump = load_bump()
         self.root = Path(self.tmp.name)
         (self.root / "ci/deploy").mkdir(parents=True)
+        (self.root / "ci/pipelines").mkdir(parents=True)
         (self.root / "test").mkdir()
         (self.root / "docker/staff-api").mkdir(parents=True)
         (self.root / "docker/local-dev/data-loaders").mkdir(parents=True)
         shutil.copy(ROOT / "ci/deploy/oan-chart.json", self.root / "ci/deploy/oan-chart.json")
         shutil.copy(ROOT / "test/test_oan_chart.py", self.root / "test/test_oan_chart.py")
-        shutil.copy(ROOT / "Jenkinsfile", self.root / "Jenkinsfile")
+        shutil.copy(ROOT / "ci/pipelines/dev.groovy", self.root / "ci/pipelines/dev.groovy")
         for name in ("docker/staff-api/Dockerfile", "docker/local-dev/data-loaders/Dockerfile"):
             shutil.copy(ROOT / "docker/staff-api/Dockerfile", self.root / name)
         self.bump.PROFILE = self.root / "ci/deploy/oan-chart.json"
@@ -303,11 +304,11 @@ class ProposePinTests(unittest.TestCase):
         new, _ = self.propose()
         changed = self.bump.update_companions(self.pinned, new["registry"], root=self.root)
         text = lambda rel: (self.root / rel).read_text(encoding="utf-8")
-        self.assertIn('RP_VERSION     = "1.2.2-rc.700"', text("Jenkinsfile"))
+        self.assertIn('RP_VERSION     = "1.2.2-rc.700"', text("ci/pipelines/dev.groovy"))
         self.assertIn('self.assertEqual(pin["version"], "1.0.0-dev.21")', text("test/test_oan_chart.py"))
         self.assertIn("ARG RP_VERSION=1.2.2-rc.700", text("docker/staff-api/Dockerfile"))
         self.assertIn("ARG RP_VERSION=1.2.2-rc.700", text("docker/local-dev/data-loaders/Dockerfile"))
-        self.assertEqual(sorted(changed), sorted(["Jenkinsfile", "test/test_oan_chart.py", "docker/staff-api/Dockerfile",
+        self.assertEqual(sorted(changed), sorted(["ci/pipelines/dev.groovy", "test/test_oan_chart.py", "docker/staff-api/Dockerfile",
                                                   "docker/local-dev/data-loaders/Dockerfile"]))
 
     def test_values_only_change_leaves_platform_files_alone(self):
@@ -321,7 +322,7 @@ class PipelineWiringTests(unittest.TestCase):
     """Jenkinsfile: build (digests) -> package chart -> deploy with rollback -> publish that chart, last."""
 
     def setUp(self):
-        self.text = (ROOT / "Jenkinsfile").read_text()
+        self.text = (ROOT / "ci/pipelines/dev.groovy").read_text()
 
     def stage(self, name, following):
         return self.text.split("stage('%s')" % name, 1)[1].split(following, 1)[0]
@@ -331,7 +332,7 @@ class PipelineWiringTests(unittest.TestCase):
                  ("Build & Push", "Package chart", "Deploy to Development", "Publish chart")]
         self.assertEqual(order, sorted(order))
         self.assertEqual(self.text.count("stage('"), 8)
-        self.assertLess(self.text.index("stage('Publish chart')"), self.text.index("\n    post {"))
+        self.assertLess(self.text.index("stage('Publish chart')"), self.text.index("\n        post {"))
 
     def test_the_deploy_installs_the_packaged_chart_and_still_fails_the_build(self):
         stage = self.stage("Deploy to Development", "stage('Publish chart')")
@@ -347,7 +348,7 @@ class PipelineWiringTests(unittest.TestCase):
         self.assertNotIn("\\{", build)                                    # an invalid Groovy escape
 
     def test_the_publish_stage_cannot_fail_the_build(self):
-        stage = self.stage("Publish chart", "\n    post {")
+        stage = self.stage("Publish chart", "\n        post {")
         self.assertIn("catchError(buildResult: 'UNSTABLE', stageResult: 'UNSTABLE')", stage)
         self.assertIn("bash ci/deploy/publish-chart.sh", stage)
         self.assertIn("when { branch 'develop' }", stage)

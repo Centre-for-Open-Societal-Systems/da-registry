@@ -18,7 +18,7 @@ A develop build deploys the chart it packaged, so this only serves a deploy by h
 
 With --write, when the version or the platform version changes, the files that must agree with the pin are
 updated in the same change: the expected version in test/test_oan_chart.py and, for a new platform version,
-RP_VERSION in the Jenkinsfile and every Dockerfile.
+RP_VERSION in ci/pipelines/dev.groovy and every Dockerfile.
 
 Standard library only; runs on the deploy node's stock Python.
 """
@@ -161,7 +161,7 @@ def update_companions(old, new, root=None):
                 r'(self\.assertEqual\(pin\["version"\],\s*")[^"]+(")',
                 lambda m: m.group(1) + new["version"] + m.group(2))
     if old.get("platformVersion") != new["platformVersion"]:
-        rewrite(root / "Jenkinsfile", r'(RP_VERSION\s*=\s*")[^"]+(")',
+        rewrite(root / "ci/pipelines/dev.groovy", r'(RP_VERSION\s*=\s*")[^"]+(")',
                 lambda m: m.group(1) + new["platformVersion"] + m.group(2))
         for dockerfile in sorted((root / "docker").glob("*/Dockerfile")):
             rewrite(dockerfile, r"ARG RP_VERSION=\S+", "ARG RP_VERSION=" + new["platformVersion"])

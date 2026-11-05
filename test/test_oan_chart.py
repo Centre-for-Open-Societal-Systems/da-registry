@@ -190,7 +190,7 @@ class CommittedProfileTests(unittest.TestCase):
         self.assertGreater(checked, 0)
 
     def test_platform_pin_matches_the_jenkinsfile(self):
-        text = (ROOT / "Jenkinsfile").read_text(encoding="utf-8")
+        text = (ROOT / "ci/pipelines/dev.groovy").read_text(encoding="utf-8")
         self.assertIn('RP_VERSION     = "' + committed_pin()["platformVersion"] + '"', text)
 
 
