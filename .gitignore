@@ -195,6 +195,9 @@ Desktop.ini
 
 # Central chart archives and public values cached for an offline deploy.
 .central-charts/
+built-chart/
+helm/**/charts/
+helm/**/Chart.lock
 
 # ci/commons-services/migrate-far-geo.sh dumps the tables it rewrites here (record data).
 far-geo-backup-*.sql.gz
