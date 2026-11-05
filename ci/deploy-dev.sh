@@ -27,7 +27,7 @@
 #   AWS_ACCOUNT_ID   owner of the ECR registry                                           required
 #   KUBECONFIG       kubeconfig for the dev cluster                                      required
 #   AWS_REGION       default ap-south-1
-#   ECR_REPO         default openg2p/da-registry
+#   ECR_BASE         default openg2p/da-registry
 #   HELM_TIMEOUT     default 20m
 #   ROLLOUT_TIMEOUT  per-Deployment rollout wait, default 420s
 # Release, namespace, chart version and values come from ci/deploy/oan-chart.json only.
@@ -41,10 +41,10 @@ TAG="${1:-${IMAGE_TAG:-}}"
 : "${AWS_ACCOUNT_ID:?set AWS_ACCOUNT_ID}"
 : "${KUBECONFIG:?set KUBECONFIG}"
 AWS_REGION="${AWS_REGION:-ap-south-1}"
-ECR_REPO="${ECR_REPO:-openg2p/da-registry}"
+ECR_BASE="${ECR_BASE:-openg2p/da-registry}"
 HELM_TIMEOUT="${HELM_TIMEOUT:-20m}"
 ROLLOUT_TIMEOUT="${ROLLOUT_TIMEOUT:-420s}"
-IMAGE_REPOSITORY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}"
+IMAGE_REPOSITORY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_BASE}"
 
 say() { echo "=== $* ==="; }
 
@@ -62,7 +62,7 @@ CENTRAL_VALUES="$(python3 ci/deploy/oan_chart.py values registry "$WORK/public-v
 echo "chart:     $(python3 ci/deploy/oan_chart.py version registry) (platform $(python3 ci/deploy/oan_chart.py platform registry))"
 echo "release:   ${HELM_RELEASE}"
 echo "namespace: ${HELM_NAMESPACE}"
-echo "images:    ${IMAGE_REPOSITORY}:<component>-${TAG}"
+echo "images:    ${IMAGE_REPOSITORY}/<component>:${TAG}"
 
 say "Release check"
 # Upgrade only. A missing release is an error, never a first install.
@@ -87,22 +87,22 @@ cat > "$WORK/ci-values.yaml" <<EOF2
 registry:
   staffApi:
     enabled: true
-    image: {repository: '${IMAGE_REPOSITORY}', tag: 'staff-api-${TAG}'}
+    image: {repository: '${IMAGE_REPOSITORY}/staff-api', tag: '${TAG}'}
   partnerApi:
     enabled: true
-    image: {repository: '${IMAGE_REPOSITORY}', tag: 'partner-api-${TAG}'}
+    image: {repository: '${IMAGE_REPOSITORY}/partner-api', tag: '${TAG}'}
   celeryWorker:
     enabled: true
-    image: {repository: '${IMAGE_REPOSITORY}', tag: 'celery-${TAG}'}
+    image: {repository: '${IMAGE_REPOSITORY}/celery', tag: '${TAG}'}
   celeryBeat:
     enabled: true
-    image: {repository: '${IMAGE_REPOSITORY}', tag: 'celery-${TAG}'}
+    image: {repository: '${IMAGE_REPOSITORY}/celery', tag: '${TAG}'}
   staffUi:
     enabled: true
-    image: {repository: '${IMAGE_REPOSITORY}', tag: 'staff-ui-${TAG}'}
+    image: {repository: '${IMAGE_REPOSITORY}/staff-ui', tag: '${TAG}'}
   dbSeed:
     enabled: true
-    image: {repository: '${IMAGE_REPOSITORY}', tag: 'db-seed-${TAG}'}
+    image: {repository: '${IMAGE_REPOSITORY}/db-seed', tag: '${TAG}'}
 EOF2
 VALUES=(-f "$CENTRAL_VALUES" -f "$WORK/ci-values.yaml")
 

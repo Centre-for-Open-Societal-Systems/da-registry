@@ -528,9 +528,9 @@ class ImageValuesTests(unittest.TestCase):
         self.assertEqual(len(old.split("\n")), len(new.split("\n")))
         self.assertEqual(len(changed), 12)                         # repository + tag of six registry components
         self.assertTrue(all(b.lstrip().startswith(("repository:", "tag:")) for _, b in changed))
-        self.assertIn("      repository: '%s'" % REPOSITORY, new)
-        self.assertIn("      tag: 'staff-api-%s@%s'" % (NEW_TAG, release_digests()["staff-api"]), new)
-        self.assertIn("      tag: 'staff-ui-%s@%s'" % (NEW_TAG, release_digests()["staff-ui"]), new)
+        self.assertIn("      repository: '%s/staff-api'" % REPOSITORY, new)
+        self.assertIn("      tag: '%s@%s'" % (NEW_TAG, release_digests()["staff-api"]), new)
+        self.assertIn("      tag: '%s@%s'" % (NEW_TAG, release_digests()["staff-ui"]), new)
         # untouched: the comment, the enabled flags, the init image, the dashboards (this repository does not build them)
         for kept in ("# a comment at column 0 inside the registry block", "tag: 1.0.0", "      A: 'b'", "repository: docker.io/x/y"):
             self.assertIn(kept, new)
@@ -548,13 +548,13 @@ class ImageValuesTests(unittest.TestCase):
         document = yaml.safe_load(self.r.rewrite_values(sample_values(), self.tags, REPOSITORY))
         for section, component in self.r.REGISTRY:
             image = document["registry"][section]["image"]
-            self.assertEqual(image["repository"], REPOSITORY)
-            self.assertEqual(image["tag"], "%s-%s@%s" % (component, NEW_TAG, release_digests()[component]))
+            self.assertEqual(image["repository"], REPOSITORY + "/" + component)
+            self.assertEqual(image["tag"], "%s@%s" % (NEW_TAG, release_digests()[component]))
             self.assertIs(document["registry"][section]["enabled"], False)
 
     def test_both_celery_workloads_get_the_celery_digest(self):
         new = self.r.rewrite_values(sample_values(), self.tags, REPOSITORY)
-        self.assertEqual(new.count("celery-%s@%s" % (NEW_TAG, release_digests()["celery"])), 2)
+        self.assertEqual(new.count("%s@%s" % (NEW_TAG, release_digests()["celery"])), 2)
 
     def test_rewriting_twice_changes_nothing(self):
         once = self.r.rewrite_values(sample_values(), self.tags, REPOSITORY)
@@ -660,7 +660,7 @@ class ImagePullRequestTests(unittest.TestCase):
         self.r = load_release()
         self.gh = FakeGitHub(self.r)
         self.out = []
-        self.env = {"IMAGE_TAG": NEW_TAG, "ECR_REGISTRY": REG, "ECR_REPO": REPO, "COMMIT_SUBJECT": "Add a field",
+        self.env = {"IMAGE_TAG": NEW_TAG, "ECR_REGISTRY": REG, "ECR_BASE": REPO, "COMMIT_SUBJECT": "Add a field",
                     "SOURCE_COMMIT": NEW_TAG + "f" * 28, "BUILD_URL": "https://jenkins/job/7/"}
         self.tags = self.r.wanted(NEW_TAG, release_digests())
 
@@ -683,7 +683,7 @@ class ImagePullRequestTests(unittest.TestCase):
                  ("POST", "ORG/pulls")]
         positions = [calls.index(c) for c in order]
         self.assertEqual(positions, sorted(positions))
-        self.assertIn("staff-api-%s@%s" % (NEW_TAG, release_digests()["staff-api"]), self.gh.branches[BRANCH])
+        self.assertIn("%s@%s" % (NEW_TAG, release_digests()["staff-api"]), self.gh.branches[BRANCH])
         _, _, body = next(c for c in self.gh.calls if c[0] == "POST" and c[1].endswith("/pulls"))
         self.assertEqual((body["base"], body["head"]), ("main", "fork-owner:" + BRANCH))
         self.assertIn("DA registry images %s: Add a field" % NEW_TAG, body["title"])
@@ -745,7 +745,7 @@ class ImagePullRequestTests(unittest.TestCase):
         self.gh.text = self.r.rewrite_values(sample_values(), self.tags, REPOSITORY)    # the previous commit is merged
         url = self.run_stage(IMAGE_TAG="fedcba987654")
         self.assertTrue(url)
-        self.assertIn("staff-api-fedcba987654@", self.gh.branches["bot/da-registry-images-fedcba987654"])
+        self.assertIn("fedcba987654@", self.gh.branches["bot/da-registry-images-fedcba987654"])
 
     def test_a_left_over_branch_is_reset_and_the_open_pull_request_is_updated_not_duplicated(self):
         self.gh.branches[BRANCH] = "stale"
@@ -855,12 +855,12 @@ class PipelineWiringTests(unittest.TestCase):
         self.assertIn('PIN_PR_CRED_ID = "oan-ci-app"', self.text)
 
     def test_the_stage_is_built_for_this_pipelines_names(self):
-        self.assertIn('ECR_REPO       = "openg2p/da-registry"', self.text)
+        self.assertIn('ECR_BASE       = "openg2p/da-registry"', self.text)
         release = (ROOT / "ci/deploy/release_images.py").read_text()
         self.assertIn('CHART = "openg2p-da-registry"', release)
         deploy = (ROOT / "ci/deploy-dev.sh").read_text()
         for section, component in load_release().REGISTRY:
-            self.assertIn("tag: '%s-${TAG}'" % component, deploy)         # the tag the deploy sets is the tag the PR records
+            self.assertIn("{repository: '${IMAGE_REPOSITORY}/%s', tag: '${TAG}'}" % component, deploy)         # the tag the deploy sets is the tag the PR records
 
     def test_every_component_the_pipeline_builds_has_a_digest_line(self):
         for component in load_release().COMPONENTS:

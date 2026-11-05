@@ -6,8 +6,8 @@ the pull request to be merged: the stage, and the build, are a success once the 
 
   1. Read the ECR digests of the build (.build/image-digests.tsv: component<TAB>sha256:...).
   2. Rewrite the image settings under `registry:` in charts/openg2p-da-registry/values.yaml of oan-helm:
-        repository: <ECR registry>/<ECR repository>        (one repository for all components)
-        tag: '<component>-<commit12>@sha256:<digest>'
+        repository: <ECR registry>/openg2p/da-registry/<component>
+        tag: '<commit12>@sha256:<digest>'
      for staffApi, partnerApi, celeryWorker, celeryBeat, staffUi and dbSeed. Only those lines change; the file is edited
      as text. The `enabled` flags are left as they are: ci/deploy-dev.sh switches the workloads on and sets the images of
      the build it deploys, whatever the chart carries.
@@ -49,7 +49,7 @@ CHART = "openg2p-da-registry"
 VALUES_PATH = "charts/%s/values.yaml" % CHART
 DIGESTS = ".build/image-digests.tsv"
 PR_FILE = ".build/oan-helm-pr.txt"
-# chart values section under `registry:` -> component (the ECR tag prefix: <component>-<commit12>)
+# chart values section under `registry:` -> component (the ECR repository: openg2p/da-registry/<component>)
 REGISTRY = (("staffApi", "staff-api"), ("partnerApi", "partner-api"), ("celeryWorker", "celery"),
             ("celeryBeat", "celery"), ("staffUi", "staff-ui"), ("dbSeed", "db-seed"))
 # A commit that changes only these files is the merge of a chart-pin pull request (propose_pin_pr.py). It is not left
@@ -82,13 +82,13 @@ def read_digests(text):
 
 
 def wanted(image_tag, digests):
-    """{values section: '<component>-<commit12>@sha256:..'} for the registry components."""
+    """{values section: '<commit12>@sha256:..'} for the registry components."""
     if not re.fullmatch(r"[0-9a-f]{12}", image_tag):
         raise ValueError("IMAGE_TAG must be the 12-character commit tag")
     missing = sorted(set(COMPONENTS) - set(digests))
     if missing:
         raise ValueError("no ECR digest for: " + ", ".join(missing))
-    return dict((section, "%s-%s@%s" % (component, image_tag, digests[component])) for section, component in REGISTRY)
+    return dict((section, "%s@%s" % (image_tag, digests[component])) for section, component in REGISTRY)
 
 
 def _indent(line):
@@ -118,8 +118,8 @@ def _set_value(lines, start, end, key, value, indent):
     lines[found] = "%s%s: %s" % (" " * indent, key, value)
 
 
-def rewrite_values(text, registry_tags, repository):
-    """The values text with the image repository and tags of the registry sections; the rest is byte for byte as it was.
+def rewrite_values(text, registry_tags, base):
+    """The values text with the image repository (<base>/<component>) and tags of the registry sections; the rest is byte for byte as it was.
 
     The tag is written in single quotes (like the empty `''` it replaces): a tag is a string whatever it looks like.
     """
@@ -131,14 +131,14 @@ def rewrite_values(text, registry_tags, repository):
         end = _block_end(lines, header, 2)
         image = _find(lines, r" {4}image:\s*", header + 1, end)
         image_end = _block_end(lines, image, 4)
-        _set_value(lines, image + 1, image_end, "repository", "'%s'" % repository, 6)
+        _set_value(lines, image + 1, image_end, "repository", "'%s/%s'" % (base, dict(REGISTRY)[section]), 6)
         _set_value(lines, image + 1, image_end, "tag", "'%s'" % tag, 6)
     return "\n".join(lines)
 
 
 def released_before(text, image_tag):
     """True when the values already carry this commit's images (an earlier build of the same commit released them)."""
-    return re.search(r"(?m)^\s+tag: '?[a-z-]+-%s@sha256:[0-9a-f]{64}'?\s*$" % re.escape(image_tag), text) is not None
+    return re.search(r"(?m)^\s+tag: '?(?:[a-z-]+-)?%s@sha256:[0-9a-f]{64}'?\s*$" % re.escape(image_tag), text) is not None
 
 
 def changed_files(root, env):
@@ -265,7 +265,7 @@ class Proposal(object):
     def run(self, env, root, digests_text):
         image_tag = env["IMAGE_TAG"]
         tags = wanted(image_tag, read_digests(digests_text))
-        repository = "%s/%s" % (env["ECR_REGISTRY"], env.get("ECR_REPO", "openg2p/da-registry"))
+        repository = "%s/%s" % (env["ECR_REGISTRY"], env.get("ECR_BASE", "openg2p/da-registry"))
         main_sha = self.main_head()
         text, _ = self.contents(self.upstream, "main", SLUG)
         new_text = rewrite_values(text, tags, repository)
