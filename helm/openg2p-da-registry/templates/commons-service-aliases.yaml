@@ -1,0 +1,22 @@
+{{- /*
+In-namespace names for Commons Services that the openg2p-registry subchart calls by
+short name. Its db-seed hook waits for http://<global.aweReleaseName>-awe:80, which
+only resolves inside the Commons namespace. Each entry renders an ExternalName
+Service with that short name pointing at the Service in the Commons namespace.
+Do not enable an entry where a Service of that name already exists unless it is
+owned by this release (Helm refuses to take over objects it did not create).
+*/ -}}
+{{- range .Values.commonsServiceAliases }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .name }}
+  labels:
+    app.kubernetes.io/managed-by: {{ $.Release.Service }}
+    app.kubernetes.io/instance: {{ $.Release.Name }}
+    app.kubernetes.io/component: commons-service-alias
+spec:
+  type: ExternalName
+  externalName: {{ printf "%s.%s.svc.cluster.local" .name (required "commonsServiceAliases[].namespace is required" .namespace) }}
+{{- end }}

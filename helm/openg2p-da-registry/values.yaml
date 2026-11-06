@@ -234,3 +234,25 @@ dashboardApi:
       memory: 256Mi
     limits:
       memory: 768Mi
+
+# Pull secret for the ECR images, created before install/upgrade by a hook Job
+# and refreshed by a CronJob from the node's IAM role (ECR tokens last 12 h).
+# Pods use it through the ServiceAccounts named in serviceAccounts, which the
+# job patches to list the secret (the openg2p-registry subchart pods and seed
+# jobs run as "default"). global.imagePullSecrets is not used for this: with
+# the pinned subchart it renders invalid Deployment YAML.
+ecrPullSecret:
+  enabled: false
+  name: ""                 # default: <release>-ecr-pull-secret
+  registry: ""             # required when enabled: <account>.dkr.ecr.<region>.amazonaws.com
+  serviceAccounts: []      # ServiceAccounts to patch with the secret, e.g. [default]
+  schedule: "0 */6 * * *"
+  awsCliImage: amazon/aws-cli:2.36.43
+  kubectlImage: alpine/k8s:1.31.1
+
+# ExternalName Services for Commons Services the registry subchart calls by short
+# name (see templates/commons-service-aliases.yaml). Example:
+#   commonsServiceAliases:
+#     - name: commons-services-awe
+#       namespace: commons
+commonsServiceAliases: []
