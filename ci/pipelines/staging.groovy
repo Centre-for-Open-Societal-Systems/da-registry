@@ -10,13 +10,9 @@ def call() {
             buildDiscarder(logRotator(numToKeepStr: '30'))
             timeout(time: 60, unit: 'MINUTES')
         }
-        parameters {
-            booleanParam(name: 'DEPLOY_STAGING', defaultValue: true,
-                description: 'Promote and deploy. Clear it to run the build without touching staging.')
-        }
         stages {
             stage('Promote and deploy') {
-                when { allOf { branch 'staging'; not { changeRequest() }; expression { params.DEPLOY_STAGING } } }
+                when { allOf { branch 'staging'; not { changeRequest() } } }
                 steps {
                     checkout scm
                     withCredentials([
