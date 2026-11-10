@@ -26,13 +26,13 @@ def call() {
                     ]) {
                         sh '''
                           set -eu
-                          sample=()
-                          if [ "${LOAD_SAMPLE_DATA:-false}" = true ]; then sample=(--set registry.dbSeed.loadSampleData=true); fi
+                          sample=''
+                          if [ "${LOAD_SAMPLE_DATA:-false}" = true ]; then sample='--set registry.dbSeed.loadSampleData=true'; fi
                           rm -rf .oan-helm
                           git clone --quiet --depth 1 --filter=blob:none --sparse \\
                             https://github.com/Centre-for-Open-Societal-Systems/oan-helm.git .oan-helm
                           git -C .oan-helm sparse-checkout set scripts/ci environments/staging/values
-                          bash .oan-helm/scripts/ci/deliver_staging.sh openg2p-da-registry da-registry da-registry da.yaml ${sample[@]+"${sample[@]}"}
+                          bash .oan-helm/scripts/ci/deliver_staging.sh openg2p-da-registry da-registry da-registry da.yaml $sample
                         '''
                     }
                 }
