@@ -17,6 +17,8 @@ def call() {
         options {
             // Overlapping runs collide on the helm upgrade ("another operation in progress").
             disableConcurrentBuilds()
+            // Agents are on-demand machines: if one is lost mid-build, run the build again.
+            retry(count: 2, conditions: [agent(), nonresumable()])
         }
 
         environment {
@@ -97,8 +99,11 @@ def call() {
                         components.each { c ->
                             def image  = "${ECR_REGISTRY}/${ECR_BASE}/${c.name}:${env.IMAGE_TAG}"
                             def latest = movingTag ? "${ECR_REGISTRY}/${ECR_BASE}/${c.name}:${movingTag}" : null
+                            // On-demand agents start with an empty Docker cache: reuse layers from the branch
+                            // tag in ECR (develop for other branches), which carries inline cache metadata.
+                            def cacheFrom = "${ECR_REGISTRY}/${ECR_BASE}/${c.name}:${movingTag ?: 'develop'}"
                             sh """
-                                docker build ${c.args} \
+                                docker build --build-arg BUILDKIT_INLINE_CACHE=1 --cache-from ${cacheFrom} ${c.args} \
                                     -f ${c.dockerfile} -t ${image} ${latest ? "-t ${latest}" : ''} .
                                 docker push ${image} > .build/push-${c.name}.log 2>&1 || { cat .build/push-${c.name}.log; exit 1; }
                                 cat .build/push-${c.name}.log
