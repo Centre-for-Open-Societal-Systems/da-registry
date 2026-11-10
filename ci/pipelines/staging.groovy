@@ -3,7 +3,7 @@
 // The build fails if develop never built this tree: staging only runs what New Dev ran first.
 def call() {
     pipeline {
-        agent { label 'vpn-agent2' }
+        agent { label 'oan-ci-deploy' }
         options {
             timestamps()
             disableConcurrentBuilds()

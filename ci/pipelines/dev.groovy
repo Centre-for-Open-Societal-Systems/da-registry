@@ -12,7 +12,7 @@
 def call() {
     pipeline {
         // The agent that reaches the dev cluster (as the livestock pipeline uses).
-        agent { label 'vpn-agent2' }
+        agent { label 'oan-ci-deploy' }
 
         options {
             // Overlapping runs collide on the helm upgrade ("another operation in progress").

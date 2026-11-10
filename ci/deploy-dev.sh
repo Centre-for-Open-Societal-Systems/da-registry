@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Upgrade the DA registry release on the dev cluster with the chart this build packaged.
 #
-# The Jenkinsfile's "Deploy to Development" stage runs this on the vpn-agent2 node
+# The Jenkinsfile's "Deploy to Development" stage runs this on the oan-ci-deploy-agent-1 node
 # with the da-dev-kubeconfig credential. A deploy by hand is the same command:
 #
 #   KUBECONFIG=<kubeconfig> AWS_ACCOUNT_ID=<id> ./ci/deploy-dev.sh <12-char-commit-sha>
