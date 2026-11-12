@@ -4,8 +4,8 @@
 Run by the platform's db-seed entrypoint when LOAD_SAMPLE_DATA=true (the
 platform owns the hook; this is the DA variant's loader). Nothing is written
 to the register tables: every sample DA is entered the way a person enters one
-on the web form, through the staff API with a service account (client
-credentials), and approved the way every register change is approved: the
+on the web form, through the staff API as INTAKE_SEED_SUBMIT_USER (alex.carter),
+and approved the way every register change is approved: the
 approval request's stage 1 as INTAKE_SEED_APPROVER_1 (alex.carter) and its
 stage 2 as INTAKE_SEED_APPROVER_2 (nina.patel), through the staff API's AWE
 proxy. The approvers sign in as in the staff portal (staff IAM, then the
@@ -45,10 +45,11 @@ submission and the loader counts it as already present. (The platform records
 the signed-in account as created_by, whatever the payload says, so created_by
 cannot mark the loader's submissions.)
 
-The submitter is the registry's service account (client credentials against
-Keycloak, the registry's own client): a service identity, not a staff user, so
-it does not go through the staff IAM sign-in. The approvers are staff users and
-do.
+The submitter signs in like the approvers (staff IAM, Keycloak login form, IAM's
+callback), as the Farmer loader does: the staff API grants by the caller's roles
+on the staff portal client, and the registry's service account holds none (the
+platform's Keycloak setup gives it none, and nothing here changes Keycloak).
+Only the read-only Master Data calls use the client-credentials token.
 
 Within the seed job's time (the deploy waits 15 minutes for the hook): the
 clock starts with the loader. After INTAKE_SEED_TIME_BUDGET seconds (default
@@ -77,8 +78,9 @@ host beside Keycloak's on the platform's host names: keycloak.<domain> (from
 STAFF_TOKEN_URL) gives staff-iam.<domain> and master-data.<domain>.
   STAFF_API_URL, STAFF_TOKEN_URL, STAFF_CLIENT_ID, STAFF_CLIENT_SECRET
       the staff API and the registry's Keycloak client (global.authClientId);
-      its service-account user needs the client role Intake Officer on the
-      staff portal client
+      the client token is used for Master Data only
+  INTAKE_SEED_SUBMIT_USER (alex.carter)
+      the staff user who enters the DAs (signed in with INTAKE_SEED_PASSWORD)
   STAFF_IAM_URL, INTAKE_SEED_PASSWORD, INTAKE_SEED_APPROVER_1 (alex.carter),
   INTAKE_SEED_APPROVER_2 (nina.patel), INTAKE_SEED_APPROVE_TIMEOUT (300)
       the approvers' sign-in (STAFF_IAM_URL: the staff IAM the approvers' browser
@@ -122,7 +124,7 @@ CSRF = uuid.uuid4().hex
 INTAKE_ARTIFACT = "registry.intake_form"
 TRANSIENT_HTTP = (502, 503, 504)  # the gateway's answer when the service behind it is away
 NETWORK_ATTEMPTS = 5
-# The request carries a created_by; the platform stores the signed-in account (the service account) instead,
+# The request carries a created_by; the platform stores the signed-in account (the submit user) instead,
 # so it cannot mark the loader's submissions.
 SEED_CREATED_BY = "sample-data-seed"
 # The identity record of every DA the loader enters has an id only the loader makes (uuid5 of the Fayda ID):
@@ -230,6 +232,7 @@ class Client:
         self.staff = env("STAFF_API_URL").rstrip("/")
         self.master_data = beside_keycloak("MDS_API_URL", "master-data")
         self._tokens: dict[str, tuple[str, float]] = {}
+        self.submitter = None  # StaffSession: staff API calls go as this signed-in user
 
     def token(self, kind: str) -> str:
         cached = self._tokens.get(kind)
@@ -250,6 +253,13 @@ class Client:
         return data["access_token"]
 
     def call(self, base: str, path: str, payload: dict, pagination: dict | None = None, once: bool = False):
+        if base == self.staff and self.submitter is not None:
+            try:
+                return True, "", self.submitter.post(path, payload, once=once, pagination=pagination)
+            except OutOfTime:
+                raise
+            except RuntimeError as exc:
+                return False, str(exc), None
         envelope = {
             "request_header": {
                 "request_id": uuid.uuid4().hex, "request_timestamp": datetime.now(timezone.utc).isoformat(),
@@ -492,13 +502,14 @@ class StaffSession:
         self._token = token
         log(f"signed in as {self.username}")
 
-    def post(self, path: str, payload: dict, once: bool = False) -> dict:
+    def post(self, path: str, payload: dict, once: bool = False, pagination: dict | None = None) -> dict:
         """The response payload; `once` for a request that must not be applied twice (no network retry)."""
         envelope = {
             "request_header": {"request_id": uuid.uuid4().hex,
                                "request_timestamp": datetime.now(timezone.utc).isoformat(),
                                "sender_app_mnemonic": "da-registry-sample-data", "sender_app_url": "http://da-registry"},
-            "request_body": {"request_payload": payload, "pagination_request": {"current_page": 1, "page_size": 100}},
+            "request_body": {"request_payload": payload,
+                             "pagination_request": pagination or {"current_page": 1, "page_size": 100}},
         }
         for attempt in (1, 2):
             csrf = uuid.uuid4().hex
@@ -609,8 +620,11 @@ def main() -> int:
                                   env("INTAKE_SEED_PASSWORD"))
                      for name, default in (("INTAKE_SEED_APPROVER_1", "alex.carter"),
                                            ("INTAKE_SEED_APPROVER_2", "nina.patel"))]
+        submit_user = env("INTAKE_SEED_SUBMIT_USER", "alex.carter")
+        client.submitter = next((a for a in approvers if a.username == submit_user), None) or StaffSession(
+            settings["STAFF_IAM_URL"], client.staff, submit_user, env("INTAKE_SEED_PASSWORD"))
     except Exception as exc:
-        log(f"the approvers cannot sign in ({exc!r}): sample DAs not submitted.")
+        log(f"the submit user or approvers cannot sign in ({exc!r}): sample DAs not submitted.")
         return 0
     approve_timeout = int(env("INTAKE_SEED_APPROVE_TIMEOUT", "180"))
     try:

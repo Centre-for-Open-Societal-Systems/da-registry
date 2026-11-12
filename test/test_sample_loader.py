@@ -438,3 +438,32 @@ def test_an_approver_signs_in_through_iam_and_the_keycloak_form(loader, monkeypa
     assert seen["prompt"] is True
     assert seen["login"] == {"username": "alex.carter", "password": "pass", "credentialId": ""}
     assert "txn=1" in (seen["login_cookie"] or "")
+
+
+def test_staff_calls_go_as_the_signed_in_submit_user_and_master_data_keeps_the_client_token(loader, monkeypatch):
+    """The registry's service account holds no staff portal role, so entering a DA as it is refused
+    ("Insufficient resource_access roles"); the staff API is called as the signed-in submit user instead."""
+    monkeypatch.setenv("STAFF_API_URL", "http://staff")
+    monkeypatch.setenv("MDS_API_URL", "http://mds")
+    client = loader.Client()
+    seen = []
+
+    class Submitter:
+        username = "alex.carter"
+
+        def post(self, path, payload, once=False, pagination=None):
+            seen.append((path, once))
+            if path == "/bad":
+                raise RuntimeError("/bad as alex.carter: 200 None Forbidden.")
+            return {"submission_id": "s-1"}
+
+    client.submitter = Submitter()
+    monkeypatch.setattr(client, "token", lambda kind: pytest.fail("no client token for the staff API"))
+    assert client.call(client.staff, "/intake/save", {"a": 1}, once=True) == (True, "", {"submission_id": "s-1"})
+    assert client.call(client.staff, "/bad", {}) == (False, "/bad as alex.carter: 200 None Forbidden.", None)
+    assert seen == [("/intake/save", True), ("/bad", False)]
+    kinds = []
+    monkeypatch.setattr(client, "token", lambda kind: kinds.append(kind) or "t")
+    monkeypatch.setattr(loader, "http", lambda *a, **k: (200, b'{"response_header": {"response_status": "SUCCESS"}}'))
+    assert client.call(client.master_data, "/geo/get_all_geo_levels", {})[0] is True
+    assert kinds == ["mds"]
