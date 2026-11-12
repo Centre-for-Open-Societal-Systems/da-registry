@@ -387,3 +387,54 @@ def test_a_refused_decision_waits_before_the_task_is_read_again(loader, monkeypa
 
     loader.approve([RefusedOnce(1, True, status, calls), RefusedOnce(2, True, status, calls)], "sub-1", 5)
     assert slept == [3] and status["sub-1"] == "APPROVED"
+
+
+def test_an_approver_signs_in_through_iam_and_the_keycloak_form(loader, monkeypatch):
+    """The whole portal sign-in against a stand-in IAM and Keycloak (the module's own http() helper once
+    shadowed the http package here, so every sign-in failed before the first request)."""
+    import json
+    import threading
+    import urllib.parse
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    seen = {}
+
+    class StandIn(BaseHTTPRequestHandler):
+        def log_message(self, *_):
+            pass
+
+        def answer(self, code, body=b"", headers=()):
+            self.send_response(code)
+            for name, value in headers:
+                self.send_header(name, value)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_POST(self):
+            data = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+            if self.path.startswith("/auth/start_authentication_transaction"):
+                return self.answer(200, json.dumps({"redirectUrl": f"{base}/realms/staff/auth?client_id=x"}).encode(),
+                                   [("Set-Cookie", "txn=1; Path=/")])
+            seen["login"] = dict(urllib.parse.parse_qsl(data.decode(), keep_blank_values=True))
+            seen["login_cookie"] = self.headers.get("Cookie")
+            self.answer(302, headers=[("Location", f"{base}/auth/callback?code=one-time")])
+
+        def do_GET(self):
+            if self.path.startswith("/realms/staff/auth"):
+                seen["prompt"] = "prompt=login" in self.path
+                form = f'<form id="kc-form-login" class="x" action="{base}/realms/staff/login-actions/authenticate?s=1&amp;t=2">'
+                return self.answer(200, form.encode())
+            self.answer(302, headers=[("Location", "/en"), ("Set-Cookie", "X-Access-Token=staff-token; Path=/")])
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), StandIn)
+    base = f"http://127.0.0.1:{server.server_port}"
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        session = loader.StaffSession(base, base, "alex.carter", "pass")
+    finally:
+        server.shutdown()
+    assert session._token == "staff-token"
+    assert seen["prompt"] is True
+    assert seen["login"] == {"username": "alex.carter", "password": "pass", "credentialId": ""}
+    assert "txn=1" in (seen["login_cookie"] or "")
