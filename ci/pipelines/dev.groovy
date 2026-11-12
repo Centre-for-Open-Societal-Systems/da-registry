@@ -60,6 +60,8 @@ def call() {
                 // no network, no cluster.
                 steps {
                     sh 'python3 -m unittest discover -s test -p "test_deploy_ci.py" -v'
+                    // Sample-approver password hook against a fake Keycloak (stdlib only, no network).
+                    sh 'python3 -m unittest discover -s test -p test_sample_approver_password.py -v'
                 }
             }
 
