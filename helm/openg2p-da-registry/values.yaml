@@ -256,3 +256,17 @@ ecrPullSecret:
 #     - name: commons-services-awe
 #       namespace: commons
 commonsServiceAliases: []
+
+# Sample approvers sign in with registry.global.aweApproverUserPassword (the platform default, `pass`).
+# keycloak-init creates them with it as a temporary password and never updates an existing user; this
+# post-install/upgrade hook makes it the permanent password for the users listed here
+# (templates/sample-approver-password.yaml). An empty aweApproverUserPassword turns it off.
+sampleApproverPassword:
+  enabled: true
+  realm: staff
+  users:
+    - alex.carter
+    - nina.patel
+  image: python:3.11.14-slim
+  imagePullSecrets: []
+  waitSeconds: 600
