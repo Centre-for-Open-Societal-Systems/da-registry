@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Upgrade the DA registry release on the dev cluster with the chart this build packaged.
 #
-# The Jenkinsfile's "Deploy to Development" stage runs this on the oan-ci-deploy-agent-1 node
-# with the da-dev-kubeconfig credential. A deploy by hand is the same command:
+# The "Deploy to Development" stage of ci/pipelines/dev.groovy runs this on an oan-ci-deploy agent
+# with the da-registry-newdev-kubeconfig credential (DEV_KUBECONFIG_CRED_ID), against the release
+# da-registry in the namespace da-registry. A deploy by hand is the same command:
 #
 #   KUBECONFIG=<kubeconfig> AWS_ACCOUNT_ID=<id> ./ci/deploy-dev.sh <12-char-commit-sha>
 #
