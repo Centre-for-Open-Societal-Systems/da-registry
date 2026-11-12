@@ -95,7 +95,7 @@ STAFF_TOKEN_URL) gives staff-iam.<domain> and master-data.<domain>.
 import csv
 import glob
 import html
-import http.cookiejar
+from http.cookiejar import CookieJar
 import json
 import os
 import re
@@ -466,7 +466,7 @@ class StaffSession:
             def redirect_request(self, *args, **kwargs):
                 return None
 
-        jar = http.cookiejar.CookieJar()
+        jar = CookieJar()
         opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar), NoRedirect,
                                              urllib.request.HTTPSHandler(context=tls_context()))
         status, _, body = self._open(opener, urllib.request.Request(

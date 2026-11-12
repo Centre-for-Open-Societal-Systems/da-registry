@@ -21,6 +21,7 @@ from .register_domain.services import (
     install_da_intake_guard,
 )
 
+from .intake_da_id import copy_da_id_to_intake
 from .schema_compat import apply_native_schema_compat
 from .schema_migration import add_missing_mapped_columns
 
@@ -193,6 +194,10 @@ class Initializer(BaseInitializer):
                         "t.geo_code_hierarchy_json::jsonb->'hierarchy'->0->>'level')) = 'region'"
                     )
                 )
+
+            # The DA-ID is written to the register row only; copy it to the
+            # record's intake rows so an approved submission shows it too.
+            await copy_da_id_to_intake(conn)
 
             # POST /da/get_push_status looks a push up by DA Services' reference_id,
             # which only exists inside the stored request body.
