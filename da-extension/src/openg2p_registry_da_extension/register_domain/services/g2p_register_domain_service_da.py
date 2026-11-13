@@ -1,7 +1,9 @@
+import json
 import logging
 from datetime import date
 
 from openg2p_registry_core.services import G2PRegisterDomainService
+from sqlalchemy import text
 
 from .choice_check import validate_choices
 from .domain_validation_utils import as_int, parse_date, validation_error
@@ -254,6 +256,71 @@ class G2PRegisterDomainServiceDA(G2PRegisterDomainService):
         record["woreda_name"] = levels["woreda"]
         record["kebele_name"] = levels["kebele"]
         record.update(geo_codes(hierarchy if level_value_id else None))
+
+    # ------------------------------------------------ location after a change --
+    FLAT_GEO_COLUMNS = (
+        "region_name", "zone_name", "woreda_name", "kebele_name",
+        "region_code", "zone_code", "woreda_code",
+    )
+
+    async def post_approve(self, change_request, session):
+        """A change request stores only what the form sent: the Kebele id and
+        its chain. The names and codes kept next to them (the Woreda and Kebele
+        on the list, the codes DA Services scopes and filters by) are derived
+        when a record is saved through the form, and a change request applies
+        its payload as it is, so after a location change they still described
+        the old place. Derive them again from the record once the change is in
+        the register."""
+        await super().post_approve(change_request, session)
+        await self._refresh_flattened_geo(change_request.internal_record_id, session)
+
+    async def _refresh_flattened_geo(self, internal_record_id: str, session) -> None:
+        columns = ", ".join(f'"{name}"' for name in self.FLAT_GEO_COLUMNS)
+        row = (
+            await session.execute(
+                text(
+                    f'SELECT "geo_lowest_level_value_id", "geo_code_hierarchy_json", {columns} '
+                    'FROM "public"."g2p_register_das" WHERE "internal_record_id" = :id'
+                ),
+                {"id": internal_record_id},
+            )
+        ).mappings().first()
+        if not row or not row["geo_lowest_level_value_id"]:
+            return
+        record = {
+            "geo_lowest_level_value_id": row["geo_lowest_level_value_id"],
+            "geo_code_hierarchy_json": row["geo_code_hierarchy_json"],
+        }
+        await self._sync_flattened_geo_names(record)
+        # Master Data not reachable: the names of the chain the record carries.
+        for name, value in self._names_of_chain(row["geo_code_hierarchy_json"]).items():
+            record.setdefault(name, value)
+        changed = {
+            name: record.get(name) for name in self.FLAT_GEO_COLUMNS
+            if name in record and record.get(name) != row[name]
+        }
+        if not changed:
+            return
+        assignments = ", ".join(f'"{name}" = :{name}' for name in changed)
+        await session.execute(
+            text(f'UPDATE "public"."g2p_register_das" SET {assignments} WHERE "internal_record_id" = :id'),
+            {**changed, "id": internal_record_id},
+        )
+
+    @classmethod
+    def _names_of_chain(cls, chain) -> dict:
+        """{"region_name": ..} from a geo_code_hierarchy_json value (dict or JSON text)."""
+        if isinstance(chain, str):
+            try:
+                chain = json.loads(chain)
+            except ValueError:
+                chain = None
+        names = {}
+        for entry in (chain.get("hierarchy") if isinstance(chain, dict) else None) or []:
+            level = str((entry or {}).get("level_mnemonic") or (entry or {}).get("level") or "").strip().lower()
+            if level in ("region", "zone", "woreda", "kebele"):
+                names[f"{level}_name"] = cls._geo_display_name(entry)
+        return names
 
     @staticmethod
     def _geo_display_name(entry: dict) -> str | None:
