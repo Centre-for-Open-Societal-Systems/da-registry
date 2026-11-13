@@ -36,8 +36,10 @@ needs:
 
 ### Who approves a DA
 
-Every submitted DA and every change request goes through the platform's
-two-level approval: first approval, then second approval. Each stage is
+Every submitted DA (web form, file import, DA Services push) goes through the
+platform's two-level approval: first approval, then second approval. A change
+to an existing DA is not approved in the registry, see "Changes to a DA"
+below. Each stage is
 completed by any one of its approvers (mode `any-n`, one decision). The
 repository seeds the same approvers in every OAN registry (`awe_meta_data/`):
 first approval = `alex.carter` or `admin`, second approval = `nina.patel` or `admin`; the two
@@ -62,6 +64,46 @@ them automatically, and no role (the Operations Administrator included)
 approves a submission or a change request directly: the direct-approval
 endpoints answer `AWE_APPROVAL_REQUIRED`. Decision (23 Oct 2026, Faiz and
 Shikha).
+
+### Changes to a DA
+
+A change to an existing DA (contact, qualification, identity or location) is
+made in DA Services and approved there twice, by the Supervisor and then by the
+Administrator. DA Services then sends the change request to the registry with
+the approving Administrator's token, and the registry applies it at once: both
+stages of the policy `registry.change_request.da` carry `skip_if` = always true
+(`awe_meta_data/20_approval_stage.sql`), so the workflow engine approves the
+request when it is created (events `stage_skipped`, `stage_skipped`,
+`request_approved`) and the registry applies it through the usual callback.
+Decision of 12 Nov 2026 (Shikha): one approval path, in DA Services, and the
+signed-in user's token, no service account for now.
+
+What the registry still does for every change request: the format and list
+checks (16-digit Fayda ID, phone, email, coded values), one DA per Fayda ID,
+the register history, and, after a location change, the Region / Zone / Woreda
+/ Kebele names and codes are derived again from the new Kebele.
+
+What it no longer does: check who asked for the change. **Anyone who holds
+`changeRequest:create` (roles Data Editor, Operations Administrator, Technical
+Administrator) can change any section of any DA, from the staff portal's Edit
+Details or through the API, and the change is applied without any approval.**
+So:
+
+- give those roles on `da-registry-staff-portal` to the DA Services
+  Administrators only (they send the approved change);
+- DAs and Supervisors get a role that can read but not create a change request
+  (for example Data Supervisor: `register:view`, `changeRequest:view`);
+- the register history shows who created each change.
+
+To make the registry approve changes again, set `skip_if` back to null on the
+two stages (in the seed file, or in the AWE admin portal for one environment).
+
+Verified locally (12 Nov 2026) with a staff user's token: a phone, an education
+level, a name and a Kebele change were each applied in about 4 seconds with no
+approval task; a 12-digit Fayda ID, another DA's Fayda ID, a bad phone number
+and an unknown education level were refused and stored nothing; a file import
+still stopped at stage 1 with tasks for `admin` and `alex.carter`; an edit made
+in the staff portal as `admin` was applied at once.
 
 ## 3. Local test result (16 Oct 2026)
 
@@ -106,7 +148,7 @@ the registry **server to server with its service account**:
 | Find the DA | `POST /register-data/search_in_a_register` with `search_text` = the DA-ID | keep only the item whose `functional_record_id` equals the DA-ID (`search_text` is partial) |
 | Show the profile | `POST /register-data/get_tab_records` (`da_details_tab`) | |
 | Request a change | `POST /change-requests/create_change_request` on that record | DA Services allows only the contact (`da_contact_section_04`), service (`da_service_section_02`) and location (`da_location_section_03`) sections; never identity (name, Fayda ID) |
-| Show the status | `POST /change-requests/get_change_request` | `PENDING` until both approval stages decide |
+| Show the status | `POST /change-requests/get_change_request` | `PENDING` in the create response, `APPROVED` a few seconds later (no registry approval, section 2); read `approval_status`, not `awe_request_status_summary` |
 
 - **Service account:** a confidential Keycloak client in realm `staff` with
   service accounts on (local: `da-services-backend`, secret
@@ -123,8 +165,9 @@ the registry **server to server with its service account**:
   never pass a DA-ID the signed-in user does not own. The registry records the
   change request as created by the service (`created_by`), so DA Services keeps
   its own log of which DA asked.
-- **Approval** is unchanged: two stages in the approval workflow, approvers as
-  configured in AWE (section 2). The DA cannot approve their own change.
+- **Approval** of a change is DA Services' job (Supervisor, then
+  Administrator); the registry applies the change request without an approval
+  of its own (section 2, "Changes to a DA").
 
 Verified locally (29 Oct 2026, `da_services_selfservice_probe.py`): the
 service-account token found one DA by DA-ID, read its details tab, created a
