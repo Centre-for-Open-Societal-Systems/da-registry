@@ -134,12 +134,12 @@ STATEMENTS = (
           SELECT 1 FROM "public"."{ROW_TABLE}" q
           WHERE q.link_internal_record_id = d.internal_record_id AND q.record_status = 'ACTIVE')
     """,
-    # DAs whose rows were saved before the triggers existed.
+    # DAs whose rows were saved before the triggers existed: the rows are the
+    # record, so the one-value fields take the main row's values.
     f"""
-    UPDATE "public"."{DA_TABLE}" d
-    SET education_level = d.education_level
-    WHERE d.education_level IS NULL AND d.specialisation IS NULL AND d.position IS NULL
-      AND EXISTS (
+    SELECT "public".da_fields_from_main_row(d.internal_record_id::text)
+    FROM "public"."{DA_TABLE}" d
+    WHERE EXISTS (
           SELECT 1 FROM "public"."{ROW_TABLE}" q
           WHERE q.link_internal_record_id = d.internal_record_id AND q.record_status = 'ACTIVE')
     """,
