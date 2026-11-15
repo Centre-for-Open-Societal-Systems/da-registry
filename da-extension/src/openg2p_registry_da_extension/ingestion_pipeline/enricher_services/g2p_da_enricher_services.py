@@ -58,6 +58,7 @@ COLUMN_ALIASES = {
     "specialisation": ("specialisation", "specialization"),
     "position": ("position", "designation"),
     "joined_date": ("joining date", "joined date", "date of joining"),
+    "passout_year": ("passout year (ec)", "passout year", "pass out year", "year of passing", "graduation year"),
     "region": ("region",),
     "zone": ("zone",),
     "woreda": ("woreda",),
@@ -234,6 +235,7 @@ def _build_da_record(row: Dict, source: str, geo: dict, session: Session) -> Dic
         "specialisation": code_lists.resolve_code("specialisation", row.get("specialisation"), session),
         "position": code_lists.resolve_code("position", row.get("position"), session),
         "joined_date": _date(row.get("joined_date"), "Joining Date"),
+        "passout_year": _integer(row.get("passout_year"), "Passout Year"),
         "source": source,
         "upstream_reference": row.get("upstream_reference") or None,
         "upstream_approved_by": row.get("upstream_approved_by") or None,
@@ -291,7 +293,7 @@ DA_SERVICES_FIELDS = {
     "birth_year_ec": "birth_year_ec", "phone_number": "mobile_number",
     "telegram_number": "telegram_number", "alternate_number": "alternate_number", "email": "email",
     "education_level": "education_level", "specialisation": "specialisation", "position": "position",
-    "joining_date": "joined_date", "region": "region", "zone": "zone", "woreda": "woreda", "kebele": "kebele",
+    "joining_date": "joined_date", "passout_year": "passout_year", "region": "region", "zone": "zone", "woreda": "woreda", "kebele": "kebele",
 }
 DA_SERVICES_SOURCES = {"WEB_INTAKE", "CSV_IMPORT"}
 DA_SERVICES_REQUIRED = {"first_name": "first_name", "middle_name": "father_name", "foundational_id": "fayda_id"}

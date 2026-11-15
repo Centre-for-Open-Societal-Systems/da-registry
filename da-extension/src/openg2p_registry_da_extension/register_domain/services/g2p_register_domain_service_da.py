@@ -51,6 +51,7 @@ class G2PRegisterDomainServiceDA(G2PRegisterDomainService):
             self._derive_birth_ec(record)
             self._validate_birth_ec(record)
             self._validate_joined_date(record)
+            self._validate_passout_year(record)
             self._validate_required(record, sections)
             await validate_choices(record, sections)
             await self._check_fayda_unique(record)
@@ -186,6 +187,12 @@ class G2PRegisterDomainServiceDA(G2PRegisterDomainService):
             validation_error("Joining date: the date is in the future. Enter today or an earlier date.")
 
     @staticmethod
+    def _validate_passout_year(record: dict) -> None:
+        from .g2p_register_domain_service_qualification import check_passout_year
+
+        check_passout_year(record)
+
+    @staticmethod
     def _validate_required(record: dict, sections: list) -> None:
         """Required fields (widget-required in the register metadata, with its
         show / hide / require conditions), checked only when a person fills in
@@ -197,7 +204,9 @@ class G2PRegisterDomainServiceDA(G2PRegisterDomainService):
         if not is_interactive(record):
             return
         found = []
-        for name, schema, _is_list in sections:
+        for name, schema, is_list in sections:
+            if is_list:
+                continue  # rows of a child register, checked by that register's service
             phrases = problems(schema, record, absent_is_missing=False)
             if phrases:
                 found.append(describe(name, phrases))

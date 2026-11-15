@@ -5,7 +5,9 @@ widget-data-options, see required_fields.py) is the single source of truth.
 
 - save ("Next"): a new record of a web-intake section must carry every
   required, visible field of that section. A partial update only has its blank
-  fields refused. A list section left with no rows is refused too.
+  fields refused. A list section whose table is marked required (education &
+  professional records) is refused with no rows; one that is not (dependents)
+  may stay empty.
 - submit (finalize): every section of the submission is checked on the server
   for every channel - web, file import and partner push - so an incomplete
   submission never starts an approval.
@@ -22,7 +24,9 @@ from openg2p_registry_da_extension.register_domain.services.domain_validation_ut
 from openg2p_registry_da_extension.register_domain.services.required_fields import (
     describe,
     has_requirements,
+    list_requires_row,
     problems,
+    row_problems,
     section_name_of,
 )
 from openg2p_registry_da_extension.register_domain.services.validation_rules import is_interactive
@@ -58,6 +62,7 @@ class RequiredFieldsMixin:
             existing = await self._existing_record_ids(submission_id, section_register_id, session)
             name = section_name_of(section)
             found: dict[str, list[str]] = {}
+            is_list = bool(getattr(section, "is_list", False))
             records = [r for r in self._records_for_validation(section_payload) if isinstance(r, dict)]
             for record in records:
                 if not is_interactive(record):
@@ -66,8 +71,12 @@ class RequiredFieldsMixin:
                 # edit_action the client put on it: the staff UI sends UPDATE for a
                 # section it believes it saved, even when nothing was stored.
                 new = str(record.get("internal_record_id") or "") not in existing
-                _add(found, name, problems(schema, record, absent_is_missing=new))
-            if getattr(section, "is_list", False):
+                if is_list:
+                    if record.get("edit_action") != "DELETE":
+                        _add(found, name, row_problems(schema, record, absent_is_missing=new))
+                else:
+                    _add(found, name, problems(schema, record, absent_is_missing=new))
+            if is_list and list_requires_row(schema):
                 kept = {str(r.get("internal_record_id")) for r in records if r.get("internal_record_id")} | existing
                 deleted = {
                     str(r.get("internal_record_id")) for r in (section_payload or [])
@@ -112,13 +121,14 @@ class RequiredFieldsMixin:
             records = [r for r in (payload.records if payload else []) if isinstance(r, dict)]
             name = section_name_of(section)
             if getattr(section, "is_list", False):
-                # A list section needs one row; each row carries its own required fields.
-                if not records:
+                # A list section marked required needs one row; each row carries
+                # its own required fields. A list that may stay empty is skipped.
+                if not records and list_requires_row(schema):
                     _add(found, name, [EMPTY_LIST])
-                targets = records
-            else:
-                targets = [records[0] if records else {}]
-            for record in targets:
+                for record in records:
+                    _add(found, name, row_problems(schema, record, absent_is_missing=True))
+                continue
+            for record in [records[0] if records else {}]:
                 _add(found, name, problems(schema, record, absent_is_missing=True))
         if found:
             validation_error("Cannot submit for approval. " + _sentence(found))
