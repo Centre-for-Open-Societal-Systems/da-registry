@@ -258,6 +258,42 @@ def problems(schema: Any, record: dict, *, absent_is_missing: bool) -> list[str]
     return (["fill in " + ", ".join(fill)] if fill else []) + extra
 
 
+def _table(schema: Any) -> dict | None:
+    """The table widget of a list section: the widget that carries the columns."""
+    for widget in _walk(schema):
+        if isinstance(widget.get("widget-data-columns"), list):
+            return widget
+    return None
+
+
+def list_requires_row(schema: Any) -> bool:
+    """Whether a list section must hold at least one row: its table widget is
+    marked required. A list such as dependents may be left empty."""
+    table = _table(schema)
+    return bool(table and table.get("widget-required"))
+
+
+def row_problems(schema: Any, row: dict, *, absent_is_missing: bool) -> list[str]:
+    """What one row of a list section leaves unfilled: "fill in Passout year".
+    The row is the child record itself; the table's columns name its fields."""
+    table = _table(schema)
+    if not table:
+        return []
+    missing: list[str] = []
+    for column in table.get("widget-data-columns") or []:
+        if not isinstance(column, dict) or not column.get("column-key") or column.get("widget-readonly"):
+            continue
+        key = column["column-key"]
+        options = column.get("widget-data-options")
+        if not is_visible(options, row) or not is_required(column.get("widget-required"), options, row):
+            continue
+        if (key in row and is_blank(row.get(key))) or (key not in row and absent_is_missing):
+            label = str(column.get("column-label") or column.get("widget-label") or _title(key))
+            if label not in missing:
+                missing.append(label)
+    return ["fill in " + ", ".join(missing)] if missing else []
+
+
 def describe(section_name: str, phrases: list[str]) -> str:
     return f"{section_name}: " + "; ".join(phrases)
 
@@ -333,7 +369,12 @@ def incomplete_reason(record: dict, sections: list[tuple[str, Any, bool]]) -> st
     """The reason "Required: <Section>: fill in <Field>; ..." for a whole record that
     leaves required, visible fields empty; None when it is complete."""
     found = []
-    for name, schema, _is_list in sections:
+    for name, schema, is_list in sections:
+        if is_list:
+            # A list section's rows are records of a child register (education &
+            # professional records, dependents); its columns are not fields of
+            # the DA record, which is what a file row or a push carries.
+            continue
         phrases = problems(schema, record, absent_is_missing=True)
         if phrases:
             found.append(describe(name, phrases))

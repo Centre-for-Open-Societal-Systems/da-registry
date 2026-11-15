@@ -69,6 +69,7 @@ Content-Type: application/json
       "specialisation": "Agronomy",
       "position": "Senior DA",
       "joining_date": "2017-09-11",
+      "passout_year": 2008,
       "kebele_id": "kebele-ET010101101001"
     }
   }
@@ -118,11 +119,18 @@ what is seeded today, read them live from Master Data
 | `specialisation` | Yes* | `DA_SPECIALISATION` list: `CROP_PRODUCTION`, `LIVESTOCK`, `NATURAL_RESOURCES`, `AGRONOMY`, `HORTICULTURE`, `OTHER` |
 | `position` | Yes* | `DA_POSITION` list: `DEVELOPMENT_AGENT`, `SENIOR_DA` |
 | `joining_date` | No | `YYYY-MM-DD` (or `DD/MM/YYYY`); not in the future |
+| `passout_year` | Yes* | Ethiopian calendar year the education was completed, 1950 to this year |
 | `kebele_id` | **Yes**, or the four names | Master Data kebele id, e.g. `kebele-ET010101101001` (preferred: names repeat across woredas) |
 | `region`, `zone`, `woreda`, `kebele` | Instead of `kebele_id` | Names as in Master Data; resolved region → kebele |
 
-\* Required when `source` is `WEB_INTAKE`. For `CSV_IMPORT` a blank value is
-accepted; a filled value must still be valid.
+\* Required for every `source` (`WEB_INTAKE` and `CSV_IMPORT`): a push with
+one of them blank is refused with `Required: <section>: fill in <field>`.
+
+`education_level`, `specialisation`, `position`, `joining_date` and
+`passout_year` become the DA's **first education & professional record**. A DA
+can have more records, and certificates, family members / dependents and a
+photo; those are not part of a push. Add them after registration with change
+requests through the staff API (`docs/da-services-staff-api.md` §2.3b, §5).
 
 ### Response
 

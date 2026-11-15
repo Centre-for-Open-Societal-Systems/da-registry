@@ -1,1 +1,3 @@
 from .da import G2PIntakeFormDA, G2PRegisterDA, G2PRegisterHistoryDA
+from .qualification import G2PIntakeFormQualification, G2PRegisterHistoryQualification, G2PRegisterQualification
+from .dependent import G2PIntakeFormDependent, G2PRegisterDependent, G2PRegisterHistoryDependent

@@ -13,15 +13,28 @@ from openg2p_registry_core.app import Initializer as CoreInitializer
 from sqlalchemy import text
 
 from .register_domain.factory import G2PRegisterDomainFactory
-from .register_domain.models import G2PIntakeFormDA, G2PRegisterDA, G2PRegisterHistoryDA
+from .register_domain.models import (
+    G2PIntakeFormDA,
+    G2PIntakeFormDependent,
+    G2PIntakeFormQualification,
+    G2PRegisterDA,
+    G2PRegisterDependent,
+    G2PRegisterHistoryDA,
+    G2PRegisterHistoryDependent,
+    G2PRegisterHistoryQualification,
+    G2PRegisterQualification,
+)
 from .register_domain.services import (
     G2PRegisterDomainServiceDA,
+    G2PRegisterDomainServiceDependent,
+    G2PRegisterDomainServiceQualification,
     install_da_change_request_service,
     install_da_import_approval_workflow,
     install_da_intake_guard,
 )
 
 from .intake_da_id import copy_da_id_to_intake
+from .qualification_sync import sync_qualifications
 from .schema_compat import apply_native_schema_compat
 from .schema_migration import add_missing_mapped_columns
 
@@ -62,6 +75,8 @@ class Initializer(BaseInitializer):
 
         G2PRegisterDomainFactory()
         G2PRegisterDomainServiceDA()
+        G2PRegisterDomainServiceQualification()
+        G2PRegisterDomainServiceDependent()
 
     async def fastapi_app_startup(self, app):
         # Also run the idempotent migration on startup, not only on the CLI
@@ -91,10 +106,27 @@ class Initializer(BaseInitializer):
         await G2PRegisterDA.create_migrate()
         await G2PRegisterHistoryDA.create_migrate()
         await G2PIntakeFormDA.create_migrate()
+        await G2PRegisterQualification.create_migrate()
+        await G2PRegisterHistoryQualification.create_migrate()
+        await G2PIntakeFormQualification.create_migrate()
+        await G2PRegisterDependent.create_migrate()
+        await G2PRegisterHistoryDependent.create_migrate()
+        await G2PIntakeFormDependent.create_migrate()
 
         # Add-only: any mapped column a table created by an older release lacks.
         await add_missing_mapped_columns(
-            dbengine.get(), [G2PRegisterDA, G2PRegisterHistoryDA, G2PIntakeFormDA]
+            dbengine.get(),
+            [
+                G2PRegisterDA,
+                G2PRegisterHistoryDA,
+                G2PIntakeFormDA,
+                G2PRegisterQualification,
+                G2PRegisterHistoryQualification,
+                G2PIntakeFormQualification,
+                G2PRegisterDependent,
+                G2PRegisterHistoryDependent,
+                G2PIntakeFormDependent,
+            ],
         )
 
         # create_all() creates missing tables but never adds columns to a table
@@ -110,6 +142,7 @@ class Initializer(BaseInitializer):
             "specialisation": "VARCHAR",
             "position": "VARCHAR",
             "joined_date": "DATE",
+            "passout_year": "INTEGER",
             "source": "VARCHAR",
             "upstream_reference": "VARCHAR",
             "upstream_approved_by": "VARCHAR",
@@ -198,6 +231,11 @@ class Initializer(BaseInitializer):
             # The DA-ID is written to the register row only; copy it to the
             # record's intake rows so an approved submission shows it too.
             await copy_da_id_to_intake(conn)
+
+            # One-value education fields of the DA record <-> the education &
+            # professional rows; first row for DAs saved before the list.
+            # See qualification_sync.py.
+            await sync_qualifications(conn)
 
             # POST /da/get_push_status looks a push up by DA Services' reference_id,
             # which only exists inside the stored request body.

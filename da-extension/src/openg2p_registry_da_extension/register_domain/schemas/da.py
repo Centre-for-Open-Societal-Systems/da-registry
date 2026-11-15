@@ -25,6 +25,7 @@ class G2PSchemaDA:
     specialisation: Optional[str] = None
     position: Optional[str] = None  # a DA_POSITION code from Master Data
     joined_date: Optional[date] = None
+    passout_year: Optional[int] = None
     source: Optional[str] = None  # a DA_SOURCE code from Master Data
 
     upstream_reference: Optional[str] = None

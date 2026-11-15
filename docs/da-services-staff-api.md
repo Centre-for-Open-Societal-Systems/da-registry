@@ -119,13 +119,14 @@ The response lists `tabs[].sections[]`; each section has a `section_id` and a
 `section_ui_schema` with its widgets (`widget-id` = field name,
 `widget-required`, `widget-readonly`, and for drop-downs
 `widget-data-source.options`). Draw the form from it, so a field added in the
-registry shows up without a Frappe change. Today the DA form has four sections:
+registry shows up without a Frappe change. Today the DA form has five sections:
 
 | `section_id` | Fields (required in **bold**) |
 |---|---|
 | `da_identity_section_01` | `prefix`, **`first_name`** (Name), **`middle_name`** (Father's name), `last_name` (Grandfather's name), **`foundational_id`** (Fayda FAN, 16 digits), **`gender`**, **`marital_status`**, **`birth_month_ec`** (1–13), **`birth_year_ec`** (EC, not in the future) |
 | `da_contact_section_04` | **`mobile_number`**, `telegram_number`, `alternate_number`, **`email`** |
-| `da_service_section_02` | **`education_level`**, **`specialisation`**, **`position`**, `joined_date` (`YYYY-MM-DD`), `source` (read-only) |
+| `da_qualification_section_05` | Education & Professional: a **list**, at least one record (§2.3b) |
+| `da_dependent_section_06` | Family members / dependents: a list, may be empty (§2.3b) |
 | `da_location_section_03` | **`da_geo_hierarchy`**: Region / Zone / Woreda / Kebele, saved as `geo_lowest_level_value_id` + `geo_code_hierarchy_json` |
 
 Drop-down codes (send the code, not the label):
@@ -142,6 +143,7 @@ As seeded today:
 | `education_level` | `DA_EDUCATION_LEVEL` | `CERTIFICATE`, `DIPLOMA`, `DEGREE`, `MASTERS` |
 | `specialisation` | `DA_SPECIALISATION` | `CROP_PRODUCTION`, `LIVESTOCK`, `NATURAL_RESOURCES`, `AGRONOMY`, `HORTICULTURE`, `OTHER` |
 | `position` | `DA_POSITION` | `DEVELOPMENT_AGENT`, `SENIOR_DA` |
+| `relationship` (dependents) | `DA_RELATIONSHIP` | `REL_SPOUSE`, `REL_SON`, `REL_DAUGHTER`, `REL_FATHER`, `REL_MOTHER`, `REL_BROTHER`, `REL_SISTER`, `REL_OTHER` |
 
 A value that is not in the list answers `response_status: ERROR` with
 `record 0: position='X' is not a value of DA_POSITION (permitted: ...)`.
@@ -282,6 +284,62 @@ reason in `response_error_message`):
   numbers, email, month 1–13, year not in the future.
 - Coded fields must hold a Master Data value (§2.2b).
 
+### 2.3b Education & professional records and dependents (lists)
+
+These two sections are lists: each record is a row of its own register, linked
+to the DA. A DA has **at least one** education & professional record and any
+number of dependents (none is fine). Save each record with the section's own
+register id as `section_register_id` and the DA's `internal_record_id` as
+`link_internal_record_id`:
+
+| `section_id` | `section_register_id` | Fields (required in **bold**) |
+|---|---|---|
+| `da_qualification_section_05` | `6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3fa0` | **`education_level`**, **`specialisation`**, **`position`**, **`passout_year`** (Ethiopian calendar year, 1950 to this year), `joined_date` (`YYYY-MM-DD`), `certificates` (up to 3 files) |
+| `da_dependent_section_06` | `6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3fb0` | **`member_name`** (one box, full name), **`relationship`** (`DA_RELATIONSHIP`), `date_of_birth` (`YYYY-MM-DD`, not in the future) |
+
+```json
+{
+  "submission_id": "385e2322-226d-49b4-8c11-e77ca017bcc8",
+  "section_id": "da_qualification_section_05",
+  "section_register_id": "6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3fa0",
+  "form_id": "6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3f91",
+  "register_id": "6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3f90",
+  "section_payload": [{
+    "edit_action": "ADD", "internal_record_id": "",
+    "link_internal_record_id": "0cafd44c-bf23-4d4b-aad2-67d4672f5456",
+    "education_level": "DEGREE", "specialisation": "AGRONOMY", "position": "DEVELOPMENT_AGENT",
+    "passout_year": 2008, "joined_date": "2017-09-11"
+  }]
+}
+```
+
+Send one record per item in `section_payload`; `UPDATE` with the record's own
+`internal_record_id` changes one, `DELETE` removes it.
+
+**Certificates** of a record are a list of at most three files. A new file goes
+inline as `{"__type": "File", "name": "degree.pdf", "type": "application/pdf",
+"size": 12345, "lastModified": 0, "data": "<base64>"}`; the registry stores it
+(PDF, JPG or PNG, up to 5 MB) and keeps `[{"document_id": "...", "name": "degree.pdf"}]`.
+To keep a saved file send it back as it was read. The registry keeps the file
+only: a certificate's issuer, dates and verification stay in DA Services, so
+send a certificate only once DA Services has verified it, and name the file
+after the certificate.
+
+**Dependents** have no status in the registry; send one once DA Services has
+approved it.
+
+**Photo**: upload the image first (`POST /documents/upload_documents`, bucket
+`documents`; PNG, JPG or WEBP up to 5 MB) and send the returned `document_id`
+as `record_image_document_id` on `da_identity_section_01` (a save or a change
+request). `null` removes the photo. Reads return a short-lived link in
+`record_image_url`.
+
+**The DA record's one-value fields** `education_level`, `specialisation`,
+`position`, `joined_date` and `passout_year` still exist (search, filters,
+DA Services reads). The registry fills them from the DA's main record: the one
+with the latest passout year, then the latest joining date. A file import or a
+push that sends one of each creates the DA's first record from them.
+
 ### 2.4 Submit for approval
 
 ```
@@ -294,8 +352,9 @@ the registry opens an approval request (`awe_request_id`). There is no DA-ID yet
 
 A submission with a section missing, or a required field still empty in any
 section, is refused: `Cannot submit for approval. Required: Phone Number,
-Email, Education Level, Specialisation, Position, Region / Zone / Woreda /
-Kebele` (whatever is missing). Save every section first.
+Email, Region / Zone / Woreda / Kebele` (whatever is missing). A submission
+with no education & professional record is refused with `Education &
+Professional: add at least one row`. Save every section first.
 
 To read a submission at any time:
 
@@ -511,6 +570,12 @@ fields that change, in the section they belong to (§2.1); a Kebele transfer
 is the location section with a new `geo_lowest_level_value_id` and
 `geo_code_hierarchy_json`. The same field rules apply as on the form, including
 the Fayda ID check.
+
+An education & professional record or a dependent is a change request on its
+list section (§2.3b): `section_id` and `section_register_id` of the list,
+`internal_record_id` of the DA, and in `change_payload` the record with
+`edit_action` `ADD` (with `link_internal_record_id` = the DA),
+`UPDATE` or `DELETE` (with the record's own `internal_record_id`).
 
 Response (trimmed):
 

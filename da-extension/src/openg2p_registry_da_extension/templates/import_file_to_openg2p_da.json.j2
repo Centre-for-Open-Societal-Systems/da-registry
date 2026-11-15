@@ -4,6 +4,13 @@
     section mnemonics of the DA intake form; each holds exactly one record. -#}
 {%- set d = expanded -%}
 {%- macro f(name) -%}{{ d.get(name) | tojson }}{%- endmacro -%}
+{#- The education & professional records are a list (rows of the Qualification
+    register). A file row or a push carries one, which becomes the DA's first
+    row; more are added on the form or by change request. The row needs an id
+    of its own, new for every DA. -#}
+{%- set hex = [] -%}{%- for _ in range(32) -%}{%- set _ = hex.append('0123456789abcdef' | random) -%}{%- endfor -%}
+{%- set h = hex | join('') -%}
+{%- set row_id = h[0:8] ~ '-' ~ h[8:12] ~ '-4' ~ h[13:16] ~ '-a' ~ h[17:20] ~ '-' ~ h[20:32] -%}
 {
   "da_identity": [
     {
@@ -16,6 +23,8 @@
       "marital_status": {{ f('marital_status') }},
       "birth_month_ec": {{ f('birth_month_ec') }},
       "birth_year_ec": {{ f('birth_year_ec') }},
+      "upstream_reference": {{ f('upstream_reference') }},
+      "upstream_approved_by": {{ f('upstream_approved_by') }},
       "source": {{ f('source') }}
     }
   ],
@@ -28,14 +37,14 @@
       "source": {{ f('source') }}
     }
   ],
-  "da_service": [
+  "da_qualification": [
     {
+      "internal_record_id": {{ row_id | tojson }},
       "education_level": {{ f('education_level') }},
       "specialisation": {{ f('specialisation') }},
       "position": {{ f('position') }},
+      "passout_year": {{ f('passout_year') }},
       "joined_date": {{ f('joined_date') }},
-      "upstream_reference": {{ f('upstream_reference') }},
-      "upstream_approved_by": {{ f('upstream_approved_by') }},
       "source": {{ f('source') }}
     }
   ],

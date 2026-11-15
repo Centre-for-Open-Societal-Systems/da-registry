@@ -45,6 +45,10 @@ class G2PDA:
     specialisation: Mapped[str] = mapped_column(String, nullable=True)  # attribute lookup
     position: Mapped[str] = mapped_column(String, nullable=True)  # DA_POSITION code (Master Data)
     joined_date: Mapped[str] = mapped_column(Date, nullable=True)  # optional for now
+    # Year the main education was completed, Ethiopian calendar. The DA's education
+    # & professional records are rows of the Qualification register; these one-value
+    # fields mirror the main row (see qualification_sync.py).
+    passout_year: Mapped[int] = mapped_column(Integer, nullable=True)
 
     # A record that arrives without a source came in through the web intake
     # form; CSV import always sets CSV_IMPORT explicitly.
