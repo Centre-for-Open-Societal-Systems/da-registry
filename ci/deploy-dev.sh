@@ -5,7 +5,7 @@
 # with the da-registry-newdev-kubeconfig credential (DEV_KUBECONFIG_CRED_ID), against the release
 # da-registry in the namespace da-registry. A deploy by hand is the same command:
 #
-#   KUBECONFIG=<kubeconfig> AWS_ACCOUNT_ID=<id> ./ci/deploy-dev.sh <12-char-commit-sha>
+#   KUBECONFIG=<kubeconfig> AWS_ACCOUNT_ID=<id> ./ci/deploy-dev.sh <image tag, e.g. 0.0.0-develop.300>
 #
 # What it does, in order:
 #   1. Refuse to run unless ci/deploy/oan-chart.json is a complete, deployable pin.
@@ -24,11 +24,10 @@
 #      db-seed or init hook, so a failure that already migrated data still needs a look.
 #
 # Env:
-#   IMAGE_TAG        first argument: the 12-character commit the images were built from  required
+#   IMAGE_TAG        first argument: the <version>-<branch>.<build> tag of the images      required
 #   AWS_ACCOUNT_ID   owner of the ECR registry                                           required
 #   KUBECONFIG       kubeconfig for the dev cluster                                      required
 #   AWS_REGION       default ap-south-1
-#   ECR_BASE         default openg2p/da-registry
 #   BUILT_CHART_DIR  folder with the archive this build packaged (Jenkins sets it); else the pinned chart
 #   HELM_TIMEOUT     default 20m
 #   ROLLOUT_TIMEOUT  per-Deployment rollout wait, default 420s
@@ -43,10 +42,15 @@ TAG="${1:-${IMAGE_TAG:-}}"
 : "${AWS_ACCOUNT_ID:?set AWS_ACCOUNT_ID}"
 : "${KUBECONFIG:?set KUBECONFIG}"
 AWS_REGION="${AWS_REGION:-ap-south-1}"
-ECR_BASE="${ECR_BASE:-openg2p/da-registry}"
 HELM_TIMEOUT="${HELM_TIMEOUT:-20m}"
 ROLLOUT_TIMEOUT="${ROLLOUT_TIMEOUT:-420s}"
-IMAGE_REPOSITORY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_BASE}"
+ECR="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+# eoan/da-registry/<component>-<RP version> (ci/image_names.py), resolved here: a failed lookup stops the deploy,
+# where inside the values heredoc below it would only leave an empty repository.
+declare -A IMAGE
+for component in staff-api partner-api celery staff-ui db-seed; do
+  IMAGE[$component]="${ECR}/$(python3 ci/image_names.py repository "$component")"
+done
 
 say() { echo "=== $* ==="; }
 
@@ -69,7 +73,7 @@ CENTRAL_VALUES="$(python3 ci/deploy/oan_chart.py values registry "$WORK/public-v
 echo "chart:     $(basename "$CHART_ARCHIVE") (platform $(python3 ci/deploy/oan_chart.py platform registry))"
 echo "release:   ${HELM_RELEASE}"
 echo "namespace: ${HELM_NAMESPACE}"
-echo "images:    ${IMAGE_REPOSITORY}/<component>:${TAG}"
+echo "images:    ${IMAGE[staff-api]%/*}/<component>-<RP version>:${TAG}"
 
 say "Release check"
 # Upgrade only. A missing release is an error, never a first install.
@@ -94,22 +98,22 @@ cat > "$WORK/ci-values.yaml" <<EOF2
 registry:
   staffApi:
     enabled: true
-    image: {repository: '${IMAGE_REPOSITORY}/staff-api', tag: '${TAG}'}
+    image: {repository: '${IMAGE[staff-api]}', tag: '${TAG}'}
   partnerApi:
     enabled: true
-    image: {repository: '${IMAGE_REPOSITORY}/partner-api', tag: '${TAG}'}
+    image: {repository: '${IMAGE[partner-api]}', tag: '${TAG}'}
   celeryWorker:
     enabled: true
-    image: {repository: '${IMAGE_REPOSITORY}/celery', tag: '${TAG}'}
+    image: {repository: '${IMAGE[celery]}', tag: '${TAG}'}
   celeryBeat:
     enabled: true
-    image: {repository: '${IMAGE_REPOSITORY}/celery', tag: '${TAG}'}
+    image: {repository: '${IMAGE[celery]}', tag: '${TAG}'}
   staffUi:
     enabled: true
-    image: {repository: '${IMAGE_REPOSITORY}/staff-ui', tag: '${TAG}'}
+    image: {repository: '${IMAGE[staff-ui]}', tag: '${TAG}'}
   dbSeed:
     enabled: true
-    image: {repository: '${IMAGE_REPOSITORY}/db-seed', tag: '${TAG}'}
+    image: {repository: '${IMAGE[db-seed]}', tag: '${TAG}'}
 EOF2
 VALUES=(-f "$CENTRAL_VALUES" -f "$WORK/ci-values.yaml")
 
