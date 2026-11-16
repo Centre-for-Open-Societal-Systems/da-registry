@@ -128,5 +128,60 @@ class RetryTests(unittest.TestCase):
         self.assertEqual(len(calls), 1)
 
 
+class _Result:
+    def __init__(self, value):
+        self.value = value
+
+    def scalar(self):
+        return self.value
+
+
+class _Conn:
+    """A connection whose backfill statement fails on the data, as the DA-ID
+    copy did on dev (duplicate key) and took the API down at startup."""
+
+    def __init__(self, log):
+        self.log = log
+
+    async def execute(self, statement, params=None):
+        sql = str(statement)
+        self.log.append(sql)
+        if sql.lstrip().startswith("SELECT EXISTS"):
+            return _Result(True)
+        if sql.lstrip().startswith(("UPDATE", "WITH")):
+            raise DBAPIError(sql, {}, ValueError("duplicate key value violates unique constraint"))
+        return _Result(None)
+
+
+class _Begin:
+    def __init__(self, log):
+        self.log = log
+
+    async def __aenter__(self):
+        return _Conn(self.log)
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+class _Engine:
+    def __init__(self):
+        self.log = []
+
+    def begin(self):
+        return _Begin(self.log)
+
+
+class BackfillFailureTests(unittest.TestCase):
+    def test_a_backfill_that_fails_on_the_data_does_not_stop_startup(self):
+        engine = _Engine()
+        with self.assertLogs("da-startup-migration", level="ERROR") as logs:
+            ran = asyncio.run(sm.run_backfills(engine))
+        # Every failing backfill was tried, logged and skipped; none raised.
+        failed = [line for line in logs.output if "failed and was skipped" in line]
+        self.assertGreaterEqual(len(failed), 1)
+        self.assertNotIn("DA-ID on approved submissions", ran)
+
+
 if __name__ == "__main__":
     unittest.main()
