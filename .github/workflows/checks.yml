@@ -1,0 +1,53 @@
+name: Checks
+on:
+  push:
+    branches: ["**", "!dependabot/**"]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  contracts:
+    # Required check: the DA extension compiles and its tests pass on the registry platform it ships on.
+    # Most tests import the platform (openg2p_registry_core), so they run inside the DA staff-api image,
+    # as the Farmer registry's extension tests do.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Source syntax
+        run: |
+          pip install ruff==0.17.2
+          python -m ruff check --select E9,F63,F7,F82 da-extension/src da-extension/tests
+      - uses: docker/setup-buildx-action@v3
+      - name: Build the staff-api image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/staff-api/Dockerfile
+          push: false
+          load: true
+          tags: registry/staff-api:ci
+          cache-from: type=gha,scope=staff-api
+          cache-to: type=gha,mode=max,scope=staff-api
+      - name: Installed DA extension tests
+        run: |
+          docker run --rm -v "$PWD:/repo:ro" -w /repo/da-extension -e PYTHONPATH=/repo/da-extension/tests --entrypoint sh registry/staff-api:ci -c 'pip install --quiet pytest==8.4.2 pytest-asyncio==0.24.0 && python -m pytest -q -p no:cacheprovider tests'
+
+  chart:
+    # Required check: the registry chart must build its dependencies, lint and render.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4.3.0
+        with:
+          version: v3.16.4
+      - name: Build chart dependencies
+        run: |
+          helm repo add openg2p https://openg2p.github.io/openg2p-helm
+          helm dependency build helm/openg2p-da-registry
+      - name: Lint
+        run: helm lint helm/openg2p-da-registry
+      - name: Render with default values
+        run: helm template oan-check helm/openg2p-da-registry --namespace oan-check > /dev/null
