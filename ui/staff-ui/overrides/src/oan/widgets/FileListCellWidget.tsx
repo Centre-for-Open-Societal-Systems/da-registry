@@ -2,8 +2,7 @@
 
 import { useCallback, useRef, useState } from 'react';
 import { useWidgetContext } from '@openg2p/registry-widgets';
-import { withCsrfHeaders } from '@/shared/utils/csrf';
-import { accepts, acceptedTypes, isSerializedFile, openSerializedFile, serializeFile } from './files';
+import { accepts, acceptedTypes, documentUrl, isSerializedFile, openSerializedFile, serializeFile } from './files';
 
 type Config = Record<string, any>;
 
@@ -113,20 +112,9 @@ export function FileListCellWidget({ config, value, onChange, onBlur, isEnabled 
             return;
         }
         if (!isStored(file)) return;
-        try {
-            const response = await fetch('/api/shared/get-documents', {
-                method: 'POST',
-                headers: withCsrfHeaders('POST', { 'Content-Type': 'application/json' }),
-                credentials: 'include',
-                body: JSON.stringify({ document_ids: [file.document_id] }),
-            });
-            const body = await response.json();
-            const url = Array.isArray(body) ? body[0]?.presigned_url : null;
-            if (!url) throw new Error('no link');
-            window.open(url, '_blank', 'noopener');
-        } catch {
-            setMessage(label('documents_not_available'));
-        }
+        const url = await documentUrl(file.document_id);
+        if (url) window.open(url, '_blank', 'noopener');
+        else setMessage(label('documents_not_available'));
     };
 
     return (

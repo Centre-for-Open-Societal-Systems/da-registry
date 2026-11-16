@@ -53,7 +53,8 @@ jsonb_build_object(
         'widget-data-format', jsonb_build_object('calendar', 'ethiopic', 'dateFormat', 'DD/MM/YYYY', 'inputMethod', 'picker', 'dateConstraint', 'past-only'),
         'widget-data-options', jsonb_build_object('maxDate', 'today', 'maxDateMessage', 'Enter a joining date that has passed.')),
       jsonb_build_object('widget','oan-file-list-cell','column-key','certificates','widget-type','input','widget-label','Certificates & documents','widget-readonly',false,'widget-required',false,'widget-data-path','certificates',
-        'widget-data-options', jsonb_build_object('accept','.pdf,.jpg,.jpeg,.png','maxSize',5242880,'maxFiles',3),
+        'widget-data-options', jsonb_build_object('accept','.pdf,.jpg,.jpeg,.png','maxSize',5242880,'maxFiles',3,
+          'rowLabelColumns', jsonb_build_array('education_level','passout_year')),
         'widget-data-format', jsonb_build_object('pattern', 'Attached'))
     )))))))),
 'FALSE','FALSE','FALSE','FALSE' WHERE true

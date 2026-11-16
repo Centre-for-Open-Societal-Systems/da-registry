@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useId, useRef, useState, type DragEvent } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
+import { documentUrl } from './files';
 import {
     getValueByPath,
     setValueByPath,
@@ -113,17 +114,40 @@ export function ProfilePhotoWidget({ config }: { config: Config }) {
     );
     const title = config['widget-label'] ? label(String(config['widget-label'])) : '';
 
-    const value = paths.imageUrl
-        ? getValueByPath(values, paths.imageUrl) ?? getValueByPath(schemaData ?? {}, paths.imageUrl)
-        : undefined;
+    // The form's value when it has one, else the record's. A value the form set
+    // to null (the photo was removed) must stay null: falling back to the
+    // record there brought the removed photo back on screen.
+    const read = (path: string | undefined) => {
+        if (!path) return undefined;
+        const inForm = getValueByPath(values, path);
+        return inForm !== undefined ? inForm : getValueByPath(schemaData ?? {}, path);
+    };
+    const value = read(paths.imageUrl);
+
+    // The photo's document id. An intake draft read back from the server has
+    // the id but no link ("imageUrl" is only filled on the register), so the
+    // link is fetched by id; without this a saved photo showed as "No photo".
+    const storedId = read(paths.image);
 
     const [preview, setPreview] = useState<string | null>(null);
     useEffect(() => {
+        let current = true;
         if (isSerializedFile(value) && value.data) setPreview(`data:${value.type};base64,${value.data}`);
         else if (typeof value === 'string' && value) setPreview(value);
         else if (value && typeof value === 'object' && typeof value.presigned_url === 'string') setPreview(value.presigned_url);
-        else setPreview(null);
-    }, [value]);
+        else {
+            setPreview(null);
+            // value === null is a photo the user just removed: nothing to fetch.
+            if (value !== null && typeof storedId === 'string' && storedId) {
+                void documentUrl(storedId).then((url) => {
+                    if (current && url) setPreview(url);
+                });
+            }
+        }
+        return () => {
+            current = false;
+        };
+    }, [value, storedId]);
 
     const store = useCallback(
         (next: SerializedFile | null) => {

@@ -1,6 +1,7 @@
 import { createElement } from 'react';
 import { HeaderSectionWidget, widgetRegistry } from '@openg2p/registry-widgets';
 import { FileListCellWidget } from './FileListCellWidget';
+import { RecordFilesTableWidget } from './RecordFilesTableWidget';
 import { PROFILE_PHOTO_VARIANT, ProfilePhotoWidget } from './ProfilePhotoWidget';
 
 // The widget package uploads a section's photo, and sets the field named by
@@ -23,6 +24,11 @@ widgetRegistry.register({ widget: 'header-section', component: HeaderSectionOrVa
 // an education & professional record). A table cell widget gets the cell value
 // and onChange from the table.
 widgetRegistry.register({ widget: 'oan-file-list-cell', component: FileListCellWidget as never });
+
+// The platform's table shows a row's files as the text "Attached". The same
+// table, with the rows' files listed under it and a View button each; a table
+// without a file column is upstream's, unchanged. See RecordFilesTableWidget.
+widgetRegistry.register({ widget: 'dialog-table', component: RecordFilesTableWidget as never });
 
 // A date picker opened inside an "Add record" dialog: the dialog's field grid
 // scrolls (overflow: auto), so the calendar, which drops below its box, was cut
