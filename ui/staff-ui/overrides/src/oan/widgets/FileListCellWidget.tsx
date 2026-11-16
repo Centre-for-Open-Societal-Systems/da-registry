@@ -2,8 +2,7 @@
 
 import { useCallback, useRef, useState } from 'react';
 import { useWidgetContext } from '@openg2p/registry-widgets';
-import { withCsrfHeaders } from '@/shared/utils/csrf';
-import { accepts, acceptedTypes, isSerializedFile, openSerializedFile, serializeFile } from './files';
+import { accepts, acceptedTypes, documentUrl, isSerializedFile, openSerializedFile, serializeFile } from './files';
 
 type Config = Record<string, any>;
 
@@ -53,13 +52,19 @@ const asList = (value: unknown): unknown[] => {
  *
  * Section metadata (a table column):
  *   widget: "oan-file-list-cell"
- *   widget-data-options: {accept, maxSize (bytes), maxFiles}
+ *   oan-file-rules: {accept, maxSize (bytes), maxFiles}
  */
 export function FileListCellWidget({ config, value, onChange, onBlur, isEnabled = true }: Props) {
     const { t } = useWidgetContext();
     const input = useRef<HTMLInputElement>(null);
     const [message, setMessage] = useState<string | null>(null);
-    const options = (config['widget-data-options'] ?? {}) as { accept?: string; maxSize?: number; maxFiles?: number };
+    // The table's popup passes the column without "widget-data-options", so the
+    // rules come under their own key; without them nothing was checked here.
+    const options = (config['oan-file-rules'] ?? config['widget-data-options'] ?? {}) as {
+        accept?: string;
+        maxSize?: number;
+        maxFiles?: number;
+    };
     const maxSize = Number(options.maxSize ?? 0);
     const maxFiles = Number(options.maxFiles ?? 3);
     const enabled = isEnabled && config['widget-readonly'] !== true;
@@ -113,20 +118,9 @@ export function FileListCellWidget({ config, value, onChange, onBlur, isEnabled 
             return;
         }
         if (!isStored(file)) return;
-        try {
-            const response = await fetch('/api/shared/get-documents', {
-                method: 'POST',
-                headers: withCsrfHeaders('POST', { 'Content-Type': 'application/json' }),
-                credentials: 'include',
-                body: JSON.stringify({ document_ids: [file.document_id] }),
-            });
-            const body = await response.json();
-            const url = Array.isArray(body) ? body[0]?.presigned_url : null;
-            if (!url) throw new Error('no link');
-            window.open(url, '_blank', 'noopener');
-        } catch {
-            setMessage(label('documents_not_available'));
-        }
+        const url = await documentUrl(file.document_id);
+        if (url) window.open(url, '_blank', 'noopener');
+        else setMessage(label('documents_not_available'));
     };
 
     return (

@@ -62,3 +62,26 @@ export function openSerializedFile(file: SerializedFile) {
     window.open(url, '_blank', 'noopener');
     setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
+
+/**
+ * A short-lived link to a stored document, by its id; null when it cannot be
+ * had. The staff UI's own route returns the catalog entries with a presigned
+ * link each.
+ */
+export async function documentUrl(documentId: string): Promise<string | null> {
+    try {
+        const { withCsrfHeaders } = await import('@/shared/utils/csrf');
+        const response = await fetch('/api/shared/get-documents', {
+            method: 'POST',
+            headers: withCsrfHeaders('POST', { 'Content-Type': 'application/json' }),
+            credentials: 'include',
+            body: JSON.stringify({ document_ids: [documentId] }),
+        });
+        if (!response.ok) return null;
+        const body = await response.json();
+        const url = Array.isArray(body) ? body[0]?.presigned_url : null;
+        return typeof url === 'string' && url ? url : null;
+    } catch {
+        return null;
+    }
+}
