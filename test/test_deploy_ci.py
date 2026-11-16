@@ -66,9 +66,6 @@ class DeployRollbackTests(unittest.TestCase):
         self.repo = base / "repo"
         (self.repo / "ci/deploy").mkdir(parents=True)
         shutil.copy(ROOT / "ci/deploy-dev.sh", self.repo / "ci/deploy-dev.sh")
-        shutil.copy(ROOT / "ci/image_names.py", self.repo / "ci/image_names.py")
-        (self.repo / "helm/openg2p-da-registry").mkdir(parents=True)
-        shutil.copy(ROOT / "helm/openg2p-da-registry/Chart.yaml", self.repo / "helm/openg2p-da-registry/Chart.yaml")
         (self.repo / "ci/deploy/oan_chart.py").write_text(CHART_STUB)
         self.bin = base / "bin"
         self.bin.mkdir()
@@ -95,13 +92,6 @@ class DeployRollbackTests(unittest.TestCase):
         self.assertIn("helm upgrade da-registry", calls)
         self.assertIn("--reset-values", calls)
         self.assertNotIn("--atomic", calls)
-
-    def test_no_image_names_stops_the_deploy_before_any_change(self):
-        # Without ci/image_names.py the image repositories are unknown: nothing may be rendered or upgraded.
-        (self.repo / "ci/image_names.py").unlink()
-        rc, out, calls = self.run_deploy()
-        self.assertNotEqual(rc, 0, out)
-        self.assertNotIn("helm upgrade", calls)
 
     def test_failed_upgrade_rolls_back_to_last_deployed_revision(self):
         rc, out, calls = self.run_deploy(UPGRADE_RC="1")
@@ -371,28 +361,14 @@ class PipelineWiringTests(unittest.TestCase):
         self.assertNotIn("Open oan-helm image PR", self.text)
         self.assertNotIn("Propose chart pin update", self.text)
 
-    def test_images_are_named_by_ci_image_names(self):
-        build = self.stage("Build & Push", "stage('Package chart')")
-        self.assertNotIn("ECR_BASE", self.text)
-        self.assertNotIn("take(12)", self.text)
-        self.assertIn('python3 ci/image_names.py tag "$BRANCH_NAME" "$BUILD_NUMBER"', build)
-        self.assertIn("python3 ci/image_names.py repository ${c.name}", build)
-        self.assertIn('def image  = "${ECR_REGISTRY}/${repository}:${env.IMAGE_TAG}"', build)
-
-    def test_every_build_tests_the_image_names(self):
-        self.assertIn("python3 -m unittest discover -s test -p test_image_names.py -v", self.text)
-
-    def test_the_packaged_chart_takes_the_image_names_of_ci_image_names(self):
-        package = (ROOT / "ci/deploy/package-chart.sh").read_text()
-        self.assertIn('"$ECR_REGISTRY/$(python3 ci/image_names.py repository "$component")"', package)
-
     def test_every_component_the_pipeline_builds_has_a_chart_image(self):
+        self.assertIn('ECR_BASE       = "openg2p/da-registry"', self.text)
         package = (ROOT / "ci/deploy/package-chart.sh").read_text()
         deploy = (ROOT / "ci/deploy-dev.sh").read_text()
         for component in ("staff-api", "staff-ui", "partner-api", "celery", "db-seed"):
             self.assertIn("name: '%s'," % component, self.text)
             self.assertIn("    %s) paths=" % component, package)
-            self.assertIn("{repository: '${IMAGE[%s]}', tag: '${TAG}'}" % component, deploy)
+            self.assertIn("{repository: '${IMAGE_REPOSITORY}/%s', tag: '${TAG}'}" % component, deploy)
 
     def test_the_chart_has_no_fixed_version(self):
         chart = (ROOT / "helm/openg2p-da-registry/Chart.yaml").read_text(encoding="utf-8")
