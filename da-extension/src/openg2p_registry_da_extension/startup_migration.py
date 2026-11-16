@@ -16,8 +16,8 @@ So, in this order:
    `lock_timeout` and is tried again a few times; if the lock cannot be had,
    startup fails with a clear message instead of holding the tables;
 3. backfills: each in its own transaction, after the DDL, and only when a
-   query finds a row that needs it. A backfill that cannot get its lock is
-   skipped with a warning and runs at the next start.
+   query finds a row that needs it. A backfill that fails, on a lock or on
+   the data it meets, is logged and skipped; it never stops startup.
 
 Several processes start together; an advisory lock lets one of them do the
 work, and the others then find nothing missing.
@@ -320,7 +320,11 @@ def backfills() -> list[tuple[str, str, str]]:
 
 
 async def run_backfills(engine) -> list[str]:
-    """Run each backfill some row needs, in its own transaction; what ran."""
+    """Run each backfill some row needs, in its own transaction; what ran.
+
+    A backfill repairs data saved by an earlier release; it is never needed for
+    the API to work. So one that fails, on a lock or on the data it meets, is
+    logged and left for the next start, and startup goes on."""
     ran = []
     for what, needed, statement in backfills():
         try:
@@ -333,9 +337,13 @@ async def run_backfills(engine) -> list[str]:
             ran.append(what)
             _logger.info("DA backfill ran: %s", what)
         except DBAPIError as error:
-            if not is_lock_timeout(error):
-                raise
-            _logger.warning("DA backfill skipped, a row or table is locked (runs at the next start): %s", what)
+            if is_lock_timeout(error):
+                _logger.warning("DA backfill skipped, a row or table is locked (runs at the next start): %s", what)
+            else:
+                _logger.error(
+                    "DA backfill failed and was skipped (startup continues; it runs again at the next start): "
+                    "%s: %s", what, str(getattr(error, "orig", error))[:500],
+                )
     return ran
 
 
