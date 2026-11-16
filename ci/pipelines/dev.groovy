@@ -25,8 +25,8 @@ def call() {
             AWS_ACCOUNT_ID = "379220350808"
             AWS_REGION     = "ap-south-1"
             ECR_REGISTRY   = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
-            // One ECR repository per component: openg2p/da-registry/<component>.
-            ECR_BASE       = "openg2p/da-registry"
+            // One ECR repository per component and platform: eoan/da-registry/<component>-<RP version>, tagged
+            // <version>-<branch>.<build>, named by ci/image_names.py from helm/openg2p-da-registry/Chart.yaml.
 
             // Must match ARG RP_VERSION in the component Dockerfiles
             // and "platformVersion" in ci/deploy/oan-chart.json (the pinned chart's openg2p-registry).
@@ -60,6 +60,8 @@ def call() {
                 // no network, no cluster.
                 steps {
                     sh 'python3 -m unittest discover -s test -p "test_deploy_ci.py" -v'
+                    // The ECR names of the images (ci/image_names.py).
+                    sh 'python3 -m unittest discover -s test -p test_image_names.py -v'
                     // Sample-approver password hook against a fake Keycloak (stdlib only, no network).
                     sh 'python3 -m unittest discover -s test -p test_sample_approver_password.py -v'
                     // Sample loader (sign-in, approvals, retries) against stand-ins, no cluster: pytest in the
@@ -83,7 +85,8 @@ def call() {
                 environment { DOCKER_CONFIG = "${env.WORKSPACE}/.docker-${env.BUILD_TAG}" }
                 steps {
                     script {
-                        env.IMAGE_TAG = env.GIT_COMMIT.take(12)
+                        env.IMAGE_TAG = sh(returnStdout: true,
+                            script: 'python3 ci/image_names.py tag "$BRANCH_NAME" "$BUILD_NUMBER"').trim()
 
                         // Build the same component Dockerfiles that docker compose
                         // uses, so CI ships what developers run.
@@ -102,11 +105,20 @@ def call() {
                         // Each environment branch also moves a tag of its own name.
                         def movingTag = (env.BRANCH_NAME in ['develop', 'staging', 'main']) ? env.BRANCH_NAME : null
                         components.each { c ->
-                            def image  = "${ECR_REGISTRY}/${ECR_BASE}/${c.name}:${env.IMAGE_TAG}"
-                            def latest = movingTag ? "${ECR_REGISTRY}/${ECR_BASE}/${c.name}:${movingTag}" : null
+                            def repository = sh(returnStdout: true, script: "python3 ci/image_names.py repository ${c.name}").trim()
+                            def image  = "${ECR_REGISTRY}/${repository}:${env.IMAGE_TAG}"
+                            def latest = movingTag ? "${ECR_REGISTRY}/${repository}:${movingTag}" : null
                             // On-demand agents start with an empty Docker cache: reuse layers from the branch
                             // tag in ECR (develop for other branches), which carries inline cache metadata.
-                            def cacheFrom = "${ECR_REGISTRY}/${ECR_BASE}/${c.name}:${movingTag ?: 'develop'}"
+                            def cacheFrom = "${ECR_REGISTRY}/${repository}:${movingTag ?: 'develop'}"
+                            // A new platform version is a new repository name, and ECR does not create repositories on push.
+                            withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-ecr-creds']]) {
+                                sh """
+                                    aws ecr describe-repositories --region ${AWS_REGION} --repository-names ${repository} > /dev/null 2>&1 \\
+                                      || aws ecr create-repository --region ${AWS_REGION} --repository-name ${repository} \\
+                                           --image-scanning-configuration scanOnPush=true > /dev/null
+                                """
+                            }
                             sh """
                                 docker build --build-arg BUILDKIT_INLINE_CACHE=1 --cache-from ${cacheFrom} ${c.args} \
                                     -f ${c.dockerfile} -t ${image} ${latest ? "-t ${latest}" : ''} .
