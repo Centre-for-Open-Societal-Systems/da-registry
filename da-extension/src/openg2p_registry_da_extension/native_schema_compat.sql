@@ -16,7 +16,12 @@ BEGIN
       ALTER TABLE public.outgoing_topics ALTER COLUMN topic_type DROP DEFAULT;
     END IF;
     -- Optional owner of a partner-scoped topic; nullable in the platform model.
-    ALTER TABLE public.outgoing_topics ADD COLUMN IF NOT EXISTS partner_id varchar;
+    -- Checked first: ALTER TABLE takes an exclusive lock even when the column
+    -- exists, and this runs at every start.
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+        WHERE table_schema='public' AND table_name='outgoing_topics' AND column_name='partner_id') THEN
+      ALTER TABLE public.outgoing_topics ADD COLUMN partner_id varchar;
+    END IF;
   END IF;
 END;
 $native_compat$;

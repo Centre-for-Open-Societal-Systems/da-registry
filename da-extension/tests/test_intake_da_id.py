@@ -15,18 +15,27 @@ from openg2p_registry_da_extension import intake_da_id
 
 class StatementTests(unittest.TestCase):
     def test_the_temporary_id_is_never_copied(self):
-        for statement in (intake_da_id.STATEMENTS[0], intake_da_id.STATEMENTS[-1]):
+        for statement in (intake_da_id.FUNCTIONS[0], intake_da_id.BACKFILLS[0][1], intake_da_id.BACKFILLS[0][2]):
             self.assertIn("NOT LIKE 'TEMP-%'", statement)
 
     def test_only_the_intake_table_is_written(self):
-        writes = [s for s in intake_da_id.STATEMENTS if "UPDATE \"public\"" in s]
-        self.assertEqual(len(writes), 2)
+        writes = [intake_da_id.FUNCTIONS[0], intake_da_id.BACKFILLS[0][2]]
         for statement in writes:
             self.assertIn('UPDATE "public"."g2p_intake_form_das"', statement)
+            self.assertNotIn('UPDATE "public"."g2p_register_das"', statement)
 
-    def test_the_trigger_is_replaced_not_duplicated(self):
-        self.assertIn("CREATE OR REPLACE FUNCTION", intake_da_id.STATEMENTS[0])
-        self.assertIn("DROP TRIGGER IF EXISTS da_copy_da_id_to_intake", intake_da_id.STATEMENTS[1])
+    def test_the_function_is_replaced_and_the_trigger_only_created(self):
+        # CREATE TRIGGER locks the table against writes; startup_migration.py
+        # runs it only when the catalog lacks the trigger, so no DROP here.
+        self.assertIn("CREATE OR REPLACE FUNCTION", intake_da_id.FUNCTIONS[0])
+        table, name, statement = intake_da_id.TRIGGERS[0]
+        self.assertEqual((table, name), ("g2p_register_das", "da_copy_da_id_to_intake"))
+        self.assertIn("CREATE TRIGGER da_copy_da_id_to_intake", statement)
+        self.assertNotIn("DROP TRIGGER", statement)
+
+    def test_the_backfill_runs_only_when_a_row_needs_it(self):
+        _what, needed, _statement = intake_da_id.BACKFILLS[0]
+        self.assertTrue(needed.strip().startswith("SELECT EXISTS"))
 
 
 @unittest.skipUnless(os.environ.get("DA_TEST_DATABASE_URL"), "Requires owned disposable PostgreSQL")
@@ -66,8 +75,18 @@ class CopyTests(unittest.IsolatedAsyncioTestCase):
                     await conn.execute(text(statement))
 
     async def install(self):
+        # As startup_migration.py does: function always, trigger when missing,
+        # backfill when a row needs it.
         async with self.engine.begin() as conn:
-            await intake_da_id.copy_da_id_to_intake(conn)
+            for statement in intake_da_id.FUNCTIONS:
+                await conn.execute(text(statement))
+            for _table, name, statement in intake_da_id.TRIGGERS:
+                exists = (await conn.execute(text("SELECT 1 FROM pg_trigger WHERE tgname = :n"), {"n": name})).first()
+                if not exists:
+                    await conn.execute(text(statement))
+            for _what, needed, statement in intake_da_id.BACKFILLS:
+                if (await conn.execute(text(needed))).scalar():
+                    await conn.execute(text(statement))
 
     async def test_submissions_approved_earlier_get_their_da_id_and_others_are_left_alone(self):
         await self.run_sql(
