@@ -294,7 +294,7 @@ register id as `section_register_id` and the DA's `internal_record_id` as
 
 | `section_id` | `section_register_id` | Fields (required in **bold**) |
 |---|---|---|
-| `da_qualification_section_05` | `6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3fa0` | **`education_level`**, **`specialisation`**, **`position`**, **`passout_year`** (Ethiopian calendar year, 1950 to this year), `joined_date` (`YYYY-MM-DD`), `certificates` (up to 3 files) |
+| `da_qualification_section_05` | `6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3fa0` | **`education_level`**, **`specialisation`**, **`position`**, **`passout_year`** (Ethiopian calendar year, 1950 to this year), `joined_date` (`YYYY-MM-DD`), `certificates` (up to 3 files, 2 MB each) |
 | `da_dependent_section_06` | `6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3fb0` | **`member_name`** (one box, full name), **`relationship`** (`DA_RELATIONSHIP`), `date_of_birth` (`YYYY-MM-DD`, not in the future) |
 
 ```json
@@ -319,7 +319,9 @@ Send one record per item in `section_payload`; `UPDATE` with the record's own
 **Certificates** of a record are a list of at most three files. A new file goes
 inline as `{"__type": "File", "name": "degree.pdf", "type": "application/pdf",
 "size": 12345, "lastModified": 0, "data": "<base64>"}`; the registry stores it
-(PDF, JPG or PNG, up to 5 MB) and keeps `[{"document_id": "...", "name": "degree.pdf"}]`.
+(PDF, JPG, PNG or WebP, up to 2 MB) and keeps `[{"document_id": "...", "name": "degree.pdf"}]`.
+A file uploaded first with `/documents/upload_documents` and sent as
+`{"document_id", "name"}` must exist and passes the same type and size check.
 To keep a saved file send it back as it was read. The registry keeps the file
 only: a certificate's issuer, dates and verification stay in DA Services, so
 send a certificate only once DA Services has verified it, and name the file

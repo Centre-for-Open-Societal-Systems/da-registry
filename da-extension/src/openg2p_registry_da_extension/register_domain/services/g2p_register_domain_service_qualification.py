@@ -4,12 +4,18 @@ A record is one row of the "Education & professional" table: education level,
 specialisation, position, passout year, joining date and up to three
 certificates.
 
+What a certificate may be (file types, size, how many) is read from the file
+column's options in the section metadata, the same options the form uses, so
+the form and the API refuse the same files. That holds for a file sent inline
+and for one uploaded first and sent by its document id.
+
 Certificates: the platform's section file uploader covers a section's own file
 widgets, not files inside a table row, so a new file arrives inline in the row
 (base64, {"__type": "File", ...}) and is stored here the way core stores an
 upload. The row keeps [{"document_id": ..., "name": ...}].
 """
 
+import asyncio
 import base64
 import hashlib
 import io
@@ -27,6 +33,9 @@ from .ethiopian_calendar import gregorian_to_ethiopic
 _logger = logging.getLogger("g2p-register-domain-service")
 
 MAX_CERTIFICATES = 3
+# Used when the section metadata names no limits for the file column.
+DEFAULT_EXTENSIONS = ("pdf", "jpg", "jpeg", "png", "webp")
+DEFAULT_MAX_BYTES = 2 * 1024 * 1024
 # Passout year is an Ethiopian calendar year, like the year of birth.
 MIN_PASSOUT_YEAR_EC = 1950
 REQUIRED = (
@@ -112,31 +121,152 @@ async def _save_pending_documents() -> None:
         await session.commit()
 
 
-def _certificates(record: dict) -> None:
+def _find_file_column(node):
+    """The "certificates" column of the table in a section's UI schema."""
+    if isinstance(node, dict):
+        if node.get("column-key") == "certificates":
+            return node
+        for value in node.values():
+            found = _find_file_column(value)
+            if found:
+                return found
+    elif isinstance(node, list):
+        for item in node:
+            found = _find_file_column(item)
+            if found:
+                return found
+    return None
+
+
+def file_limits(sections: list) -> dict:
+    """What a certificate may be: the file column's "oan-file-rules" in the
+    section metadata (accept, maxSize in bytes, maxFiles). The form reads the
+    same options, so the form and the API refuse the same files."""
+    limits = {"extensions": set(DEFAULT_EXTENSIONS), "max_bytes": DEFAULT_MAX_BYTES, "max_files": MAX_CERTIFICATES}
+    for _name, schema, _is_list in sections or []:
+        column = _find_file_column(_json(schema))
+        if not column:
+            continue
+        # "oan-file-rules": the table's popup strips widget-data-options before the
+        # widget sees the column, so the rules live under a key of their own.
+        options = column.get("oan-file-rules") or column.get("widget-data-options") or {}
+        accepted = {part.strip().lstrip(".").lower() for part in str(options.get("accept") or "").split(",")}
+        accepted.discard("")
+        if accepted:
+            limits["extensions"] = accepted
+        if as_int(options.get("maxSize")):
+            limits["max_bytes"] = as_int(options.get("maxSize"))
+        if as_int(options.get("maxFiles")):
+            limits["max_files"] = as_int(options.get("maxFiles"))
+        break
+    return limits
+
+
+def check_file(name: str, size: int | None, limits: dict) -> None:
+    """Refuse a file of a type or size the certificates column does not take."""
+    extension = name.rsplit(".", 1)[-1].lower() if "." in name else ""
+    if extension not in limits["extensions"]:
+        allowed = sorted(e.upper() for e in limits["extensions"])
+        listed = (", ".join(allowed[:-1]) + " or " + allowed[-1]) if len(allowed) > 1 else "".join(allowed)
+        validation_error(f"Certificates & documents: {name} cannot be attached here. Choose a {listed} file.")
+    if size is not None and size > limits["max_bytes"]:
+        megabytes = limits["max_bytes"] / 1048576
+        validation_error(
+            f"Certificates & documents: {name} is larger than {megabytes:g} MB. "
+            "Choose a smaller file, or scan it again at a lower resolution."
+        )
+
+
+# Stored documents already checked, so a change request validated on creation
+# and again before approval reads a referenced file once.
+_checked_documents: "OrderedDict[str, bool]" = OrderedDict()
+
+
+async def _attached_ids(record: dict) -> set[str]:
+    """Document ids the stored row of this record already carries."""
+    row_id = str(record.get("internal_record_id") or "").strip()
+    if not row_id:
+        return set()
+    from openg2p_fastapi_common.context import dbengine
+    from sqlalchemy import text
+
+    found: set[str] = set()
+    async with dbengine.get().connect() as conn:
+        for table in ("g2p_register_qualifications", "g2p_intake_form_qualifications"):
+            rows = await conn.execute(
+                text(f'SELECT certificates FROM "public"."{table}" WHERE internal_record_id = :id'), {"id": row_id}
+            )
+            for (value,) in rows:
+                stored = value if isinstance(value, list) else (_json(value) or [])
+                for item in stored if isinstance(stored, list) else []:
+                    if isinstance(item, dict) and item.get("document_id"):
+                        found.add(str(item["document_id"]))
+    return found
+
+
+async def _check_reference(document_id: str, limits: dict) -> None:
+    """A file uploaded first and sent by its id: it must exist and pass the
+    same type and size rules as a file sent inline."""
+    if document_id in _checked_documents:
+        return
+    from openg2p_fastapi_common.context import dbengine
+    from openg2p_registry_core.helpers.document import get_document_handler
+    from sqlalchemy import text
+
+    async with dbengine.get().connect() as conn:
+        row = (
+            await conn.execute(
+                text(
+                    'SELECT document_store_id, bucket, source_filename FROM "public"."g2p_registry_documents" '
+                    "WHERE document_id = :id"
+                ),
+                {"id": document_id},
+            )
+        ).first()
+    if row is None:
+        validation_error(
+            "Certificates & documents: a file was not found in the registry. Upload it again, then attach it."
+        )
+    store_id, bucket, filename = row
+    check_file(str(filename or "file"), None, limits)
+    content = await asyncio.to_thread(get_document_handler().download, store_id, bucket)
+    check_file(str(filename or "file"), len(content), limits)
+    _checked_documents[document_id] = True
+    while len(_checked_documents) > _STORED_MAX:
+        _checked_documents.popitem(last=False)
+
+
+async def _certificates(record: dict, limits: dict) -> None:
     if "certificates" not in record:
         return
     value = _json(record.get("certificates"))
     if value in (None, ""):
         record["certificates"] = None
         return
-    items = value if isinstance(value, list) else [value]
+    items = [item for item in (_json(i) for i in (value if isinstance(value, list) else [value])) if isinstance(item, dict)]
+    references = [str(item["document_id"]) for item in items if item.get("__type") != "File" and item.get("document_id")]
+    # A file the row already carries was accepted under the rules of its day.
+    attached = await _attached_ids(record) if references else set()
     kept = []
     for item in items:
-        item = _json(item)
-        if not isinstance(item, dict):
-            continue
         if item.get("__type") == "File":
+            name = str(item.get("name") or "certificate")
+            encoded = str(item.get("data") or "")
+            check_file(name, (len(encoded) * 3) // 4 - encoded[-2:].count("="), limits)
             kept.append(_store_file(item, record.get("created_by")))
         elif item.get("document_id"):
+            document_id = str(item["document_id"])
+            if document_id not in attached:
+                await _check_reference(document_id, limits)
             kept.append(
                 {
-                    "document_id": str(item["document_id"]),
+                    "document_id": document_id,
                     "name": str(item.get("name") or item.get("source_filename") or "certificate"),
                 }
             )
-    if len(kept) > MAX_CERTIFICATES:
+    if len(kept) > limits["max_files"]:
         validation_error(
-            f"Certificates & documents: up to {MAX_CERTIFICATES} files can be attached to one record. Remove one."
+            f"Certificates & documents: up to {limits['max_files']} files can be attached to one record. Remove one."
         )
     record["certificates"] = kept or None
 
@@ -176,12 +306,13 @@ class G2PRegisterDomainServiceQualification(G2PRegisterDomainService):
 
         # The dropdowns of the table are columns of a section of the DA register.
         sections = [s for s in await load_sections(DA_REGISTER_ID) if s[2]] if records else []
+        limits = file_limits(sections)
         for record in records:
             if record.get("edit_action") in _SKIP_ACTIONS:
                 continue
             _check(record)
             await validate_choices(record, sections)
-            _certificates(record)
+            await _certificates(record, limits)
         await _save_pending_documents()
 
     async def pre_approve(self, change_request, session):
@@ -192,9 +323,12 @@ class G2PRegisterDomainServiceQualification(G2PRegisterDomainService):
 
         payload = await session.get(G2PRegisterChangeRequestPayload, change_request.change_request_id)
         if payload and payload.change_payload:
+            from .required_fields import DA_REGISTER_ID, load_sections
+
+            limits = file_limits([s for s in await load_sections(DA_REGISTER_ID) if s[2]])
             for record in payload.change_payload:
                 if record.get("edit_action") not in _SKIP_ACTIONS:
-                    _certificates(record)
+                    await _certificates(record, limits)
             await _save_pending_documents()
             flag_modified(payload, "change_payload")
         await super().pre_approve(change_request, session)

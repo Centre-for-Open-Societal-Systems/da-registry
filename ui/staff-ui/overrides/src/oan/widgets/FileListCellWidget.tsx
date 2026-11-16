@@ -52,13 +52,19 @@ const asList = (value: unknown): unknown[] => {
  *
  * Section metadata (a table column):
  *   widget: "oan-file-list-cell"
- *   widget-data-options: {accept, maxSize (bytes), maxFiles}
+ *   oan-file-rules: {accept, maxSize (bytes), maxFiles}
  */
 export function FileListCellWidget({ config, value, onChange, onBlur, isEnabled = true }: Props) {
     const { t } = useWidgetContext();
     const input = useRef<HTMLInputElement>(null);
     const [message, setMessage] = useState<string | null>(null);
-    const options = (config['widget-data-options'] ?? {}) as { accept?: string; maxSize?: number; maxFiles?: number };
+    // The table's popup passes the column without "widget-data-options", so the
+    // rules come under their own key; without them nothing was checked here.
+    const options = (config['oan-file-rules'] ?? config['widget-data-options'] ?? {}) as {
+        accept?: string;
+        maxSize?: number;
+        maxFiles?: number;
+    };
     const maxSize = Number(options.maxSize ?? 0);
     const maxFiles = Number(options.maxFiles ?? 3);
     const enabled = isEnabled && config['widget-readonly'] !== true;

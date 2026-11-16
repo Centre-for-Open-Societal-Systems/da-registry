@@ -7,9 +7,11 @@ its first record, and the statements that keep the DA record's one-value
 fields and the records in step.
 """
 
+import asyncio
 import json
 import pathlib
 import unittest
+from unittest import mock
 from datetime import date
 
 import jinja2
@@ -83,19 +85,60 @@ class RecordRuleTests(unittest.TestCase):
             q._check({"edit_action": "ADD", "education_level": "DEGREE", "specialisation": "AGRONOMY"})
         self.assertIn("Position", str(getattr(raised.exception, "message", raised.exception)))
 
-    def test_saved_certificates_are_kept_and_more_than_three_refused(self):
-        saved = [{"document_id": str(n), "name": f"{n}.pdf"} for n in range(3)]
-        record = {"certificates": json.dumps(saved)}
-        q._certificates(record)
-        self.assertEqual(record["certificates"], saved)
-        with self.assertRaises(Exception):
-            q._certificates({"certificates": saved + [{"document_id": "4", "name": "4.pdf"}]})
-
     def test_no_certificates_is_stored_as_nothing(self):
         for empty in ([], None, ""):
             record = {"certificates": empty}
-            q._certificates(record)
+            asyncio.run(q._certificates(record, q.file_limits([])))
             self.assertIsNone(record["certificates"])
+
+    def test_limits_come_from_the_file_column_of_the_section_metadata(self):
+        schema = {"panels": [{"widgets": [{"widget": "dialog-table", "widget-data-columns": [
+            {"column-key": "education_level"},
+            {"column-key": "certificates",
+             "oan-file-rules": {"accept": ".pdf,.jpg,.jpeg,.png,.webp", "maxSize": 2097152, "maxFiles": 3}}]}]}]}
+        limits = q.file_limits([("Education & Professional", schema, True)])
+        self.assertEqual(limits, {"extensions": {"pdf", "jpg", "jpeg", "png", "webp"}, "max_bytes": 2097152,
+                                  "max_files": 3})
+        # No metadata: the defaults, which say the same.
+        self.assertEqual(q.file_limits([]), limits)
+
+    def test_a_file_of_another_type_or_too_large_is_refused(self):
+        limits = q.file_limits([])
+        q.check_file("degree.PDF", 2 * 1024 * 1024, limits)
+        q.check_file("scan.webp", 10, limits)
+        for name, size, part in (("notes.docx", 10, "cannot be attached"), ("noextension", 10, "cannot be attached"),
+                                 ("big.pdf", 2 * 1024 * 1024 + 1, "larger than 2 MB")):
+            with self.assertRaises(Exception) as raised:
+                q.check_file(name, size, limits)
+            self.assertIn(part, str(getattr(raised.exception, "message", raised.exception)))
+
+    def test_an_inline_file_is_checked_before_it_is_stored(self):
+        too_big = {"__type": "File", "name": "big.pdf", "data": "A" * (4 * (2 * 1024 * 1024 // 3) + 400)}
+        wrong = {"__type": "File", "name": "notes.txt", "data": "aGVsbG8="}
+        for item in (too_big, wrong):
+            with mock.patch.object(q, "_store_file") as store:
+                with self.assertRaises(Exception):
+                    asyncio.run(q._certificates({"certificates": [item]}, q.file_limits([])))
+                store.assert_not_called()
+
+    def test_a_file_the_row_already_carries_is_kept_and_a_new_reference_is_checked(self):
+        saved = [{"document_id": "1", "name": "1.pdf"}, {"document_id": "2", "name": "2.pdf"}]
+        checked = []
+
+        async def attached(_record):
+            return {"1"}
+
+        async def check(document_id, _limits):
+            checked.append(document_id)
+
+        with mock.patch.object(q, "_attached_ids", attached), mock.patch.object(q, "_check_reference", check):
+            record = {"internal_record_id": "row", "certificates": list(saved)}
+            asyncio.run(q._certificates(record, q.file_limits([])))
+            self.assertEqual(record["certificates"], saved)
+            self.assertEqual(checked, ["2"])
+            with self.assertRaises(Exception):
+                more = saved + [{"document_id": "3", "name": "3.pdf"}, {"document_id": "4", "name": "4.pdf"}]
+                asyncio.run(q._certificates({"internal_record_id": "row", "certificates": more}, q.file_limits([])))
 
 
 class ImportTemplateTests(unittest.TestCase):

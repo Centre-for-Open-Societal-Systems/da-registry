@@ -5,7 +5,8 @@
 -- shown in one section as a table with "Add record", the way the livestock
 -- register lists animals. "Add record" opens a dialog with every field:
 -- education level, specialisation, position, passout year, joining date and
--- the record's certificates (up to three files, OAN's table cell widget
+-- the record's certificates (up to three files of 2 MB each: PDF, JPG, PNG or
+-- WebP; the form and the API read these limits from the column below; OAN's table cell widget
 -- "oan-file-list-cell", ui/staff-ui/overrides/src/oan/widgets/FileListCellWidget.tsx).
 --
 -- The one-value section it replaces (da_service_section_02) is taken off the
@@ -53,8 +54,11 @@ jsonb_build_object(
         'widget-data-format', jsonb_build_object('calendar', 'ethiopic', 'dateFormat', 'DD/MM/YYYY', 'inputMethod', 'picker', 'dateConstraint', 'past-only'),
         'widget-data-options', jsonb_build_object('maxDate', 'today', 'maxDateMessage', 'Enter a joining date that has passed.')),
       jsonb_build_object('widget','oan-file-list-cell','column-key','certificates','widget-type','input','widget-label','Certificates & documents','widget-readonly',false,'widget-required',false,'widget-data-path','certificates',
-        'widget-data-options', jsonb_build_object('accept','.pdf,.jpg,.jpeg,.png','maxSize',5242880,'maxFiles',3,
-          'rowLabelColumns', jsonb_build_array('education_level','passout_year')),
+        -- The table's popup hands a column to its widget without widget-data-options,
+        -- so the file rules have a key of their own, which reaches the widget. The
+        -- API reads the same key (g2p_register_domain_service_qualification.py).
+        'oan-file-rules', jsonb_build_object('accept','.pdf,.jpg,.jpeg,.png,.webp','maxSize',2097152,'maxFiles',3),
+        'widget-data-options', jsonb_build_object('rowLabelColumns', jsonb_build_array('education_level','passout_year')),
         'widget-data-format', jsonb_build_object('pattern', 'Attached'))
     )))))))),
 'FALSE','FALSE','FALSE','FALSE' WHERE true
