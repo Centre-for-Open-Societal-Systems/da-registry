@@ -172,6 +172,23 @@ def call() {
         post {
             failure {
                 echo "DA registry ${env.BRANCH_NAME} build/deploy failed. A failed deploy is rolled back automatically; see the archived deploy-failure-${env.BUILD_NUMBER}.txt and 'helm history da-registry -n da-registry'."
+                script {
+                    // Mail the DevOps list and the commit author, as Farmer's pipelines do; a controller without SMTP
+                    // must not hide the failure.
+                    try {
+                        def author = ''
+                        try { author = sh(script: "git log -1 --pretty=format:'%ae'", returnStdout: true).trim() } catch (ignored) { author = '' }
+                        def recipients = ['simretyibeltal@gmail.com', 'pavanns.ns@gmail.com']
+                        if (author && !author.contains('noreply')) { recipients = [author] + recipients }
+                        mail(
+                            to: recipients.unique().join(', '),
+                            subject: "Build FAILED: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+                            body: "DA Registry develop build or deploy failed.\n\nJob:     ${env.JOB_NAME}\nBranch:  ${env.BRANCH_NAME}\nBuild:   #${env.BUILD_NUMBER}\nURL:     ${env.BUILD_URL}\nConsole: ${env.BUILD_URL}console\n\nJenkins"
+                        )
+                    } catch (err) {
+                        echo "notification not sent: ${err.message}"
+                    }
+                }
             }
             always {
                 sh 'docker image prune -f || true'
