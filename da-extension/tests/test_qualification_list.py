@@ -121,21 +121,30 @@ class ImportTemplateTests(unittest.TestCase):
 
 class SyncStatementTests(unittest.TestCase):
     def test_each_trigger_stands_down_when_the_other_fired_it(self):
-        functions = [s for s in qualification_sync.STATEMENTS if "RETURNS trigger" in s]
+        functions = [s for s in qualification_sync.FUNCTIONS if "RETURNS trigger" in s]
         self.assertEqual(len(functions), 2)
         for function in functions:
             self.assertIn("pg_trigger_depth() > 1", function)
 
     def test_the_main_row_is_the_latest_active_one(self):
-        chooser = qualification_sync.STATEMENTS[0]
+        chooser = qualification_sync.FUNCTIONS[0]
         self.assertIn("record_status = 'ACTIVE'", chooser)
         self.assertIn("passout_year DESC NULLS LAST, q.joined_date DESC NULLS LAST", chooser)
 
     def test_every_mirrored_field_is_written_both_ways(self):
-        to_da, _, _, _, to_row = qualification_sync.STATEMENTS[:5]
+        to_da, _row_changed, to_row = qualification_sync.FUNCTIONS
         for field in qualification_sync.FIELDS:
             self.assertIn(f"{field} = main.{field}", to_da)
             self.assertIn(f"{field} = NEW.{field}", to_row)
+
+    def test_triggers_are_created_not_replaced_and_backfills_are_guarded(self):
+        self.assertEqual([(t, n) for t, n, _s in qualification_sync.TRIGGERS],
+                         [("g2p_register_qualifications", "da_qualification_row_changed"),
+                          ("g2p_register_das", "da_one_value_fields_changed")])
+        for _table, _name, statement in qualification_sync.TRIGGERS:
+            self.assertNotIn("DROP TRIGGER", statement)
+        for _what, needed, _statement in qualification_sync.BACKFILLS:
+            self.assertTrue(needed.strip().startswith("SELECT EXISTS"))
 
 
 if __name__ == "__main__":

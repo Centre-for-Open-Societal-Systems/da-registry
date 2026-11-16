@@ -16,8 +16,12 @@ _logger = logging.getLogger("coss-registry-schema")
 
 
 async def add_missing_mapped_columns(
-    engine: AsyncEngine, model_classes: Iterable[type]
+    engine: AsyncEngine, model_classes: Iterable[type], lock_timeout: str | None = None
 ) -> list[tuple[str, str]]:
+    """Add the mapped columns existing tables lack. The catalog is read first,
+    so a complete schema runs no ALTER and takes no table lock. With
+    `lock_timeout`, an ALTER that cannot get its lock in that time fails
+    (SQLSTATE 55P03) instead of waiting and holding up every other query."""
     tables = {model.__table__.key: model.__table__ for model in model_classes}
     schema_map = (
         engine.sync_engine.get_execution_options().get("schema_translate_map") or {}
@@ -51,6 +55,8 @@ async def add_missing_mapped_columns(
                 if column.name in present:
                     continue
                 column_type = column.type.compile(dialect=connection.dialect)
+                if lock_timeout and not added:
+                    await connection.execute(text(f"SET LOCAL lock_timeout = '{lock_timeout}'"))
                 _logger.debug("Adding mapped column %s.%s", table.key, column.name)
                 await connection.execute(
                     text(

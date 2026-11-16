@@ -20,14 +20,14 @@ intake, a change request, an import):
 
 Each trigger does nothing when it was fired by the other (pg_trigger_depth).
 A one-off statement creates the first row of every DA saved before the list
-existed. All of it is safe to run on every start.
+existed. startup_migration.py installs them: the functions on every start, a
+trigger only when it is missing, a statement only when a row needs it.
 
 The mirrored values are written by the trigger, not through the platform's
 change request, so the register history shows the change on the side it was
 made on only.
 """
 
-from sqlalchemy import text
 
 DA_TABLE = "g2p_register_das"
 ROW_TABLE = "g2p_register_qualifications"
@@ -40,7 +40,8 @@ _SET_ROW = ", ".join(f"{f} = NEW.{f}" for f in FIELDS)
 _ROW_DIFFERS = " OR ".join(f"q.{f} IS DISTINCT FROM NEW.{f}" for f in FIELDS)
 _NEW_FIELDS = ", ".join(f"NEW.{f}" for f in FIELDS)
 
-STATEMENTS = (
+# Replaced on every start (no table lock), so a changed body takes effect.
+FUNCTIONS = (
     f"""
     CREATE OR REPLACE FUNCTION "public".da_fields_from_main_row(da_id text) RETURNS void AS $$
     BEGIN
@@ -73,12 +74,6 @@ STATEMENTS = (
         RETURN NULL;
     END;
     $$ LANGUAGE plpgsql
-    """,
-    f'DROP TRIGGER IF EXISTS da_qualification_row_changed ON "public"."{ROW_TABLE}"',
-    f"""
-    CREATE TRIGGER da_qualification_row_changed
-    AFTER INSERT OR UPDATE OR DELETE ON "public"."{ROW_TABLE}"
-    FOR EACH ROW EXECUTE FUNCTION "public".da_qualification_row_changed()
     """,
     f"""
     CREATE OR REPLACE FUNCTION "public".da_one_value_fields_changed() RETURNS trigger AS $$
@@ -119,34 +114,58 @@ STATEMENTS = (
     END;
     $$ LANGUAGE plpgsql
     """,
-    f'DROP TRIGGER IF EXISTS da_one_value_fields_changed ON "public"."{DA_TABLE}"',
-    f"""
+)
+
+# (table, trigger name, statement). Created only when the catalog lacks it:
+# CREATE TRIGGER locks the table against writes, so it must not run on every
+# start. A trigger whose definition changes gets a new name.
+TRIGGERS = (
+    (ROW_TABLE, "da_qualification_row_changed", f"""
+    CREATE TRIGGER da_qualification_row_changed
+    AFTER INSERT OR UPDATE OR DELETE ON "public"."{ROW_TABLE}"
+    FOR EACH ROW EXECUTE FUNCTION "public".da_qualification_row_changed()
+    """),
+    (DA_TABLE, "da_one_value_fields_changed", f"""
     CREATE TRIGGER da_one_value_fields_changed
     AFTER INSERT OR UPDATE OF {", ".join(FIELDS)} ON "public"."{DA_TABLE}"
     FOR EACH ROW EXECUTE FUNCTION "public".da_one_value_fields_changed()
-    """,
-    # DAs saved before the list existed: their one-value fields become the first row.
-    f"""
-    UPDATE "public"."{DA_TABLE}" d
-    SET education_level = d.education_level
-    WHERE (d.education_level IS NOT NULL OR d.specialisation IS NOT NULL OR d.position IS NOT NULL)
-      AND NOT EXISTS (
-          SELECT 1 FROM "public"."{ROW_TABLE}" q
-          WHERE q.link_internal_record_id = d.internal_record_id AND q.record_status = 'ACTIVE')
-    """,
-    # DAs whose rows were saved before the triggers existed: the rows are the
-    # record, so the one-value fields take the main row's values.
-    f"""
-    SELECT "public".da_fields_from_main_row(d.internal_record_id::text)
-    FROM "public"."{DA_TABLE}" d
-    WHERE EXISTS (
-          SELECT 1 FROM "public"."{ROW_TABLE}" q
-          WHERE q.link_internal_record_id = d.internal_record_id AND q.record_status = 'ACTIVE')
-    """,
+    """),
 )
 
+_NO_ROW = f"""
+    (d.education_level IS NOT NULL OR d.specialisation IS NOT NULL OR d.position IS NOT NULL)
+    AND NOT EXISTS (
+        SELECT 1 FROM "public"."{ROW_TABLE}" q
+        WHERE q.link_internal_record_id = d.internal_record_id AND q.record_status = 'ACTIVE')
+"""
+# A DA whose one-value fields differ from its main row.
+_OUT_OF_STEP = f"""
+    EXISTS (
+        SELECT 1 FROM (
+            SELECT {", ".join("q." + f for f in FIELDS)}
+            FROM "public"."{ROW_TABLE}" q
+            WHERE q.link_internal_record_id = d.internal_record_id AND q.record_status = 'ACTIVE'
+            ORDER BY {_MAIN_ORDER}
+            LIMIT 1
+        ) main
+        WHERE ({", ".join("d." + f for f in FIELDS)}) IS DISTINCT FROM ({", ".join("main." + f for f in FIELDS)}))
+"""
 
-async def sync_qualifications(conn) -> None:
-    """Install the triggers and bring existing DAs in step."""
-    for statement in STATEMENTS:
-        await conn.execute(text(statement))
+# (what, query that is true when some row needs it, statement). The statement
+# runs only when the query says so; see startup_migration.py.
+BACKFILLS = (
+    # DAs saved before the list existed: their one-value fields become the first row.
+    (
+        "first education & professional record",
+        f'SELECT EXISTS (SELECT 1 FROM "public"."{DA_TABLE}" d WHERE {_NO_ROW})',
+        f'UPDATE "public"."{DA_TABLE}" d SET education_level = d.education_level WHERE {_NO_ROW}',
+    ),
+    # DAs whose rows were saved before the triggers existed: the rows are the
+    # record, so the one-value fields take the main row's values.
+    (
+        "one-value education fields from the main record",
+        f'SELECT EXISTS (SELECT 1 FROM "public"."{DA_TABLE}" d WHERE {_OUT_OF_STEP})',
+        f'SELECT "public".da_fields_from_main_row(d.internal_record_id::text) '
+        f'FROM "public"."{DA_TABLE}" d WHERE {_OUT_OF_STEP}',
+    ),
+)
