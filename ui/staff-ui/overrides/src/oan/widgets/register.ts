@@ -42,3 +42,25 @@ if (typeof document !== 'undefined' && !document.getElementById(DIALOG_CALENDAR_
         '.dialog-table-modal .overflow-auto:has(.absolute.z-50) { overflow: visible !important; }';
     document.head.appendChild(style);
 }
+
+// Home address (96_home_address.sql) has a row of its own, as wide as the phone
+// and email columns together. A section gives every label half of its row, so
+// the address box started in the middle of the section, away from the boxes
+// above it, and kept the platform's 180px, which shows about 16 characters of
+// a 100-character address. Here the label is as wide as a label in the phone
+// column (a quarter of the row, less the 40px each column keeps to its
+// divider), and the box runs from there to the end of the row. Narrow screens
+// stack label and box, as the platform does.
+const HOME_ADDRESS_STYLE_ID = 'oan-home-address';
+if (typeof document !== 'undefined' && !document.getElementById(HOME_ADDRESS_STYLE_ID)) {
+    const field = '[data-widget-id="address_line_1"]';
+    const label = `${field} .owt-field-label.owt-field-label.owt-field-label`;
+    const labelWidth = 'calc((100% - 80px) / 4)';
+    const style = document.createElement('style');
+    style.id = HOME_ADDRESS_STYLE_ID;
+    style.textContent =
+        `@media (min-width: 640px) { ${label} { width: ${labelWidth} !important; ` +
+        `min-width: ${labelWidth} !important; max-width: ${labelWidth} !important; } } ` +
+        `${field} input { width: 100% !important; }`;
+    document.head.appendChild(style);
+}
