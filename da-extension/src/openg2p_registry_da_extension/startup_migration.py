@@ -31,6 +31,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
 from . import intake_da_id, qualification_sync
+from .geo_codes import GEO_NAME_KEYS
 
 _logger = logging.getLogger("da-startup-migration")
 
@@ -267,15 +268,23 @@ async def apply_pending_ddl(engine, *, attempts: int = DDL_ATTEMPTS, retry_secon
 
 
 def geo_backfills() -> list[tuple[str, str, str]]:
-    """Location codes of records saved before the columns existed, from the
-    chain each record carries (see geo_codes.py); and the root (country) entry
-    in front of chains that imports stored from the region down, which the
-    form's geo widget reads from the root and shows nothing without."""
+    """Location codes and names next to a record's Kebele, from the chain the
+    record carries (see geo_codes.py): for records saved before the columns
+    existed, and for records whose Kebele was changed before a change request
+    refreshed them, which kept the old place's Woreda and Kebele on the list
+    and its codes in the filters DA Services uses. Names are written as Master
+    Data spells them, the way the record page shows them. And the root
+    (country) entry in front of chains that imports stored from the region
+    down, which the form's geo widget reads from the root and shows nothing
+    without."""
     steps = []
     chain = (
         "CASE WHEN jsonb_typeof(t.geo_code_hierarchy_json::jsonb->'hierarchy') = 'array' "
         "THEN t.geo_code_hierarchy_json::jsonb->'hierarchy' ELSE '[]'::jsonb END"
     )
+    # A value that differs from the chain is rewritten only when the chain ends
+    # at the record's own Kebele, so a chain that is itself out of date is left.
+    same_place = f"({chain})->-1->>'level_value_id' = t.geo_lowest_level_value_id"
     for table in DA_TABLES:
         for level in ("region", "zone", "woreda"):
             code = (
@@ -284,12 +293,28 @@ def geo_backfills() -> list[tuple[str, str, str]]:
                 f"WHERE lower(coalesce(e->>'level_mnemonic', e->>'level')) = '{level}' LIMIT 1)"
             )
             where = (
-                f'WHERE t."{level}_code" IS NULL AND t.geo_code_hierarchy_json IS NOT NULL AND {code} IS NOT NULL'
+                f'WHERE (t."{level}_code" IS NULL OR (t."{level}_code" <> {code} AND {same_place})) '
+                f"AND t.geo_code_hierarchy_json IS NOT NULL AND {code} IS NOT NULL"
             )
             steps.append((
                 f"{level} code on {table}",
                 f'SELECT EXISTS (SELECT 1 FROM "public"."{table}" t {where})',
                 f'UPDATE "public"."{table}" t SET "{level}_code" = {code} {where}',
+            ))
+        for level in ("region", "zone", "woreda", "kebele"):
+            name = (
+                "(SELECT coalesce(" + ", ".join(f"nullif(btrim(e->>'{key}'), '')" for key in GEO_NAME_KEYS) + ") "
+                f"FROM jsonb_array_elements({chain}) e "
+                f"WHERE lower(coalesce(e->>'level_mnemonic', e->>'level')) = '{level}' LIMIT 1)"
+            )
+            where = (
+                f'WHERE t."{level}_name" IS DISTINCT FROM {name} AND {same_place} '
+                f"AND t.geo_code_hierarchy_json IS NOT NULL AND {name} IS NOT NULL"
+            )
+            steps.append((
+                f"{level} name on {table}",
+                f'SELECT EXISTS (SELECT 1 FROM "public"."{table}" t {where})',
+                f'UPDATE "public"."{table}" t SET "{level}_name" = {name} {where}',
             ))
     root_source = " UNION ALL ".join(
         f'SELECT geo_code_hierarchy_json::jsonb->\'hierarchy\' AS h FROM "public"."{name}"' for name in DA_TABLES

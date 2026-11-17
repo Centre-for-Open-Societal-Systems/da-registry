@@ -10,7 +10,7 @@ from .domain_validation_utils import as_int, parse_date, validation_error
 from .ethiopian_calendar import gregorian_to_ethiopic
 from .fayda_uniqueness import duplicate_message, find_fayda_owner
 from .required_fields import DA_REGISTER_ID, describe, load_sections, problems
-from ...geo_codes import geo_codes
+from ...geo_codes import GEO_NAME_KEYS, geo_codes
 from .validation_rules import (
     EMAIL_PATTERN,
     FAYDA_FAN_PATTERN,
@@ -31,6 +31,9 @@ _logger = logging.getLogger("g2p-register-domain-service")
 # (12 September 1927).
 MIN_BIRTH_YEAR_EC = 1920
 
+# The same limit as the Home address box on the form (96_home_address.sql).
+HOME_ADDRESS_MAX = 100
+
 
 class G2PRegisterDomainServiceDA(G2PRegisterDomainService):
     """Domain rules for the DA register.
@@ -48,6 +51,7 @@ class G2PRegisterDomainServiceDA(G2PRegisterDomainService):
             self._validate_fayda_fan(record)
             self._validate_phones(record)
             self._validate_email(record)
+            self._validate_home_address(record)
             self._derive_birth_ec(record)
             self._validate_birth_ec(record)
             self._validate_joined_date(record)
@@ -111,6 +115,25 @@ class G2PRegisterDomainServiceDA(G2PRegisterDomainService):
             if not matches(PHONE_PATTERN, text):
                 validation_error(f"{label}: enter an Ethiopian phone number, for example 0911234567.")
             record[field] = text
+
+    @staticmethod
+    def _validate_home_address(record: dict) -> None:
+        """Where the DA lives: optional, one line, up to HOME_ADDRESS_MAX
+        characters. The form's text box states the same limit. A line break is
+        refused, not removed: a change request stores what was sent, so a
+        value tidied here would still reach the register as it came."""
+        if "address_line_1" not in record:
+            return
+        value = record.get("address_line_1")
+        text = "" if value is None else str(value).strip()
+        if not text:
+            record["address_line_1"] = None
+            return
+        if "\n" in text or "\r" in text:
+            validation_error("Home address: write it on one line, without line breaks.")
+        if len(text) > HOME_ADDRESS_MAX:
+            validation_error(f"Home address: use {HOME_ADDRESS_MAX} characters or fewer (this one has {len(text)}).")
+        record["address_line_1"] = text
 
     @staticmethod
     def _validate_email(record: dict) -> None:
@@ -333,14 +356,14 @@ class G2PRegisterDomainServiceDA(G2PRegisterDomainService):
 
     @staticmethod
     def _geo_display_name(entry: dict) -> str | None:
-        for key in ("level_value_display_name", "level_value_name", "display_name"):
+        """The place's name as Master Data spells it. The record page shows that
+        spelling, so the list must too: title-casing it made "Bure (OR)" read
+        "Bure (Or)" on the list and "Dubti town" read "Dubti Town"."""
+        for key in GEO_NAME_KEYS:
             value = str(entry.get(key) or "").strip()
             if value:
                 return value
-        mnemonic = str(entry.get("level_value_mnemonic") or "").strip()
-        if not mnemonic:
-            return None
-        return mnemonic.replace("_", " ").replace("-", " ").title()
+        return None
 
     # --------------------------------------------------- search / record name --
     def construct_search_text(self, payload: dict, extra: list[str] = None) -> str:

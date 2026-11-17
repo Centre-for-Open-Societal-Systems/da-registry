@@ -80,7 +80,7 @@ class BackfillTests(unittest.TestCase):
         _what, needed, statement = sm.geo_backfills()[0]
         for sql in (needed, statement):
             self.assertIn('"region_code" IS NULL', sql)
-            self.assertIn("IS NOT NULL", sql.split('"region_code" IS NULL', 1)[1])
+            self.assertTrue(sql.rstrip(" )").endswith("IS NOT NULL"))
 
 
 class _LockTimeout(Exception):
