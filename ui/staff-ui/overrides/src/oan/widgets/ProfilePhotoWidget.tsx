@@ -32,7 +32,7 @@ const LABELS: Record<string, string> = {
     profile_photo_upload: 'Upload photo',
     profile_photo_replace: 'Replace photo',
     profile_photo_remove: 'Remove',
-    profile_photo_hint: 'JPEG, PNG or WebP. On a phone, take a photo or pick one from the gallery.',
+    profile_photo_hint: 'JPEG, PNG or WebP.',
     profile_photo_none: 'No photo',
     profile_photo_bad_type: 'Use a JPEG, PNG or WebP image.',
     profile_photo_too_large: 'The photo is larger than {size} KB after resizing. Choose a smaller image, or take the photo again.',
