@@ -38,3 +38,8 @@ def geo_codes(chain) -> dict:
         if level in CODE_LEVELS:
             codes[f"{level}_code"] = code_of(entry.get("level_value_id"))
     return codes
+
+
+# Where a chain entry carries the place's name; the first one set wins. Used
+# for the names on the list (the DA service) and by the startup backfill.
+GEO_NAME_KEYS = ("level_value_display_name", "level_value_name", "display_name", "level_value_mnemonic")
