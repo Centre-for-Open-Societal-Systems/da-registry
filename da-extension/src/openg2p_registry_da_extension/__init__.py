@@ -16,3 +16,22 @@ if "openg2p_registry_celery_worker" in _sys.modules:
         from .register_domain.factory import G2PRegisterDomainFactory
 
         G2PRegisterDomainFactory()
+
+    # A Keycloak account for each person in the register (keycloak_users.py):
+    # after the platform's task that gives a record its DA-ID, and again on a
+    # timer for what failed. Off unless DA_KEYCLOAK_USERS_ENABLED is "true".
+    from celery.signals import task_postrun as _task_postrun
+    from celery.signals import worker_ready as _worker_ready
+
+    @_task_postrun.connect(weak=False)
+    def _da_keycloak_users_after_task(sender=None, **_kwargs):
+        from . import keycloak_users
+
+        if getattr(sender, "name", "") in keycloak_users.TRIGGER_TASKS:
+            keycloak_users.run_quietly()
+
+    @_worker_ready.connect(weak=False)
+    def _da_keycloak_users_retry_timer(**_kwargs):
+        from . import keycloak_users
+
+        keycloak_users.start_retry_timer()

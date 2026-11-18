@@ -101,6 +101,19 @@ registry:
   celeryWorker:
     enabled: true
     image: {repository: '${IMAGE_REPOSITORY}/celery', tag: '${TAG}'}
+    # Dev only (18 Nov 2026, for the team demo): a Keycloak account for each
+    # approved person (docs/keycloak-users.md). Test values: everyone gets the
+    # same first password and may keep it; never copy these to staging. The
+    # worker signs in with its DA_AWE_* client; that client's service account
+    # needs the realm-management roles manage-users, view-users, query-users
+    # and view-clients in realm staff. The attribute is the one created on dev.
+    envVars:
+      DA_KEYCLOAK_USERS_ENABLED: 'true'
+      DA_KEYCLOAK_INITIAL_PASSWORD: 'password'
+      DA_KEYCLOAK_FORCE_PASSWORD_CHANGE: 'false'
+      DA_KEYCLOAK_RECORD_ATTRIBUTE: 'da_id'
+      DA_KEYCLOAK_RETRY_SECONDS: '120'
+      DA_KEYCLOAK_ROLES: '{"DEVELOPMENT_AGENT": ["oan-client:Development Agent"], "SENIOR_DA": ["oan-client:Development Agent"], "SUPERVISOR": ["da-registry-staff-portal:Data Editor", "oan-client:Supervisor"], "EXECUTIVE_OFFICER": ["da-registry-staff-portal:Data Editor", "oan-client:executive"], "COMMUNICATION_OFFICER": ["oan-client:Communications Officer"], "ADMIN": ["da-registry-staff-portal:Data Editor", "da-registry-staff-portal:Integration Manager", "da-registry-staff-portal:Intake Officer", "oan-client:Supervisor", "oan-client:OAN Administrator"]}'
   celeryBeat:
     enabled: true
     image: {repository: '${IMAGE_REPOSITORY}/celery', tag: '${TAG}'}
