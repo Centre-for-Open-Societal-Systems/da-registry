@@ -42,7 +42,9 @@ def run(row, lookup):
     service = G2PRegisterDomainServiceDA.__new__(G2PRegisterDomainServiceDA)
     session = Session(row)
     geo = SimpleNamespace(get_geo_hierarchy=mock.AsyncMock(**lookup))
-    with mock.patch("openg2p_registry_core.services.G2PGeoHierarchyService.get_component", return_value=geo):
+    # The fields a position hides are another matter (test_position_and_reporting.py).
+    with mock.patch("openg2p_registry_core.services.G2PGeoHierarchyService.get_component", return_value=geo), \
+            mock.patch.object(G2PRegisterDomainServiceDA, "_clear_hidden_after_change", mock.AsyncMock()):
         asyncio.run(service.post_approve(SimpleNamespace(internal_record_id="rec-1"), session))
     return session.updates
 

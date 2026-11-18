@@ -9,7 +9,8 @@ from .choice_check import validate_choices
 from .domain_validation_utils import as_int, parse_date, validation_error
 from .ethiopian_calendar import gregorian_to_ethiopic
 from .fayda_uniqueness import duplicate_message, find_fayda_owner
-from .required_fields import DA_REGISTER_ID, describe, load_sections, problems
+from . import position_rights
+from .required_fields import DA_REGISTER_ID, describe, hidden_fields, is_blank, load_sections, problems
 from ...geo_codes import GEO_NAME_KEYS, geo_codes
 from .validation_rules import (
     EMAIL_PATTERN,
@@ -56,7 +57,10 @@ class G2PRegisterDomainServiceDA(G2PRegisterDomainService):
             self._validate_birth_ec(record)
             self._validate_joined_date(record)
             self._validate_passout_year(record)
-            self._validate_required(record, sections)
+            self._clear_hidden_fields(record, sections)
+            await position_rights.check(record, sections)
+            self._validate_required(record, sections, await self._condition_context(record, sections))
+            await self._validate_reports_to(record)
             await validate_choices(record, sections)
             await self._check_fayda_unique(record)
             await self._sync_flattened_geo_names(record)
@@ -216,7 +220,89 @@ class G2PRegisterDomainServiceDA(G2PRegisterDomainService):
         check_passout_year(record)
 
     @staticmethod
-    def _validate_required(record: dict, sections: list) -> None:
+    def _clear_hidden_fields(record: dict, sections: list) -> None:
+        """A field the form hides for this record keeps no value: the
+        specialisation of someone who is not a development agent, the person
+        an administrator reports to. The form can still send what was typed
+        before the position was changed."""
+        for _name, schema, is_list in sections:
+            if is_list:
+                continue
+            for field in hidden_fields(schema, record):
+                if field in record and not is_blank(record.get(field)):
+                    record[field] = None
+
+    @staticmethod
+    async def _validate_reports_to(record: dict) -> None:
+        """"Reports to" is the DA-ID of a person in the register: an active
+        record, and not the person's own. The ID must be written as the
+        register has it: a change request stores what was sent, so an ID tidied
+        here (case, spaces) would still reach the register as it came."""
+        if "reports_to" not in record:
+            return
+        value = "" if record.get("reports_to") is None else str(record.get("reports_to"))
+        if not value.strip():
+            record["reports_to"] = None
+            return
+        from openg2p_fastapi_common.context import dbengine
+
+        async with dbengine.get().connect() as conn:
+            row = (
+                await conn.execute(
+                    text(
+                        'SELECT "internal_record_id", "record_status" FROM "public"."g2p_register_das" '
+                        'WHERE "functional_record_id" = :id ORDER BY ("record_status" = \'ACTIVE\') DESC LIMIT 1'
+                    ),
+                    {"id": value},
+                )
+            ).first()
+        if row is None:
+            validation_error(
+                f"Reports to: no one in the register has the ID {value}. Choose the person from the list."
+            )
+        if str(row[1]) != "ACTIVE":
+            validation_error(f"Reports to: {value} is no longer active in the register. Choose another person.")
+        if str(row[0]) == str(record.get("internal_record_id") or ""):
+            validation_error("Reports to: a person cannot report to themselves. Choose another person.")
+
+    @staticmethod
+    async def _condition_context(record: dict, sections: list) -> dict:
+        """The stored values of the fields the sections' conditions read and the
+        record does not carry: a change of the Work location alone does not
+        carry the position its rule depends on. Read from the register record
+        a change request is for, else from the record (register, then intake)
+        with the record's id. Empty when there is nothing to read."""
+        from .required_fields import condition_fields
+
+        wanted = sorted({
+            field for _name, schema, is_list in sections if not is_list
+            for field in condition_fields(schema)
+            if field not in record and field.replace("_", "").isalnum()
+        })
+        if not wanted:
+            return {}
+        from .position_rights import _change_target
+
+        target = _change_target.get() or str(record.get("internal_record_id") or "")
+        if not target:
+            return {}
+        from openg2p_fastapi_common.context import dbengine
+
+        columns = ", ".join(f'"{field}"' for field in wanted)
+        async with dbengine.get().connect() as conn:
+            for table, order in (("g2p_register_das", ""), ("g2p_intake_form_das", ' ORDER BY "created_at" DESC')):
+                row = (
+                    await conn.execute(
+                        text(f'SELECT {columns} FROM "public"."{table}" WHERE "internal_record_id" = :id{order} LIMIT 1'),
+                        {"id": target},
+                    )
+                ).mappings().first()
+                if row:
+                    return dict(row)
+        return {}
+
+    @staticmethod
+    def _validate_required(record: dict, sections: list, context: dict | None = None) -> None:
         """Required fields (widget-required in the register metadata, with its
         show / hide / require conditions), checked only when a person fills in
         the form. Only keys present in the record are checked here: the intake
@@ -230,7 +316,10 @@ class G2PRegisterDomainServiceDA(G2PRegisterDomainService):
         for name, schema, is_list in sections:
             if is_list:
                 continue  # rows of a child register, checked by that register's service
-            phrases = problems(schema, record, absent_is_missing=False)
+            # Stored values only feed the conditions; an empty one says nothing
+            # and must not read as a field the record blanked.
+            seen = {**{k: v for k, v in (context or {}).items() if k not in record and not is_blank(v)}, **record}
+            phrases = problems(schema, seen, absent_is_missing=False)
             if phrases:
                 found.append(describe(name, phrases))
         if found:
@@ -305,6 +394,35 @@ class G2PRegisterDomainServiceDA(G2PRegisterDomainService):
         the register."""
         await super().post_approve(change_request, session)
         await self._refresh_flattened_geo(change_request.internal_record_id, session)
+        await self._clear_hidden_after_change(change_request.internal_record_id, session)
+
+    async def _clear_hidden_after_change(self, internal_record_id: str, session) -> None:
+        """A change request applies its payload as it is, so a field the form
+        hides for the record's new position (see _clear_hidden_fields) is
+        emptied once the change is in the register."""
+        row = (
+            await session.execute(
+                text('SELECT * FROM "public"."g2p_register_das" WHERE "internal_record_id" = :id'),
+                {"id": internal_record_id},
+            )
+        ).mappings().first()
+        if not row:
+            return
+        record = dict(row)
+        stale = [
+            field
+            for _name, schema, is_list in await load_sections(DA_REGISTER_ID)
+            if not is_list
+            for field in hidden_fields(schema, record)
+            if field in record and not is_blank(record[field]) and field.replace("_", "").isalnum()
+        ]
+        if not stale:
+            return
+        assignments = ", ".join(f'"{field}" = NULL' for field in dict.fromkeys(stale))
+        await session.execute(
+            text(f'UPDATE "public"."g2p_register_das" SET {assignments} WHERE "internal_record_id" = :id'),
+            {"id": internal_record_id},
+        )
 
     async def _refresh_flattened_geo(self, internal_record_id: str, session) -> None:
         columns = ", ".join(f'"{name}"' for name in self.FLAT_GEO_COLUMNS)

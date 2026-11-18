@@ -14,11 +14,20 @@ condition holds. A condition is {"field", "operator", "value"} (operators
 equals, notEquals, in, notIn, empty, notEmpty, contains) or a group
 {"and": [...]}, {"or": [...]}, {"not": {...}}.
 
+Two keys of OAN's own:
+
+- "oan-optional-on-import": true on a required widget: the field is required
+  of someone filling in the form, and may be left out of a file import or a
+  DA Services push (see came_from_another_system).
+- A list section's table may carry "require" actions that name a field of the
+  parent record, for example "a development agent needs an education record,
+  an administrator does not" (see list_requires_row).
+
 Limits: on a web save or finalize a condition is evaluated against the record
 of its own section, so a condition naming a field of another section sees no
-value (the enrichers pass the whole record and are not affected). Section
-schemas are cached for five minutes, so a metadata edit reaches a running pod
-within that time.
+value (the enrichers pass the whole record and are not affected; a list
+section's table is given the parent record). Section schemas are cached for
+five minutes, so a metadata edit reaches a running pod within that time.
 
 A widget's data path names the field: "<register_id>.email", or for the geo
 widget {"value": "<register_id>.geo_lowest_level_value_id", "hierarchy": ...}.
@@ -190,12 +199,75 @@ def is_required(static: Any, options: Any, record: dict) -> bool:
     return any(evaluate_condition(a.get("condition"), record) is not False for a in _actions(options, "require"))
 
 
+def _condition_fields(options: Any, actions: tuple[str, ...] = ("show", "hide", "require")) -> list[str]:
+    """The fields the conditions of a widget's actions read."""
+    found: list[str] = []
+
+    def collect(condition: Any) -> None:
+        if not isinstance(condition, dict):
+            return
+        for key in ("and", "or"):
+            for inner in condition.get(key) or []:
+                collect(inner)
+        collect(condition.get("not"))
+        field = _field_of(condition.get("field"))
+        if field and field not in found:
+            found.append(field)
+
+    for name in actions:
+        for action in _actions(options, name):
+            collect(action.get("condition"))
+    return found
+
+
+def condition_fields(schema: Any) -> list[str]:
+    """Every field the show / hide / require conditions of a section's widgets
+    read. A condition may read a field of another section (the Work location is
+    required unless the position is ADMIN); a check of one section then needs
+    that field from the rest of the record."""
+    found: list[str] = []
+    for widget in _walk(schema):
+        for field in _condition_fields(widget.get("widget-data-options")):
+            if field not in found:
+                found.append(field)
+    return found
+
+
+def came_from_another_system(record: dict) -> bool:
+    """A file import (its source says so) or a DA Services push (it carries the
+    record's reference in DA Services)."""
+    from .validation_rules import is_interactive
+
+    return not is_interactive(record) or not is_blank(record.get("upstream_reference"))
+
+
+def hidden_fields(schema: Any, record: dict) -> list[str]:
+    """Fields of a section that none of its visible widgets writes for this
+    record: a widget hidden by its condition does not collect a value, so the
+    record should not keep one (a specialisation once the position is no
+    longer a development agent's)."""
+    shown: set[str] = set()
+    hidden: list[str] = []
+    for fields, _label, _static, options, columns, _import_optional in _widgets(schema):
+        if columns:
+            continue
+        # A record that does not carry the field a condition reads (a change of
+        # another field only) says nothing about the widget: leave its value.
+        if not all(name in record for name in _condition_fields(options, ("show", "hide"))) \
+                or is_visible(options, record):
+            shown.update(fields)
+        else:
+            hidden.extend(f for f in fields if f not in hidden)
+    return [f for f in hidden if f not in shown]
+
+
 def _title(key: str) -> str:
     return key.replace("_", " ").replace("-", " ").strip().capitalize()
 
 
 def _widgets(schema: Any):
-    """(fields, label, static_required, options, columns) per input widget."""
+    """(fields, label, static_required, options, columns, optional on import)
+    per input widget."""
     for widget in _walk(schema):
         if widget.get("widget-readonly"):
             continue
@@ -206,12 +278,13 @@ def _widgets(schema: Any):
             widget.get("widget-required"),
             widget.get("widget-data-options"),
             columns,
+            bool(widget.get("oan-optional-on-import")),
         )
 
 
 def has_requirements(schema: Any) -> bool:
     """Whether any widget of the schema is, or can become, required."""
-    for _fields, _label, static, options, columns in _widgets(schema):
+    for _fields, _label, static, options, columns, _import_optional in _widgets(schema):
         if static or _actions(options, "require"):
             return True
         if any(c.get("widget-required") or _actions(c.get("widget-data-options"), "require") for c in columns):
@@ -226,10 +299,11 @@ def problems(schema: Any, record: dict, *, absent_is_missing: bool) -> list[str]
     absent_is_missing as in missing_labels."""
     fill: list[str] = []
     extra: list[str] = []
-    for fields, label, static, options, columns in _widgets(schema):
+    imported = came_from_another_system(record)
+    for fields, label, static, options, columns, import_optional in _widgets(schema):
         if not fields or not is_visible(options, record):
             continue
-        required = is_required(static, options, record)
+        required = is_required(static, options, record) and not (import_optional and imported)
         name = label or _title(fields[0])
         if columns:
             field = fields[0]
@@ -266,11 +340,23 @@ def _table(schema: Any) -> dict | None:
     return None
 
 
-def list_requires_row(schema: Any) -> bool:
+def list_requires_row(schema: Any, parent: dict | None = None) -> bool:
     """Whether a list section must hold at least one row: its table widget is
-    marked required. A list such as dependents may be left empty."""
+    marked required, or carries a "require" action whose condition holds for
+    the parent record (education records are required of a development agent,
+    not of an administrator). Without the parent record only the plain flag
+    counts. A list such as dependents may be left empty."""
     table = _table(schema)
-    return bool(table and table.get("widget-required"))
+    if not table:
+        return False
+    if table.get("widget-required"):
+        return True
+    if not parent:
+        return False
+    return any(
+        evaluate_condition(a.get("condition"), parent) is True
+        for a in _actions(table.get("widget-data-options"), "require")
+    )
 
 
 def row_problems(schema: Any, row: dict, *, absent_is_missing: bool) -> list[str]:
@@ -371,9 +457,14 @@ def incomplete_reason(record: dict, sections: list[tuple[str, Any, bool]]) -> st
     found = []
     for name, schema, is_list in sections:
         if is_list:
-            # A list section's rows are records of a child register (education &
-            # professional records, dependents); its columns are not fields of
-            # the DA record, which is what a file row or a push carries.
+            # A list section's rows are records of a child register (education
+            # records, dependents). A file row or a push carries one education
+            # in the DA record's own fields; where the record's position needs
+            # an education record, those fields must be filled.
+            if list_requires_row(schema, record):
+                phrases = row_problems(schema, record, absent_is_missing=True)
+                if phrases:
+                    found.append(describe(name, phrases))
             continue
         phrases = problems(schema, record, absent_is_missing=True)
         if phrases:

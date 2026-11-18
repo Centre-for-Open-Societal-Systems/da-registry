@@ -147,7 +147,7 @@ the registry **server to server with its service account**:
 |---|---|---|
 | Find the DA | `POST /register-data/search_in_a_register` with `search_text` = the DA-ID | keep only the item whose `functional_record_id` equals the DA-ID (`search_text` is partial) |
 | Show the profile | `POST /register-data/get_tab_records` (`da_details_tab`) | |
-| Request a change | `POST /change-requests/create_change_request` on that record | DA Services allows only the contact (`da_contact_section_04`), service (`da_service_section_02`) and location (`da_location_section_03`) sections; never identity (name, Fayda ID) |
+| Request a change | `POST /change-requests/create_change_request` on that record | DA Services allows only the contact (`da_contact_section_04`), service (`da_service_section_02`) and location (`da_location_section_03`) sections, and in the service section only `joined_date` and `specialisation`: **not `position` or `reports_to`** (section 6); never identity (name, Fayda ID) |
 | Show the status | `POST /change-requests/get_change_request` | `PENDING` in the create response, `APPROVED` a few seconds later (no registry approval, section 2); read `approval_status`, not `awe_request_status_summary` |
 
 - **Service account:** a confidential Keycloak client in realm `staff` with
@@ -179,3 +179,83 @@ Keycloak attribute `da_id` and the registry limited that token to one record
 through an override of the platform's data-policy middleware. It needed a
 platform override and a Keycloak scope per realm; enforcing it in DA Services
 needs neither.
+
+## 6. Positions: who may give one, and who may change it
+
+> **Switched off for now (18 Nov 2026).** For the team demo on dev the rules
+> below are not in the metadata: anyone who can fill in the form may give any
+> position, a file import and a DA Services push may bring any position, and
+> a Data Editor may change `position` and `reports_to`. The code stays and is
+> tested; `85_position_and_reporting.sql` says which keys switch it back on.
+> Until then, an approver is the only check on a record's position.
+
+The register holds everyone: development agents and the people they report to
+(supervisors, officers, the administrator). A person's position decides the
+rights of the Keycloak account the registry makes for them
+(`docs/keycloak-users.md`), so it is not a free choice of whoever fills in the
+form. The rules are metadata on the Position and "Reports to" widgets
+(`85_position_and_reporting.sql`); the code is
+`register_domain/services/position_rights.py`.
+
+| Who | Positions they may give |
+|---|---|
+| A user with the registry role **Operations Administrator** | every position |
+| Anyone else who may fill in the form (a supervisor: Intake Officer) | Development Agent and Senior DA only |
+| A file import or a DA Services push | Development Agent and Senior DA only |
+
+| Who | May change `position` or `reports_to` of a registered record |
+|---|---|
+| Intake Officer, Data Supervisor or Operations Administrator | yes (a position above Senior DA still needs Operations Administrator) |
+| A user with Data Editor only (a development agent) | no |
+
+What the API answers:
+
+- `Position: only an administrator can give this position (ADMIN). Choose another position, or ask an administrator to register this person.`
+- `Position: you cannot change this. Ask your supervisor to change it.` (also for `Reports to (ID)`)
+- `Position: ADMIN cannot be given in a file import or by DA Services. An administrator registers this person in the registry.`
+
+A field sent with the value the register already has is not a change: the form
+sends a whole section, so a supervisor can still correct another field of an
+administrator's record.
+
+On the form, a user without the right does not see the other positions in the
+dropdown (the form reads a permission for this, `incomingMessage:view`, which
+Operations Administrator has and the supervisor roles do not; the staff UI
+knows a user's permissions, not their roles). The API decides by the role.
+
+**DA Services' service account** has Intake Officer, so the registry lets it
+change a position between Development Agent and Senior DA and change
+`reports_to`. When it acts for a development agent (self-service, section 5)
+the registry cannot tell: DA Services must not send `position` or `reports_to`
+there. With the user's own token instead of the service account, the registry
+refuses them itself.
+
+Not covered: the approval of a new record is the same for every position. An
+approver should look at the position of a record whose position is above
+Senior DA; a stricter approval for those records is a change of the approval
+policy, not of the registry.
+
+## 7. Starting a new environment
+
+A new environment has no record in the register, and nobody in it can be given
+a position above Senior DA except by an administrator. So the first
+administrator does not come from the register:
+
+1. **Keycloak is set up**: the `staff` realm, the DA Services groups
+   (section 1), and one user in `DA Services - OAN Administrator`. On the local
+   stack `docker/local-dev/keycloak-init.sh` does this; elsewhere it is part
+   of the installation.
+2. **Two approvers** exist and are named in the two DA approval policies.
+3. **Master Data** has the DA lists, among them `DA_POSITION` with every
+   position (openg2p-data).
+4. **That administrator signs in to the registry** and registers people from
+   the top down: administrators first (they report to no one), then officers
+   and supervisors, then development agents. "Reports to" must name a person
+   already in the register, so a file import follows the same order, and a
+   file can bring development agents only.
+5. An administrator who already has a Keycloak login is registered with the
+   **same email** as that login, so the registry links the record to it
+   instead of making a second account (`docs/keycloak-users.md`).
+
+The first administrator's login is made outside the register and is the most
+powerful one. Give it to few people, and change its password on the first day.

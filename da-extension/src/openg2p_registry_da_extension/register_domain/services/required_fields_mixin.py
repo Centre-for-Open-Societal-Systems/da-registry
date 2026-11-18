@@ -22,6 +22,8 @@ import logging
 
 from openg2p_registry_da_extension.register_domain.services.domain_validation_utils import validation_error
 from openg2p_registry_da_extension.register_domain.services.required_fields import (
+    DA_REGISTER_ID,
+    condition_fields,
     describe,
     has_requirements,
     list_requires_row,
@@ -64,6 +66,11 @@ class RequiredFieldsMixin:
             found: dict[str, list[str]] = {}
             is_list = bool(getattr(section, "is_list", False))
             records = [r for r in self._records_for_validation(section_payload) if isinstance(r, dict)]
+            # A condition may read a field another section holds (Work location is
+            # required unless the position is ADMIN): take it from the submission.
+            wanted = [] if is_list else condition_fields(schema)
+            parent = await self._parent_record(submission_id, session) if wanted else {}
+            context = {field: parent[field] for field in wanted if parent.get(field) not in (None, "")}
             for record in records:
                 if not is_interactive(record):
                     continue
@@ -75,8 +82,9 @@ class RequiredFieldsMixin:
                     if record.get("edit_action") != "DELETE":
                         _add(found, name, row_problems(schema, record, absent_is_missing=new))
                 else:
-                    _add(found, name, problems(schema, record, absent_is_missing=new))
-            if is_list and list_requires_row(schema):
+                    seen = {**{k: v for k, v in context.items() if k not in record}, **record}
+                    _add(found, name, problems(schema, seen, absent_is_missing=new))
+            if is_list and list_requires_row(schema, await self._parent_record(submission_id, session)):
                 kept = {str(r.get("internal_record_id")) for r in records if r.get("internal_record_id")} | existing
                 deleted = {
                     str(r.get("internal_record_id")) for r in (section_payload or [])
@@ -90,6 +98,26 @@ class RequiredFieldsMixin:
             submission_id, section_id, section_payload, section_register_id, form_id, register_id,
             created_by, session, documents=documents,
         )
+
+    async def _parent_record(self, submission_id, session) -> dict:
+        """The DA record the submission holds so far, for a list section whose
+        need for a row depends on it (the position decides whether an education
+        record is required). Empty when nothing is stored yet; the submit check
+        then decides."""
+        if not submission_id:
+            return {}
+        try:
+            submission = await self._get_submission_or_error(submission_id, session)
+            intake_class = await self._resolve_intake_form_class(DA_REGISTER_ID, session)
+            rows = await self._get_intake_rows(intake_class, submission.submission_id, session)
+        except Exception as exc:  # noqa: BLE001 - nothing stored yet
+            _logger.warning("intake guard: no DA record for submission %s (%s)", submission_id, exc)
+            return {}
+        for row in rows.values() if isinstance(rows, dict) else rows:
+            if hasattr(row, "to_dict"):
+                return dict(row.to_dict())
+            return {key: value for key, value in vars(row).items() if not key.startswith("_")}
+        return {}
 
     async def _existing_record_ids(self, submission_id, section_register_id, session) -> set[str]:
         """internal_record_ids the submission already stores for this register."""
@@ -113,6 +141,17 @@ class RequiredFieldsMixin:
         sections = await self._get_form_sections(submission.form_id, session)
         payloads = {p.section_id: p for p in await self._build_section_payloads(submission, session)}
         found: dict[str, list[str]] = {}
+        # The DA record as the sections of the submission hold it: what a list
+        # section's need for a row, and "came from a file or DA Services", are
+        # decided by.
+        parent: dict = {}
+        for section in sections:
+            if getattr(section, "is_list", False):
+                continue
+            payload = payloads.get(section.section_id)
+            for record in (payload.records if payload else [])[:1]:
+                if isinstance(record, dict):
+                    parent.update({k: v for k, v in record.items() if v is not None or k not in parent})
         for section in sections:
             schema = section.section_ui_schema
             if not has_requirements(schema):
@@ -121,15 +160,17 @@ class RequiredFieldsMixin:
             records = [r for r in (payload.records if payload else []) if isinstance(r, dict)]
             name = section_name_of(section)
             if getattr(section, "is_list", False):
-                # A list section marked required needs one row; each row carries
-                # its own required fields. A list that may stay empty is skipped.
-                if not records and list_requires_row(schema):
+                # A list section that needs a row for this record must hold one;
+                # each row carries its own required fields. A list that may stay
+                # empty is skipped.
+                if not records and list_requires_row(schema, parent):
                     _add(found, name, [EMPTY_LIST])
                 for record in records:
                     _add(found, name, row_problems(schema, record, absent_is_missing=True))
                 continue
             for record in [records[0] if records else {}]:
-                _add(found, name, problems(schema, record, absent_is_missing=True))
+                # The whole record: a condition may read another section's field.
+                _add(found, name, problems(schema, {**parent, **record}, absent_is_missing=True))
         if found:
             validation_error("Cannot submit for approval. " + _sentence(found))
         return await super().finalize_submission_with_session(

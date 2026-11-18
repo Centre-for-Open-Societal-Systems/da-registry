@@ -29,6 +29,7 @@ class G2PSchemaDA:
     position: Optional[str] = None  # a DA_POSITION code from Master Data
     joined_date: Optional[date] = None
     passout_year: Optional[int] = None
+    reports_to: Optional[str] = None  # DA-ID of the person this one reports to
     source: Optional[str] = None  # a DA_SOURCE code from Master Data
 
     upstream_reference: Optional[str] = None

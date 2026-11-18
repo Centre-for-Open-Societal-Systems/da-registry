@@ -1,8 +1,8 @@
-"""Domain service of a DA's education & professional records (child of DA).
+"""Domain service of a DA's education records (child of DA).
 
-A record is one row of the "Education & professional" table: education level,
-specialisation, position, passout year, joining date and up to three
-certificates.
+A record is one row of the "Education" table: education level, passout year
+and up to three certificates. Position, specialisation and joining date are
+fields of the DA record ("Position and reporting"), not of a row.
 
 What a certificate may be (file types, size, how many) is read from the file
 column's options in the section metadata, the same options the form uses, so
@@ -27,7 +27,7 @@ from datetime import date
 
 from openg2p_registry_core.services import G2PRegisterDomainService
 
-from .domain_validation_utils import as_int, parse_date, validation_error
+from .domain_validation_utils import as_int, validation_error
 from .ethiopian_calendar import gregorian_to_ethiopic
 
 _logger = logging.getLogger("g2p-register-domain-service")
@@ -40,8 +40,6 @@ DEFAULT_MAX_BYTES = 2 * 1024 * 1024
 MIN_PASSOUT_YEAR_EC = 1950
 REQUIRED = (
     ("education_level", "Education level"),
-    ("specialisation", "Specialisation"),
-    ("position", "Position"),
     ("passout_year", "Passout year"),
 )
 _SKIP_ACTIONS = {"DELETE", "NO_CHANGE"}
@@ -290,15 +288,12 @@ def _check(record: dict) -> None:
     if record.get("edit_action") == "ADD":
         missing = [label for field, label in REQUIRED if _is_blank(record.get(field))]
     if missing:
-        validation_error("Required: Education & professional: fill in " + ", ".join(missing) + ".")
+        validation_error("Required: Education: fill in " + ", ".join(missing) + ".")
     check_passout_year(record)
-    joined = parse_date(record.get("joined_date"))
-    if joined is not None and joined > date.today():
-        validation_error("Joining date: the date is in the future. Enter today or an earlier date.")
 
 
 class G2PRegisterDomainServiceQualification(G2PRegisterDomainService):
-    _KEYS = ("education_level", "specialisation", "position", "passout_year")
+    _KEYS = ("education_level", "passout_year")
 
     async def validate_domain_attributes(self, records: list[dict]):
         from .choice_check import validate_choices

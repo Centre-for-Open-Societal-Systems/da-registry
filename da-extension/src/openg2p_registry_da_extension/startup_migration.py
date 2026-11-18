@@ -58,6 +58,7 @@ DA_COLUMNS = {
     "position": "VARCHAR",
     "joined_date": "DATE",
     "passout_year": "INTEGER",
+    "reports_to": "VARCHAR",
     "source": "VARCHAR",
     "upstream_reference": "VARCHAR",
     "upstream_approved_by": "VARCHAR",

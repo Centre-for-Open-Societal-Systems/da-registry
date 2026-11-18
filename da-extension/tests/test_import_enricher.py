@@ -77,10 +77,13 @@ class TestEnricher(unittest.TestCase):
         self.resolve.assert_called_once_with(
             {"region": "amhara", "zone": "Awi", "woreda": "Banja", "kebele": "Barie"})
 
-    def test_missing_identity_or_location_is_rejected(self):
-        row = dict(ROW, **{"Fayda ID": "", "Kebele": ""})
-        with self.assertRaisesRegex(ValueError, "Missing: Fayda ID, Kebele"):
-            self.enrich(row, session=None)
+    def test_missing_identity_or_part_of_the_location_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "Missing: Fayda ID"):
+            self.enrich(dict(ROW, **{"Fayda ID": ""}), session=None)
+        # Three of the four places: a mistake in the row. (None of the four is
+        # for the metadata to decide: allowed for an administrator only.)
+        with self.assertRaisesRegex(ValueError, "Missing: Kebele"):
+            self.enrich(dict(ROW, **{"Kebele": ""}), session=None)
 
     def test_unknown_code_lists_the_allowed_values(self):
         with self.assertRaisesRegex(ValueError, "Position: 'Manager' is not one of the choices. Choose one of: Development Agent, Senior DA"):

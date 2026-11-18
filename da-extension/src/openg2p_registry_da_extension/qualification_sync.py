@@ -1,22 +1,25 @@
-"""Keep a DA's one-value education fields and the education & professional
-records in step.
+"""Keep a DA's one-value education fields and the education records in step.
 
-A DA's education & professional records are rows of the Qualification register
-(g2p_register_qualifications), added on the form with "Add record". The DA
-record still has the one-value fields education_level, specialisation,
-position, joined_date and passout_year: a file import and a DA Services push
+A DA's education records are rows of the Qualification register
+(g2p_register_qualifications), added on the form with "Add record": education
+level, passout year and certificates. The DA record still has the one-value
+fields education_level and passout_year: a file import and a DA Services push
 send one of each, DA Services reads them, and the register's search results
 and filters show them.
+
+Position, specialisation and joining date are not part of an education record.
+A person holds one position, so they are fields of the DA record itself (the
+"Position and reporting" section); the rows' old columns of those names are no
+longer read or written.
 
 Two triggers hold the two together, whatever wrote the row (approval of an
 intake, a change request, an import):
 
 - a row is added, changed or removed -> the DA record's fields take the values
   of the DA's main row: the active row with the latest passout year, then the
-  latest joining date, then the newest;
-- the DA record's fields are written (import, push, a change request on the
-  one-value section) -> the main row takes them, or the first row is created
-  when the DA has none.
+  newest;
+- the DA record's fields are written (import, push) -> the main row takes
+  them, or the first row is created when the DA has none.
 
 Each trigger does nothing when it was fired by the other (pg_trigger_depth).
 A one-off statement creates the first row of every DA saved before the list
@@ -31,9 +34,9 @@ made on only.
 
 DA_TABLE = "g2p_register_das"
 ROW_TABLE = "g2p_register_qualifications"
-FIELDS = ("education_level", "specialisation", "position", "joined_date", "passout_year")
+FIELDS = ("education_level", "passout_year")
 
-_MAIN_ORDER = "q.passout_year DESC NULLS LAST, q.joined_date DESC NULLS LAST, q.created_at DESC"
+_MAIN_ORDER = "q.passout_year DESC NULLS LAST, q.created_at DESC"
 _SET_DA = ", ".join(f"{f} = main.{f}" for f in FIELDS)
 _DA_DIFFERS = " OR ".join(f"d.{f} IS DISTINCT FROM main.{f}" for f in FIELDS)
 _SET_ROW = ", ".join(f"{f} = NEW.{f}" for f in FIELDS)
@@ -88,8 +91,9 @@ FUNCTIONS = (
         WHERE q.link_internal_record_id = NEW.internal_record_id AND q.record_status = 'ACTIVE'
         ORDER BY {_MAIN_ORDER}
         LIMIT 1;
-        IF NEW.education_level IS NULL AND NEW.specialisation IS NULL AND NEW.position IS NULL THEN
-            -- A DA saved from the form: its rows carry the values.
+        IF NEW.education_level IS NULL AND NEW.passout_year IS NULL THEN
+            -- A record saved from the form: its rows carry the values. A person
+            -- whose position needs no education record has neither.
             IF main_id IS NOT NULL THEN
                 PERFORM "public".da_fields_from_main_row(NEW.internal_record_id::text);
             END IF;
@@ -101,8 +105,8 @@ FUNCTIONS = (
                 last_approved_at, last_approved_by, record_status, {", ".join(FIELDS)}
             ) VALUES (
                 gen_random_uuid()::text, NEW.internal_record_id,
-                concat_ws(' ', NEW.education_level, NEW.specialisation, NEW.position),
-                concat_ws(' ', NEW.education_level, NEW.specialisation, NEW.position),
+                concat_ws(' ', NEW.education_level, NEW.passout_year::text),
+                concat_ws(' ', NEW.education_level, NEW.passout_year::text),
                 NEW.created_by, NEW.created_at, NEW.last_approved_at, NEW.last_approved_by, 'ACTIVE', {_NEW_FIELDS}
             );
         ELSE
@@ -125,6 +129,9 @@ TRIGGERS = (
     AFTER INSERT OR UPDATE OR DELETE ON "public"."{ROW_TABLE}"
     FOR EACH ROW EXECUTE FUNCTION "public".da_qualification_row_changed()
     """),
+    # Where it was created by an earlier release it also fires on a change of
+    # position, specialisation or joining date; the function then finds nothing
+    # to do, so the trigger is not replaced (CREATE TRIGGER locks the table).
     (DA_TABLE, "da_one_value_fields_changed", f"""
     CREATE TRIGGER da_one_value_fields_changed
     AFTER INSERT OR UPDATE OF {", ".join(FIELDS)} ON "public"."{DA_TABLE}"
@@ -133,7 +140,7 @@ TRIGGERS = (
 )
 
 _NO_ROW = f"""
-    (d.education_level IS NOT NULL OR d.specialisation IS NOT NULL OR d.position IS NOT NULL)
+    d.education_level IS NOT NULL
     AND NOT EXISTS (
         SELECT 1 FROM "public"."{ROW_TABLE}" q
         WHERE q.link_internal_record_id = d.internal_record_id AND q.record_status = 'ACTIVE')
@@ -156,7 +163,7 @@ _OUT_OF_STEP = f"""
 BACKFILLS = (
     # DAs saved before the list existed: their one-value fields become the first row.
     (
-        "first education & professional record",
+        "first education record",
         f'SELECT EXISTS (SELECT 1 FROM "public"."{DA_TABLE}" d WHERE {_NO_ROW})',
         f'UPDATE "public"."{DA_TABLE}" d SET education_level = d.education_level WHERE {_NO_ROW}',
     ),

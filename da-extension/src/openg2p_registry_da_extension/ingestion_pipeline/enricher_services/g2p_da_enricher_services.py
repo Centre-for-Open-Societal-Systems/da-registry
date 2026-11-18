@@ -33,6 +33,7 @@ from sqlalchemy.orm import Session
 
 from ...geo_codes import geo_codes
 from ...register_domain.services.required_fields import incomplete_reason, load_sections_sync
+from ...register_domain.services.position_rights import import_problem
 from . import code_lists, master_data_api
 
 _logger = logging.getLogger("g2p-payload-enricher-service")
@@ -59,6 +60,7 @@ COLUMN_ALIASES = {
     "position": ("position", "designation"),
     "joined_date": ("joining date", "joined date", "date of joining"),
     "passout_year": ("passout year (ec)", "passout year", "pass out year", "year of passing", "graduation year"),
+    "reports_to": ("reports to (da id)", "reports to", "reported to", "reporting to"),
     "region": ("region",),
     "zone": ("zone",),
     "woreda": ("woreda",),
@@ -72,8 +74,11 @@ _HEADER_TO_FIELD = {alias: field for field, aliases in COLUMN_ALIASES.items() fo
 # approver; format checks still apply to whatever is filled in.
 IMPORT_REQUIRED = {
     "first_name": "Name", "middle_name": "Father Name", "foundational_id": "Fayda ID",
-    "region": "Region", "zone": "Zone", "woreda": "Woreda", "kebele": "Kebele",
 }
+# The four location columns go together: all four, or none. None is accepted
+# only where the metadata says the Work location is not required (an
+# administrator); _require_complete refuses it for everyone else.
+GEO_LABELS = {"region": "Region", "zone": "Zone", "woreda": "Woreda", "kebele": "Kebele"}
 
 GEO_LEVELS = ("region", "zone", "woreda", "kebele")
 
@@ -214,7 +219,19 @@ class _MasterDataGeo:
         return {"hierarchy": chain, "lowest_level_value_id": kebele_id}
 
 
-def _build_da_record(row: Dict, source: str, geo: dict, session: Session) -> Dict:
+def _geo_from_names(row: Dict) -> dict | None:
+    """The location chain of a row's four names; None when it names none. Some
+    but not all of them is a mistake in the row."""
+    given = [level for level in GEO_LEVELS if row.get(level)]
+    if not given:
+        return None
+    missing = [GEO_LABELS[level] for level in GEO_LEVELS if not row.get(level)]
+    if missing:
+        raise ValueError("Missing: " + ", ".join(missing))
+    return _MasterDataGeo.resolve({level: row[level] for level in GEO_LEVELS})
+
+
+def _build_da_record(row: Dict, source: str, geo: dict | None, session: Session) -> Dict:
     """Canonical DA fields (row keys are DA field names, values strings) ->
     the record the intake template expects. Shared by every ingestion path."""
     out = {
@@ -236,10 +253,19 @@ def _build_da_record(row: Dict, source: str, geo: dict, session: Session) -> Dic
         "position": code_lists.resolve_code("position", row.get("position"), session),
         "joined_date": _date(row.get("joined_date"), "Joining Date"),
         "passout_year": _integer(row.get("passout_year"), "Passout Year"),
+        # DA-ID of the person this one reports to; optional in a file and a push.
+        "reports_to": str(row.get("reports_to") or "").strip() or None,
         "source": source,
         "upstream_reference": row.get("upstream_reference") or None,
         "upstream_approved_by": row.get("upstream_approved_by") or None,
     }
+    if geo is None:
+        # No Work location (allowed for an administrator; see _require_complete).
+        out.update({key: None for key in (
+            "geo_lowest_level_value_id", "geo_code_hierarchy_json",
+            "region_name", "zone_name", "woreda_name", "kebele_name")})
+        out.update(geo_codes(None))
+        return out
     names = {entry["level_mnemonic"]: entry["level_value_mnemonic"] for entry in geo["hierarchy"]}
     out.update({
         "geo_lowest_level_value_id": geo["lowest_level_value_id"],
@@ -259,7 +285,10 @@ def _require_complete(record: Dict, session: Session) -> None:
     The ValueError carries the readable reason; the platform records it against
     the row, and the DA Services exceptions list shows it as a missing mandatory
     field."""
-    reason = incomplete_reason(record, load_sections_sync(session))
+    sections = load_sections_sync(session)
+    # A position only an administrator can give is not taken from a file or
+    # from DA Services (position_rights.py).
+    reason = incomplete_reason(record, sections) or import_problem(record, sections)
     if reason:
         raise ValueError(reason)
 
@@ -276,7 +305,7 @@ class DAImportFileEnricherService(G2PPayloadEnricherInterface):
         if missing:
             raise ValueError("Missing: " + ", ".join(missing))
 
-        geo = _MasterDataGeo.resolve({level: row[level] for level in GEO_LEVELS})
+        geo = _geo_from_names(row)
         out = _build_da_record(row, SOURCE_CSV_IMPORT, geo, session)
         _require_complete(out, session)
         _logger.info("DA import row enriched: Fayda ID %s, kebele %s", out["foundational_id"], out["kebele_name"])
@@ -293,7 +322,7 @@ DA_SERVICES_FIELDS = {
     "birth_year_ec": "birth_year_ec", "phone_number": "mobile_number",
     "telegram_number": "telegram_number", "alternate_number": "alternate_number", "email": "email",
     "education_level": "education_level", "specialisation": "specialisation", "position": "position",
-    "joining_date": "joined_date", "passout_year": "passout_year", "region": "region", "zone": "zone", "woreda": "woreda", "kebele": "kebele",
+    "joining_date": "joined_date", "passout_year": "passout_year", "reports_to": "reports_to", "region": "region", "zone": "zone", "woreda": "woreda", "kebele": "kebele",
 }
 DA_SERVICES_SOURCES = {"WEB_INTAKE", "CSV_IMPORT"}
 DA_SERVICES_REQUIRED = {"first_name": "first_name", "middle_name": "father_name", "foundational_id": "fayda_id"}
@@ -323,15 +352,17 @@ class DAServicesEnricherService(G2PPayloadEnricherInterface):
         row = {DA_SERVICES_FIELDS[k]: _clean(v) for k, v in da.items() if k in DA_SERVICES_FIELDS}
         missing = [name for field, name in DA_SERVICES_REQUIRED.items() if not row.get(field)]
         kebele_id = _clean(da.get("kebele_id"))
-        if not kebele_id and not all(row.get(level) for level in GEO_LEVELS):
+        if not kebele_id and any(row.get(level) for level in GEO_LEVELS) \
+                and not all(row.get(level) for level in GEO_LEVELS):
             missing.append("kebele_id (or region, zone, woreda, kebele)")
         if missing:
             raise ValueError("Missing: " + ", ".join(missing))
 
         row["upstream_reference"] = reference
         row["upstream_approved_by"] = _clean(message.get("approved_by"))
-        geo = (_MasterDataGeo.resolve_by_id(kebele_id) if kebele_id
-               else _MasterDataGeo.resolve({level: row[level] for level in GEO_LEVELS}))
+        # No location at all is accepted only where the metadata does not
+        # require one (an administrator); _require_complete decides.
+        geo = _MasterDataGeo.resolve_by_id(kebele_id) if kebele_id else _geo_from_names(row)
         out = _build_da_record(row, source, geo, session)
         _require_complete(out, session)
         _logger.info("DA Services record %s enriched: Fayda ID %s, kebele %s",

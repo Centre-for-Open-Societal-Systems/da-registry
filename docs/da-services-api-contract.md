@@ -115,21 +115,24 @@ what is seeded today, read them live from Master Data
 | `telegram_number` | No | Phone number, same format |
 | `alternate_number` | No | Phone number, same format |
 | `email` | Yes* | Valid email; stored lower case |
-| `education_level` | Yes* | `DA_EDUCATION_LEVEL` list: `CERTIFICATE`, `DIPLOMA`, `DEGREE`, `MASTERS` |
-| `specialisation` | Yes* | `DA_SPECIALISATION` list: `CROP_PRODUCTION`, `LIVESTOCK`, `NATURAL_RESOURCES`, `AGRONOMY`, `HORTICULTURE`, `OTHER` |
-| `position` | Yes* | `DA_POSITION` list: `DEVELOPMENT_AGENT`, `SENIOR_DA` |
+| `position` | Yes* | `DA_POSITION` list: `DEVELOPMENT_AGENT`, `SENIOR_DA`, `SUPERVISOR`, `COMMUNICATION_OFFICER`, `EXECUTIVE_OFFICER`, `ADMIN`. (A later release may refuse the positions above `SENIOR_DA` in a push.) |
+| `specialisation` | Yes* for `DEVELOPMENT_AGENT` and `SENIOR_DA` | `DA_SPECIALISATION` list: `CROP_PRODUCTION`, `LIVESTOCK`, `NATURAL_RESOURCES`, `AGRONOMY`, `HORTICULTURE`, `OTHER`. Not kept for other positions. |
 | `joining_date` | No | `YYYY-MM-DD` (or `DD/MM/YYYY`); not in the future |
-| `passout_year` | Yes* | Ethiopian calendar year the education was completed, 1950 to this year |
+| `reports_to` | No | DA-ID of the person this one reports to, exactly as the register has it; must be an active record. Not kept for `ADMIN`. |
+| `education_level` | Yes* for `DEVELOPMENT_AGENT` and `SENIOR_DA` | `DA_EDUCATION_LEVEL` list: `CERTIFICATE`, `DIPLOMA`, `DEGREE`, `MASTERS` |
+| `passout_year` | Yes* for `DEVELOPMENT_AGENT` and `SENIOR_DA` | Ethiopian calendar year the education was completed, 1950 to this year. Required whenever `education_level` is sent. |
 | `kebele_id` | **Yes**, or the four names | Master Data kebele id, e.g. `kebele-ET010101101001` (preferred: names repeat across woredas) |
 | `region`, `zone`, `woreda`, `kebele` | Instead of `kebele_id` | Names as in Master Data; resolved region → kebele |
 
 \* Required for every `source` (`WEB_INTAKE` and `CSV_IMPORT`): a push with
 one of them blank is refused with `Required: <section>: fill in <field>`.
 
-`education_level`, `specialisation`, `position`, `joining_date` and
-`passout_year` become the DA's **first education & professional record**. A DA
-can have more records, and certificates, family members / dependents and a
-photo; those are not part of a push. Add them after registration with change
+`education_level` and `passout_year` become the person's **first education
+record**; a push without them (allowed for the positions that need no
+education record) creates none. `position`, `specialisation`, `joining_date`
+and `reports_to` are the person's position and reporting. A person can have more
+education records, and certificates, family members / dependents and a photo;
+those are not part of a push. Add them after registration with change
 requests through the staff API (`docs/da-services-staff-api.md` §2.3b, §5).
 
 ### Response
