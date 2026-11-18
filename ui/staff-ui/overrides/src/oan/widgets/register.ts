@@ -1,6 +1,7 @@
 import { createElement } from 'react';
 import { HeaderSectionWidget, widgetRegistry } from '@openg2p/registry-widgets';
 import { FileListCellWidget } from './FileListCellWidget';
+import { GeoByPositionWidget } from './GeoByPositionWidget';
 import { RecordFilesTableWidget } from './RecordFilesTableWidget';
 import { ReportsToWidget } from './ReportsToWidget';
 import { SelectByRightWidget } from './SelectByRightWidget';
@@ -41,6 +42,11 @@ widgetRegistry.register({ widget: 'oan-select-by-right', component: SelectByRigh
 // reports to, chosen from a list of the people in the register, with their
 // name and position shown under it. See ReportsToWidget.
 widgetRegistry.register({ widget: 'oan-reports-to', component: ReportsToWidget as never });
+
+// The Work location, as far down as the position needs it (a supervisor: the
+// Woreda; an administrator: none). Upstream's geo widget, unchanged, wherever
+// the widget carries no "oan-location-depth". See GeoByPositionWidget.
+widgetRegistry.register({ widget: 'geo-hierarchy', component: GeoByPositionWidget as never });
 
 // A date picker opened inside an "Add record" dialog: the dialog's field grid
 // scrolls (overflow: auto), so the calendar, which drops below its box, was cut

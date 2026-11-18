@@ -9,7 +9,7 @@ from .choice_check import validate_choices
 from .domain_validation_utils import as_int, parse_date, validation_error
 from .ethiopian_calendar import gregorian_to_ethiopic
 from .fayda_uniqueness import duplicate_message, find_fayda_owner
-from . import position_rights
+from . import location_depth, position_rights
 from .required_fields import DA_REGISTER_ID, describe, hidden_fields, is_blank, load_sections, problems
 from ...geo_codes import GEO_NAME_KEYS, geo_codes
 from .validation_rules import (
@@ -57,9 +57,11 @@ class G2PRegisterDomainServiceDA(G2PRegisterDomainService):
             self._validate_birth_ec(record)
             self._validate_joined_date(record)
             self._validate_passout_year(record)
-            self._clear_hidden_fields(record, sections)
+            context = await self._condition_context(record, sections)
+            self._clear_hidden_fields(record, sections, context)
+            self._fit_location(record, sections, context)
             await position_rights.check(record, sections)
-            self._validate_required(record, sections, await self._condition_context(record, sections))
+            self._validate_required(record, sections, context)
             await self._validate_reports_to(record)
             await validate_choices(record, sections)
             await self._check_fayda_unique(record)
@@ -220,17 +222,34 @@ class G2PRegisterDomainServiceDA(G2PRegisterDomainService):
         check_passout_year(record)
 
     @staticmethod
-    def _clear_hidden_fields(record: dict, sections: list) -> None:
+    def _clear_hidden_fields(record: dict, sections: list, context: dict | None = None) -> None:
         """A field the form hides for this record keeps no value: the
         specialisation of someone who is not a development agent, the person
-        an administrator reports to. The form can still send what was typed
-        before the position was changed."""
+        an administrator reports to, the Work location of an administrator or
+        a communication officer. The form can still send what was typed
+        before the position was changed. `context` gives the stored values the
+        conditions read and the record does not carry (the position, on a save
+        of the Work location alone)."""
+        seen = {**{k: v for k, v in (context or {}).items() if k not in record and not is_blank(v)}, **record}
         for _name, schema, is_list in sections:
             if is_list:
                 continue
-            for field in hidden_fields(schema, record):
+            for field in hidden_fields(schema, seen):
                 if field in record and not is_blank(record.get(field)):
                     record[field] = None
+
+    @staticmethod
+    def _fit_location(record: dict, sections: list, context: dict | None = None) -> None:
+        """The Work location goes down to the position's level and no further
+        (location_depth.py): a Kebele chosen for a supervisor is left out and
+        the Woreda kept; a location that stops above the position's level is
+        refused with the level to choose."""
+        rule = location_depth.find_rule(sections)
+        if not rule:
+            return
+        problem = location_depth.fit_record(record, rule, context)
+        if problem:
+            validation_error(problem)
 
     @staticmethod
     async def _validate_reports_to(record: dict) -> None:
@@ -381,7 +400,7 @@ class G2PRegisterDomainServiceDA(G2PRegisterDomainService):
     # ------------------------------------------------ location after a change --
     FLAT_GEO_COLUMNS = (
         "region_name", "zone_name", "woreda_name", "kebele_name",
-        "region_code", "zone_code", "woreda_code",
+        "region_code", "zone_code", "woreda_code", "kebele_code",
     )
 
     async def post_approve(self, change_request, session):
@@ -393,8 +412,45 @@ class G2PRegisterDomainServiceDA(G2PRegisterDomainService):
         the old place. Derive them again from the record once the change is in
         the register."""
         await super().post_approve(change_request, session)
-        await self._refresh_flattened_geo(change_request.internal_record_id, session)
+        # A change of position can leave the Work location hidden (emptied) or
+        # deeper than the new position's level (cut back): both before the names
+        # and codes next to the location are derived again.
         await self._clear_hidden_after_change(change_request.internal_record_id, session)
+        await self._fit_location_after_change(change_request.internal_record_id, session)
+        await self._refresh_flattened_geo(change_request.internal_record_id, session)
+
+    async def _fit_location_after_change(self, internal_record_id: str, session) -> None:
+        """A change request applies its payload as it is: a development agent
+        made a supervisor keeps the Kebele they had. Cut the location back to
+        the new position's level (see _fit_location). A location above the
+        position's level is left for the next edit to complete."""
+        rule = location_depth.find_rule(await load_sections(DA_REGISTER_ID))
+        if not rule:
+            return
+        row = (
+            await session.execute(
+                text(
+                    'SELECT "position", "geo_lowest_level_value_id", "geo_code_hierarchy_json" '
+                    'FROM "public"."g2p_register_das" WHERE "internal_record_id" = :id'
+                ),
+                {"id": internal_record_id},
+            )
+        ).mappings().first()
+        if not row or not row["geo_lowest_level_value_id"]:
+            return
+        record = dict(row)
+        before = record["geo_lowest_level_value_id"]
+        if location_depth.fit_record(record, rule) or record["geo_lowest_level_value_id"] == before:
+            return
+        chain = record["geo_code_hierarchy_json"]
+        await session.execute(
+            text(
+                'UPDATE "public"."g2p_register_das" SET "geo_lowest_level_value_id" = :lowest, '
+                '"geo_code_hierarchy_json" = CAST(:chain AS jsonb) WHERE "internal_record_id" = :id'
+            ),
+            {"lowest": record["geo_lowest_level_value_id"],
+             "chain": None if chain is None else json.dumps(chain), "id": internal_record_id},
+        )
 
     async def _clear_hidden_after_change(self, internal_record_id: str, session) -> None:
         """A change request applies its payload as it is, so a field the form
@@ -435,7 +491,21 @@ class G2PRegisterDomainServiceDA(G2PRegisterDomainService):
                 {"id": internal_record_id},
             )
         ).mappings().first()
-        if not row or not row["geo_lowest_level_value_id"]:
+        if not row:
+            return
+        if not row["geo_lowest_level_value_id"]:
+            # No Work location (emptied for a position that has none): no names
+            # or codes of a place either.
+            stale = [name for name in self.FLAT_GEO_COLUMNS if row[name] is not None]
+            if stale:
+                await session.execute(
+                    text(
+                        'UPDATE "public"."g2p_register_das" SET '
+                        + ", ".join(f'"{name}" = NULL' for name in stale)
+                        + ' WHERE "internal_record_id" = :id'
+                    ),
+                    {"id": internal_record_id},
+                )
             return
         record = {
             "geo_lowest_level_value_id": row["geo_lowest_level_value_id"],

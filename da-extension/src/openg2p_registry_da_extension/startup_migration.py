@@ -69,10 +69,11 @@ DA_COLUMNS = {
     "region_code": "VARCHAR",
     "zone_code": "VARCHAR",
     "woreda_code": "VARCHAR",
+    "kebele_code": "VARCHAR",
 }
 SOURCE_DEFAULT = "WEB_INTAKE"
 # Same names SQLAlchemy uses, so a fresh database gets no second index.
-INDEXED_COLUMNS = ("upstream_reference", "region_code", "zone_code", "woreda_code")
+INDEXED_COLUMNS = ("upstream_reference", "region_code", "zone_code", "woreda_code", "kebele_code")
 
 OUTGOING_TOPICS = "outgoing_topics"
 OUTGOING_TOPICS_COLUMNS = ("topic_type", "partner_id")
@@ -287,7 +288,7 @@ def geo_backfills() -> list[tuple[str, str, str]]:
     # at the record's own Kebele, so a chain that is itself out of date is left.
     same_place = f"({chain})->-1->>'level_value_id' = t.geo_lowest_level_value_id"
     for table in DA_TABLES:
-        for level in ("region", "zone", "woreda"):
+        for level in ("region", "zone", "woreda", "kebele"):
             code = (
                 "(SELECT substr(e->>'level_value_id', strpos(e->>'level_value_id', '-') + 1) "
                 f"FROM jsonb_array_elements({chain}) e "

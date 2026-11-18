@@ -27,10 +27,12 @@ from openg2p_registry_da_extension.register_domain.services.required_fields impo
     describe,
     has_requirements,
     list_requires_row,
+    load_sections,
     problems,
     row_problems,
     section_name_of,
 )
+from openg2p_registry_da_extension.register_domain.services import location_depth
 from openg2p_registry_da_extension.register_domain.services.validation_rules import is_interactive
 
 _logger = logging.getLogger("da-intake-guard")
@@ -94,10 +96,44 @@ class RequiredFieldsMixin:
                     _add(found, name, [EMPTY_LIST])
             if found:
                 validation_error(_sentence(found))
-        return await super().save_intake_form_submission_with_session(
+        result = await super().save_intake_form_submission_with_session(
             submission_id, section_id, section_payload, section_register_id, form_id, register_id,
             created_by, session, documents=documents,
         )
+        if section_register_id == DA_REGISTER_ID and any(
+            isinstance(r, dict) and "position" in r for r in self._records_for_validation(section_payload) or []
+        ):
+            await self._fit_stored_location(getattr(result, "submission_id", None) or submission_id, session)
+        return result
+
+    async def _fit_stored_location(self, submission_id, session) -> None:
+        """A change of position on the form reaches the Work location already
+        saved in the submission: emptied for a position that has none, cut back
+        to the Woreda for a supervisor (location_depth.py). The form then shows
+        it so, and the record that is approved, and that DA Services reads,
+        carries it so."""
+        if not submission_id:
+            return
+        rule = location_depth.find_rule(await load_sections(DA_REGISTER_ID))
+        if not rule:
+            return
+        try:
+            submission = await self._get_submission_or_error(submission_id, session)
+            intake_class = await self._resolve_intake_form_class(DA_REGISTER_ID, session)
+            rows = await self._get_intake_rows(intake_class, submission.submission_id, session)
+        except Exception as exc:  # noqa: BLE001 - nothing stored yet
+            _logger.warning("location fit: no DA record for submission %s (%s)", submission_id, exc)
+            return
+        changed = False
+        for row in rows.values() if isinstance(rows, dict) else rows:
+            stored = {key: getattr(row, key, None) for key in (
+                location_depth.position_field(rule), "geo_lowest_level_value_id", "geo_code_hierarchy_json")}
+            for key, value in location_depth.fitted_columns(stored, rule).items():
+                if hasattr(row, key):
+                    setattr(row, key, value)
+                    changed = True
+        if changed:
+            await session.flush()
 
     async def _parent_record(self, submission_id, session) -> dict:
         """The DA record the submission holds so far, for a list section whose

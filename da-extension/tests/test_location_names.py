@@ -54,7 +54,7 @@ class StatementTests(unittest.TestCase):
 
     def test_names_and_codes_are_repaired_on_every_da_table(self):
         self.assertEqual(len(self.steps("name")), 4 * len(sm.DA_TABLES))
-        self.assertEqual(len(self.steps("code")), 3 * len(sm.DA_TABLES))
+        self.assertEqual(len(self.steps("code")), 4 * len(sm.DA_TABLES))
 
     def test_a_differing_value_is_rewritten_only_when_the_chain_ends_at_the_records_kebele(self):
         for _what, needed, statement in self.steps("name") + self.steps("code"):
@@ -72,7 +72,7 @@ class RepairTests(unittest.IsolatedAsyncioTestCase):
     COLUMNS = (
         "internal_record_id varchar primary key, geo_lowest_level_value_id varchar, geo_code_hierarchy_json jsonb, "
         "region_name varchar, zone_name varchar, woreda_name varchar, kebele_name varchar, "
-        "region_code varchar, zone_code varchar, woreda_code varchar"
+        "region_code varchar, zone_code varchar, woreda_code varchar, kebele_code varchar"
     )
 
     async def asyncSetUp(self):
@@ -97,7 +97,9 @@ class RepairTests(unittest.IsolatedAsyncioTestCase):
         async with self.engine.begin() as conn:
             await conn.execute(
                 text(
-                    'INSERT INTO "public"."g2p_register_das" VALUES '
+                    'INSERT INTO "public"."g2p_register_das" (internal_record_id, geo_lowest_level_value_id, '
+                    "geo_code_hierarchy_json, region_name, zone_name, woreda_name, kebele_name, "
+                    "region_code, zone_code, woreda_code) VALUES "
                     "(:id, :kebele_id, CAST(:chain AS jsonb), :r, :z, :w, :k, :rc, :zc, :wc)"
                 ),
                 {"id": record_id, "kebele_id": kebele_id, "chain": hierarchy,

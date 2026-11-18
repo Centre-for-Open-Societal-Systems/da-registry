@@ -22,9 +22,11 @@ NEW_CHAIN = {"hierarchy": [entry("country", "country-ET", "Ethiopia"), entry("re
                            entry("kebele", "kebele-ET030403101001", "Kutaber")],
              "lowest_level_value_id": "kebele-ET030403101001"}
 OLD_FLAT = {"region_name": "Tigray", "zone_name": "North Western", "woreda_name": "Tahtay Adiyabo",
-            "kebele_name": "Adi Hageray", "region_code": "ET01", "zone_code": "ET0101", "woreda_code": "ET010101"}
+            "kebele_name": "Adi Hageray", "region_code": "ET01", "zone_code": "ET0101", "woreda_code": "ET010101",
+            "kebele_code": "ET010101101001"}
 NEW_FLAT = {"region_name": "Amhara", "zone_name": "South Wello", "woreda_name": "Kutaber",
-            "kebele_name": "Kutaber", "region_code": "ET03", "zone_code": "ET0304", "woreda_code": "ET030403"}
+            "kebele_name": "Kutaber", "region_code": "ET03", "zone_code": "ET0304", "woreda_code": "ET030403",
+            "kebele_code": "ET030403101001"}
 
 
 class Session:
@@ -44,7 +46,8 @@ def run(row, lookup):
     geo = SimpleNamespace(get_geo_hierarchy=mock.AsyncMock(**lookup))
     # The fields a position hides are another matter (test_position_and_reporting.py).
     with mock.patch("openg2p_registry_core.services.G2PGeoHierarchyService.get_component", return_value=geo), \
-            mock.patch.object(G2PRegisterDomainServiceDA, "_clear_hidden_after_change", mock.AsyncMock()):
+            mock.patch.object(G2PRegisterDomainServiceDA, "_clear_hidden_after_change", mock.AsyncMock()), \
+            mock.patch.object(G2PRegisterDomainServiceDA, "_fit_location_after_change", mock.AsyncMock()):
         asyncio.run(service.post_approve(SimpleNamespace(internal_record_id="rec-1"), session))
     return session.updates
 
@@ -71,6 +74,12 @@ def test_without_master_data_the_chain_the_record_carries_is_used():
         assert params == {**NEW_FLAT, "id": "rec-1"}
 
 
-def test_a_record_without_a_location_is_left_alone():
-    assert run(row(OLD_FLAT, chain=None, kebele=None), {"return_value": NEW_CHAIN}) == []
+def test_a_record_without_a_location_keeps_no_names_or_codes_of_a_place():
+    # Emptied for a position that has no Work location (location_depth.py).
+    (sql, params), = run(row(OLD_FLAT, chain=None, kebele=None), {"return_value": NEW_CHAIN})
+    assert sql.startswith('UPDATE "public"."g2p_register_das" SET "region_name" = NULL')
+    assert all(f'"{name}" = NULL' in sql for name in OLD_FLAT)
+    assert params == {"id": "rec-1"}
+    empty = {name: None for name in OLD_FLAT}
+    assert run(row(empty, chain=None, kebele=None), {"return_value": NEW_CHAIN}) == []
     assert run(None, {"return_value": NEW_CHAIN}) == []

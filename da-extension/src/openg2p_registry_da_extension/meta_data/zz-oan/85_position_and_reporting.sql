@@ -15,8 +15,9 @@
 --     to no one: the field is hidden for that position. It holds the DA-ID of
 --     a person in this register, chosen from a list (OAN widget
 --     "oan-reports-to", ui/staff-ui/overrides/src/oan/widgets/ReportsToWidget.tsx).
---     A file import or a DA Services push may leave it out
---     ("oan-optional-on-import"); someone filling in the form may not.
+--     A file import or a DA Services push without it, or with a DA-ID no one
+--     has, is refused and stays in the exceptions list; it does not go to
+--     approval (decision of 18 Nov 2026).
 -- The API reads the same conditions (required_fields.py) and empties a field
 -- the form hides (g2p_register_domain_service_da.py).
 --
@@ -85,7 +86,6 @@ WITH parts AS (
         jsonb_build_object(
           'widget', 'oan-reports-to', 'widget-id', 'reports_to', 'widget-type', 'input',
           'widget-label', 'Reports to (ID)', 'widget-readonly', false, 'widget-required', true,
-          'oan-optional-on-import', true,
           'widget-data-path', '6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3f90.reports_to',
           'widget-data-options', jsonb_build_object('actions', jsonb_build_array(jsonb_build_object(
             'action', 'hide', 'condition', jsonb_build_object(

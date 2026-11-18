@@ -67,7 +67,7 @@
       "region_code": {{ (da.get('region_code') or geo_code(da.get('geo_code_hierarchy_json'), 'region')) | tojson }},
       "zone_code": {{ (da.get('zone_code') or geo_code(da.get('geo_code_hierarchy_json'), 'zone')) | tojson }},
       "woreda_code": {{ (da.get('woreda_code') or geo_code(da.get('geo_code_hierarchy_json'), 'woreda')) | tojson }},
-      "kebele_code": {{ ((da.get('geo_lowest_level_value_id') or '') | string).split('-', 1) | last | tojson }},
+      "kebele_code": {{ (da.get('kebele_code') or (da.get('geo_lowest_level_value_id') or '') | string).split('-', 1) | last | tojson }},
       "geo_lowest_level_value_id": {{ (da.get('geo_lowest_level_value_id') or '') | tojson }}
     },
     "record_status": {{ (da.get('record_status') or '') | tojson }},
