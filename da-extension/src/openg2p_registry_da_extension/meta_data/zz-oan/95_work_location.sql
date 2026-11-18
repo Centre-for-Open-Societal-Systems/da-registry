@@ -34,7 +34,9 @@ SET "section_ui_schema" = jsonb_set(jsonb_set(jsonb_set(s."section_ui_schema"::j
       '{panels,0,panels,0,widgets,0,widget-data-options}', '{}'::jsonb),
       '{panels,0,panels,0,widgets,0,oan-location-depth}',
       jsonb_build_object(
-        'field', '6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3f90.position',
+        -- The widget names its field "<register id>.position": the DA register's id,
+        -- looked up by its mnemonic.
+        'field', (SELECT d."register_id" FROM "public"."g2p_register_definitions" d WHERE d."register_mnemonic" = 'DA') || '.position',
         'levels', jsonb_build_object(
           'DEVELOPMENT_AGENT', 'kebele', 'SENIOR_DA', 'kebele',
           'SUPERVISOR', 'woreda', 'EXECUTIVE_OFFICER', 'woreda',

@@ -7,12 +7,14 @@
 -- (geo_codes.py fills it on every save; the startup backfill fills older
 -- records).
 --
+-- The DA register is found by its mnemonic.
+--
 -- The entry is placed right after the Woreda code and the filters are
 -- numbered again in their order. Idempotent: nothing happens once it is there.
 WITH current AS (
   SELECT filter_schema::jsonb AS fs
   FROM "public"."g2p_register_schemas"
-  WHERE "register_id" = '6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3f90'
+  WHERE "register_id" = (SELECT d."register_id" FROM "public"."g2p_register_definitions" d WHERE d."register_mnemonic" = 'DA')
     AND NOT jsonb_path_exists(filter_schema::jsonb, '$[*] ? (@.field_name == "kebele_code")')
 ),
 entries AS (
@@ -33,5 +35,5 @@ numbered AS (
 )
 UPDATE "public"."g2p_register_schemas"
 SET "filter_schema" = (SELECT jsonb_agg(e ORDER BY n) FROM numbered)::json
-WHERE "register_id" = '6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3f90'
+WHERE "register_id" = (SELECT d."register_id" FROM "public"."g2p_register_definitions" d WHERE d."register_mnemonic" = 'DA')
   AND EXISTS (SELECT 1 FROM current);
