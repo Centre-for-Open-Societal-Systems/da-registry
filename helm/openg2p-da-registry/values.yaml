@@ -115,6 +115,11 @@ registry:
       COMMON_DB_HOSTNAME: commons-postgresql.commons.svc.cluster.local
       NOTIFICATION_ENABLED: 'false'
       NOTIFICATION_PROVIDER_URL: ''
+      # A Keycloak account for each person in the DA register, made by this
+      # worker (docs/keycloak-users.md). Off until the service account has the
+      # rights and the realm has the attribute; then set it to 'true' and add
+      # DA_KEYCLOAK_ROLES, and DA_KEYCLOAK_INITIAL_PASSWORD from a secret.
+      DA_KEYCLOAK_USERS_ENABLED: 'false'
     envVarsFrom:
       REGISTRY_CELERY_WORKERS_MASTER_DATA_DB_PASSWORD:
         secretKeyRef:

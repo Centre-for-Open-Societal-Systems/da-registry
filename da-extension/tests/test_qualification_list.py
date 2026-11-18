@@ -1,4 +1,4 @@
-"""Education & professional records and dependents: lists (child registers of DA).
+"""Education records and dependents: lists (child registers of DA).
 
 Covers what the registry adds around the platform's list sections: the
 required-field checks reading a list section's table and columns, the passout
@@ -58,15 +58,12 @@ class ListSectionRequirementTests(unittest.TestCase):
         self.assertEqual(rf.row_problems(EDUCATION, {"passout_year": ""}, absent_is_missing=False),
                          ["fill in Passout Year"])
 
-    def test_a_file_row_is_not_asked_for_the_columns_of_a_list(self):
-        one_value = {"panels": [{"widgets": [
-            {"widget": "select", "widget-label": "Education Level", "widget-data-path": "reg.education_level",
-             "widget-required": True}]}]}
-        sections = [("Education & Professional", one_value, False), ("Education & Professional", EDUCATION, True),
-                    ("Family members / dependents", DEPENDENTS, True)]
-        self.assertIsNone(rf.incomplete_reason({"education_level": "DEGREE"}, sections))
-        self.assertEqual(rf.incomplete_reason({}, sections),
-                         "Required: Education & Professional: fill in Education Level")
+    def test_a_file_row_is_asked_for_a_required_lists_columns_and_not_for_an_optional_lists(self):
+        # A file row or a push carries one education in the record's own fields.
+        sections = [("Education", EDUCATION, True), ("Family members / dependents", DEPENDENTS, True)]
+        self.assertIsNone(rf.incomplete_reason({"education_level": "DEGREE", "passout_year": 2010}, sections))
+        self.assertEqual(rf.incomplete_reason({"education_level": "DEGREE"}, sections),
+                         "Required: Education: fill in Passout Year")
 
 
 class RecordRuleTests(unittest.TestCase):
@@ -82,8 +79,12 @@ class RecordRuleTests(unittest.TestCase):
 
     def test_a_new_record_needs_every_required_field(self):
         with self.assertRaises(Exception) as raised:
-            q._check({"edit_action": "ADD", "education_level": "DEGREE", "specialisation": "AGRONOMY"})
-        self.assertIn("Position", str(getattr(raised.exception, "message", raised.exception)))
+            q._check({"edit_action": "ADD", "education_level": "DEGREE"})
+        self.assertIn("Passout year", str(getattr(raised.exception, "message", raised.exception)))
+
+    def test_position_specialisation_and_joining_date_are_not_part_of_a_record(self):
+        q._check({"edit_action": "ADD", "education_level": "DEGREE", "passout_year": 2010})
+        self.assertEqual([field for field, _label in q.REQUIRED], ["education_level", "passout_year"])
 
     def test_no_certificates_is_stored_as_nothing(self):
         for empty in ([], None, ""):
@@ -150,16 +151,26 @@ class ImportTemplateTests(unittest.TestCase):
         out = self.render({"first_name": "Selam", "education_level": "DEGREE", "specialisation": "AGRONOMY",
                            "position": "DEVELOPMENT_AGENT", "passout_year": 2010, "joined_date": "2015-01-10",
                            "upstream_reference": "REF-1", "source": "CSV_IMPORT"})
-        self.assertNotIn("da_service", out)
         (row,) = out["da_qualification"]
-        self.assertEqual((row["education_level"], row["passout_year"], row["joined_date"]),
-                         ("DEGREE", 2010, "2015-01-10"))
+        self.assertEqual((row["education_level"], row["passout_year"]), ("DEGREE", 2010))
+        self.assertEqual(sorted(row), ["education_level", "internal_record_id", "passout_year", "source"])
         self.assertRegex(row["internal_record_id"], r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-a[0-9a-f]{3}-[0-9a-f]{12}$")
         self.assertEqual(out["da_identity"][0]["upstream_reference"], "REF-1")
 
     def test_every_row_gets_its_own_record_id(self):
-        ids = {self.render({})["da_qualification"][0]["internal_record_id"] for _ in range(20)}
+        ids = {self.render({"education_level": "DEGREE"})["da_qualification"][0]["internal_record_id"]
+               for _ in range(20)}
         self.assertEqual(len(ids), 20)
+
+    def test_the_professional_details_go_to_the_record_itself(self):
+        out = self.render({"position": "SUPERVISOR", "joined_date": "2015-01-10", "reports_to": "DA-1000000001",
+                           "upstream_reference": "REF-1", "source": "WEB_INTAKE"})
+        self.assertEqual(out["da_service"], [{
+            "position": "SUPERVISOR", "specialisation": None, "joined_date": "2015-01-10",
+            "reports_to": "DA-1000000001", "upstream_reference": "REF-1", "source": "WEB_INTAKE"}])
+
+    def test_a_person_without_an_education_sends_no_education_record(self):
+        self.assertNotIn("da_qualification", self.render({"position": "ADMIN", "source": "CSV_IMPORT"}))
 
 
 class SyncStatementTests(unittest.TestCase):
@@ -172,7 +183,15 @@ class SyncStatementTests(unittest.TestCase):
     def test_the_main_row_is_the_latest_active_one(self):
         chooser = qualification_sync.FUNCTIONS[0]
         self.assertIn("record_status = 'ACTIVE'", chooser)
-        self.assertIn("passout_year DESC NULLS LAST, q.joined_date DESC NULLS LAST", chooser)
+        self.assertIn("passout_year DESC NULLS LAST, q.created_at DESC", chooser)
+
+    def test_only_the_education_fields_are_mirrored(self):
+        # Position, specialisation and joining date belong to the DA record alone.
+        self.assertEqual(qualification_sync.FIELDS, ("education_level", "passout_year"))
+        for statement in qualification_sync.FUNCTIONS:
+            for field in ("position", "specialisation", "joined_date"):
+                for column in (f".{field}", f"{field} ="):
+                    self.assertNotIn(column, statement)
 
     def test_every_mirrored_field_is_written_both_ways(self):
         to_da, _row_changed, to_row = qualification_sync.FUNCTIONS

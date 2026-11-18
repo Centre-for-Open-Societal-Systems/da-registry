@@ -590,6 +590,15 @@ services:
       REGISTRY_CELERY_WORKERS_MASTER_DATA_TOKEN_URL: http://keycloak:8080/realms/staff/protocol/openid-connect/token
       REGISTRY_CELERY_WORKERS_MASTER_DATA_CLIENT_ID: da-registry-backend
       REGISTRY_CELERY_WORKERS_MASTER_DATA_CLIENT_SECRET: ${KEYCLOAK_DA_BACKEND_CLIENT_SECRET:-dev-da-backend-secret}
+      # A Keycloak account for each person in the register, made by the worker
+      # with the client above (da-extension keycloak_users.py). For local
+      # testing every account gets the same first password and may keep it;
+      # never use these two values outside a test environment.
+      DA_KEYCLOAK_USERS_ENABLED: ${DA_KEYCLOAK_USERS_ENABLED:-true}
+      DA_KEYCLOAK_INITIAL_PASSWORD: ${DA_KEYCLOAK_INITIAL_PASSWORD:-password}
+      DA_KEYCLOAK_FORCE_PASSWORD_CHANGE: ${DA_KEYCLOAK_FORCE_PASSWORD_CHANGE:-false}
+      DA_KEYCLOAK_ROLES: ${DA_KEYCLOAK_ROLES:-}
+      DA_KEYCLOAK_RETRY_SECONDS: ${DA_KEYCLOAK_RETRY_SECONDS:-120}
       # Imports are approved through AWE (two-level) with the service token, so this
       # process needs the same AWE settings as the staff API.
       REGISTRY_CELERY_WORKERS_AWE_ENABLED: "true"

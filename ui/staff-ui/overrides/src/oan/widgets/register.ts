@@ -2,6 +2,8 @@ import { createElement } from 'react';
 import { HeaderSectionWidget, widgetRegistry } from '@openg2p/registry-widgets';
 import { FileListCellWidget } from './FileListCellWidget';
 import { RecordFilesTableWidget } from './RecordFilesTableWidget';
+import { ReportsToWidget } from './ReportsToWidget';
+import { SelectByRightWidget } from './SelectByRightWidget';
 import { PROFILE_PHOTO_VARIANT, ProfilePhotoWidget } from './ProfilePhotoWidget';
 
 // The widget package uploads a section's photo, and sets the field named by
@@ -29,6 +31,16 @@ widgetRegistry.register({ widget: 'oan-file-list-cell', component: FileListCellW
 // table, with the rows' files listed under it and a View button each; a table
 // without a file column is upstream's, unchanged. See RecordFilesTableWidget.
 widgetRegistry.register({ widget: 'dialog-table', component: RecordFilesTableWidget as never });
+
+// Position: the platform's select, without the positions the signed-in user
+// may not give (a supervisor registers development agents, an administrator
+// anyone). The API enforces the same rule. See SelectByRightWidget.
+widgetRegistry.register({ widget: 'oan-select-by-right', component: SelectByRightWidget as never });
+
+// "Reports to" in Position and reporting: the DA-ID of the person this one
+// reports to, chosen from a list of the people in the register, with their
+// name and position shown under it. See ReportsToWidget.
+widgetRegistry.register({ widget: 'oan-reports-to', component: ReportsToWidget as never });
 
 // A date picker opened inside an "Add record" dialog: the dialog's field grid
 // scrolls (overflow: auto), so the calendar, which drops below its box, was cut
