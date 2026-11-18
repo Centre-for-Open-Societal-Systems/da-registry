@@ -74,6 +74,7 @@ class G2PDA:
     region_code: Mapped[str] = mapped_column(String, nullable=True, index=True)
     zone_code: Mapped[str] = mapped_column(String, nullable=True, index=True)
     woreda_code: Mapped[str] = mapped_column(String, nullable=True, index=True)
+    kebele_code: Mapped[str] = mapped_column(String, nullable=True, index=True)
 
 
 # All Register classes should have the prefix G2PRegister

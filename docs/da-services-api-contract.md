@@ -108,7 +108,7 @@ what is seeded today, read them live from Master Data
 | `grandfather_name` | No | Grandfather's name. Same format |
 | `fayda_id` | **Yes** | Fayda FAN, 16 digits (spaces / dashes are removed). One DA per Fayda ID (also enforced by a unique index on active registered DAs) |
 | `gender` | Yes* | `GENDER` list: `MALE`, `FEMALE`, `OTHER`, `UNKNOWN` |
-| `marital_status` | Yes* | `MARITAL_STATUS` list: `SINGLE`, `MARRIED`, `WIDOWED`, `DIVORCED`, `SEPARATED`, `UNKNOWN` |
+| `marital_status` | No | `DA_MARITAL_STATUS` list: `SINGLE`, `MARRIED`, `WIDOWED`, `DIVORCED`, `SEPARATED`. There is no `UNKNOWN`: leave it out when not known. |
 | `birth_month_ec` | Yes* | 1–13 (Ethiopian calendar) |
 | `birth_year_ec` | Yes* | 4-digit EC year, not in the future |
 | `phone_number` | Yes* | Ethiopian number: `0911234567` or `+251911234567` (a 9-digit number gets its leading 0 back) |
@@ -118,11 +118,22 @@ what is seeded today, read them live from Master Data
 | `position` | Yes* | `DA_POSITION` list: `DEVELOPMENT_AGENT`, `SENIOR_DA`, `SUPERVISOR`, `COMMUNICATION_OFFICER`, `EXECUTIVE_OFFICER`, `ADMIN`. (A later release may refuse the positions above `SENIOR_DA` in a push.) |
 | `specialisation` | Yes* for `DEVELOPMENT_AGENT` and `SENIOR_DA` | `DA_SPECIALISATION` list: `CROP_PRODUCTION`, `LIVESTOCK`, `NATURAL_RESOURCES`, `AGRONOMY`, `HORTICULTURE`, `OTHER`. Not kept for other positions. |
 | `joining_date` | No | `YYYY-MM-DD` (or `DD/MM/YYYY`); not in the future |
-| `reports_to` | No | DA-ID of the person this one reports to, exactly as the register has it; must be an active record. Not kept for `ADMIN`. |
+| `reports_to` | Yes* except for `ADMIN` | DA-ID of the person this one reports to, exactly as the register has it; must be an active record already in the register. A push without it, or with a DA-ID no one has, is refused and goes to the exceptions list. Not kept for `ADMIN`. |
 | `education_level` | Yes* for `DEVELOPMENT_AGENT` and `SENIOR_DA` | `DA_EDUCATION_LEVEL` list: `CERTIFICATE`, `DIPLOMA`, `DEGREE`, `MASTERS` |
 | `passout_year` | Yes* for `DEVELOPMENT_AGENT` and `SENIOR_DA` | Ethiopian calendar year the education was completed, 1950 to this year. Required whenever `education_level` is sent. |
-| `kebele_id` | **Yes**, or the four names | Master Data kebele id, e.g. `kebele-ET010101101001` (preferred: names repeat across woredas) |
-| `region`, `zone`, `woreda`, `kebele` | Instead of `kebele_id` | Names as in Master Data; resolved region → kebele |
+| `kebele_id` | **Yes**, or the names (see *Work location by position*) | Master Data kebele id, e.g. `kebele-ET010101101001` (preferred: names repeat across woredas) |
+| `region`, `zone`, `woreda`, `kebele` | Instead of `kebele_id` | Names as in Master Data; resolved region → kebele, as far down as the position needs |
+
+**Work location by position.** How far down the location goes depends on `position`:
+
+| `position` | Location sent | Kept in the registry |
+|---|---|---|
+| `DEVELOPMENT_AGENT`, `SENIOR_DA` | `kebele_id`, or `region`, `zone`, `woreda`, `kebele` | down to the Kebele; required |
+| `SUPERVISOR`, `EXECUTIVE_OFFICER` | `kebele_id` (cut back to its Woreda), or `region`, `zone`, `woreda` | down to the Woreda; required. A `kebele` name is not read; `kebele_code` and `kebele_name` stay empty |
+| `ADMIN`, `COMMUNICATION_OFFICER` | nothing | no location. A location sent anyway is not kept, and the push is not refused for it |
+
+A push that stops above the position's level (a Supervisor with no `woreda`) is
+refused and goes to the exceptions list with the missing names.
 
 \* Required for every `source` (`WEB_INTAKE` and `CSV_IMPORT`): a push with
 one of them blank is refused with `Required: <section>: fill in <field>`.
@@ -227,7 +238,8 @@ duplicate.
 P-codes Master Data holds for those levels (`ET04` Oromia, `ET0403` Ilu Aba
 Bora, `ET040301` Darimu); each code starts with its parent's. Kebeles have no
 P-code in Master Data, so `kebele_code` is the Kebele's Master Data id without
-its `kebele-` prefix. Do not derive a Woreda from a Kebele code: Kebele ids do
+its `kebele-` prefix (the staff API's records carry the same `kebele_code`).
+Do not derive a Woreda from a Kebele code: Kebele ids do
 not always carry their parents' codes. Use codes, not names, for scoping:
 23 Woreda names and 790 Kebele names repeat across Ethiopia.
 

@@ -43,6 +43,7 @@ class G2PSchemaDA:
     region_code: Optional[str] = None
     zone_code: Optional[str] = None
     woreda_code: Optional[str] = None
+    kebele_code: Optional[str] = None
 
 
 class G2PRegisterSchemaDA(G2PRegisterBaseSchema, G2PPersonSchema, G2PGeoSchema, G2PSchemaDA):

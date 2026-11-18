@@ -1,4 +1,4 @@
-"""Region / Zone / Woreda codes of a DA, taken from its location chain.
+"""Region / Zone / Woreda / Kebele codes of a DA, taken from its location chain.
 
 DA Services scopes and filters DAs by code (names repeat: 23 Woreda names and
 790 Kebele names occur more than once), so the codes are kept in their own
@@ -10,7 +10,10 @@ in the chain, never from the Kebele id.
 
 import json
 
-CODE_LEVELS = ("region", "zone", "woreda")
+# The Kebele has no P-code in Master Data: its code is its Master Data id
+# without the "kebele-" prefix, the same value as geo_lowest_level_value_id.
+# It has a column of its own so the four levels read alike in the staff API.
+CODE_LEVELS = ("region", "zone", "woreda", "kebele")
 
 
 def code_of(level_value_id) -> str | None:
@@ -22,7 +25,7 @@ def code_of(level_value_id) -> str | None:
 
 
 def geo_codes(chain) -> dict:
-    """{"region_code", "zone_code", "woreda_code"} from a geo_code_hierarchy_json
+    """{"region_code", "zone_code", "woreda_code", "kebele_code"} from a geo_code_hierarchy_json
     value (a dict, or its JSON text). Missing levels are None."""
     if isinstance(chain, str):
         try:

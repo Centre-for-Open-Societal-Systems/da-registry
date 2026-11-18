@@ -22,6 +22,10 @@ Two keys of OAN's own:
 - A list section's table may carry "require" actions that name a field of the
   parent record, for example "a development agent needs an education record,
   an administrator does not" (see list_requires_row).
+- "oan-location-depth" on the Work location's geo widget: how far down the
+  location goes for each position, and which positions have none
+  (location_depth.py). It is read here as the widget's hide and require
+  actions.
 
 Limits: on a web save or finalize a condition is evaluated against the record
 of its own section, so a condition naming a field of another section sees no
@@ -176,6 +180,20 @@ def evaluate_condition(condition: Any, record: dict) -> bool | None:
     return None
 
 
+def widget_options(widget: dict) -> Any:
+    """A widget's widget-data-options, with the actions its
+    "oan-location-depth" stands for (location_depth.py)."""
+    from .location_depth import rule_of, synthesized_actions
+
+    options = widget.get("widget-data-options")
+    rule = rule_of(widget)
+    if not rule:
+        return options
+    base = dict(options) if isinstance(options, dict) else {}
+    base["actions"] = list(base.get("actions") or []) + synthesized_actions(rule)
+    return base
+
+
 def _actions(options: Any, name: str) -> list[dict]:
     actions = options.get("actions") if isinstance(options, dict) else None
     return [a for a in actions or [] if isinstance(a, dict) and a.get("action") == name]
@@ -227,7 +245,7 @@ def condition_fields(schema: Any) -> list[str]:
     that field from the rest of the record."""
     found: list[str] = []
     for widget in _walk(schema):
-        for field in _condition_fields(widget.get("widget-data-options")):
+        for field in _condition_fields(widget_options(widget)):
             if field not in found:
                 found.append(field)
     return found
@@ -276,7 +294,7 @@ def _widgets(schema: Any):
             _fields_of(widget.get("widget-data-path")),
             str(widget.get("widget-label") or "").strip(),
             widget.get("widget-required"),
-            widget.get("widget-data-options"),
+            widget_options(widget),
             columns,
             bool(widget.get("oan-optional-on-import")),
         )

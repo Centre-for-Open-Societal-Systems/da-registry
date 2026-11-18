@@ -35,7 +35,7 @@ PROFESSIONAL = {"panels": [{"widgets": [
      "widget-required": True, "widget-data-options": {"actions": [when("show", "SENIOR_DA")]}},
     {"widget": "date", "widget-label": "Joining date", "widget-data-path": "reg.joined_date"},
     {"widget": "oan-reports-to", "widget-label": "Reports to", "widget-data-path": "reg.reports_to",
-     "widget-required": True, "oan-optional-on-import": True,
+     "widget-required": True,
      "widget-data-options": {"actions": [when("hide", "ADMIN")]}},
 ]}]}
 EDUCATION = {"panels": [{"widgets": [{
@@ -95,11 +95,16 @@ class ReportsToRequirementTests(unittest.TestCase):
         DA._clear_hidden_fields(record, SECTIONS)
         self.assertIsNone(record["reports_to"])
 
-    def test_a_file_import_and_a_push_may_leave_it_out(self):
-        self.assertEqual(problems({"position": "SUPERVISOR", "source": "CSV_IMPORT"}), [])
+    def test_a_file_import_and_a_push_without_it_are_refused(self):
+        # Decision of 18 Nov 2026: such a row stays in the exceptions list, it does not go to approval.
+        self.assertEqual(problems({"position": "SUPERVISOR", "source": "CSV_IMPORT"}), ["fill in Reports to"])
         self.assertEqual(problems({"position": "SUPERVISOR", "source": "WEB_INTAKE", "upstream_reference": "FR-1"}),
-                         [])
-        self.assertIsNone(rf.incomplete_reason({"position": "SUPERVISOR", "source": "CSV_IMPORT"}, SECTIONS))
+                         ["fill in Reports to"])
+        self.assertEqual(rf.incomplete_reason({"position": "SUPERVISOR", "source": "CSV_IMPORT"}, SECTIONS),
+                         "Required: Position and reporting: fill in Reports to")
+
+    def test_an_administrator_needs_none_anywhere(self):
+        self.assertIsNone(rf.incomplete_reason({"position": "ADMIN", "source": "CSV_IMPORT"}, SECTIONS))
 
     def test_the_form_may_not(self):
         self.assertEqual(problems({"position": "SUPERVISOR", "source": "WEB_INTAKE"}), ["fill in Reports to"])
@@ -122,13 +127,14 @@ class EducationRequirementTests(unittest.TestCase):
         self.assertFalse(rf.list_requires_row(EDUCATION, {}))
 
     def test_a_file_row_of_a_development_agent_needs_its_education(self):
-        row = {"position": "DEVELOPMENT_AGENT", "specialisation": "AGRONOMY", "source": "CSV_IMPORT"}
+        row = {"position": "DEVELOPMENT_AGENT", "specialisation": "AGRONOMY", "source": "CSV_IMPORT", "reports_to": "DA-1"}
         self.assertEqual(rf.incomplete_reason(row, SECTIONS),
                          "Required: Education: fill in Education Level, Passout Year")
         self.assertIsNone(rf.incomplete_reason({**row, "education_level": "DEGREE", "passout_year": 2010}, SECTIONS))
 
     def test_a_file_row_of_a_supervisor_does_not(self):
-        self.assertIsNone(rf.incomplete_reason({"position": "SUPERVISOR", "source": "CSV_IMPORT"}, SECTIONS))
+        self.assertIsNone(rf.incomplete_reason({"position": "SUPERVISOR", "source": "CSV_IMPORT", "reports_to": "DA-1"},
+                                               SECTIONS))
 
 
 class _Connection:
@@ -211,10 +217,10 @@ class MetadataTests(unittest.TestCase):
                            r"'operator', 'equals', 'value', '(\w+)'", self.PROFESSIONAL)
         self.assertEqual(shown, ["DEVELOPMENT_AGENT", "SENIOR_DA"])
 
-    def test_reports_to_is_hidden_for_the_administrator_and_optional_on_import(self):
+    def test_reports_to_is_hidden_for_the_administrator_and_required_on_import(self):
         self.assertRegex(self.PROFESSIONAL, r"'action', 'hide', 'condition', jsonb_build_object\(\s*'field', "
                                             r"'[^']+\.position', 'operator', 'equals', 'value', 'ADMIN'")
-        self.assertIn("'oan-optional-on-import', true", self.PROFESSIONAL)
+        self.assertNotIn("'oan-optional-on-import', true", self.PROFESSIONAL)
 
     def test_the_education_table_is_required_for_the_two_da_positions_only(self):
         self.assertIn("'widget-label', 'Education', 'widget-readonly', false, 'widget-required', false", self.EDUCATION)

@@ -75,7 +75,8 @@ class TestEnricher(unittest.TestCase):
         self.assertEqual(out["geo_lowest_level_value_id"], "kebele-1")
         self.assertEqual((out["region_name"], out["kebele_name"]), ("Amhara", "Barie"))
         self.resolve.assert_called_once_with(
-            {"region": "amhara", "zone": "Awi", "woreda": "Banja", "kebele": "Barie"})
+            {"region": "amhara", "zone": "Awi", "woreda": "Banja", "kebele": "Barie"},
+            ("region", "zone", "woreda", "kebele"))
 
     def test_missing_identity_or_part_of_the_location_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "Missing: Fayda ID"):

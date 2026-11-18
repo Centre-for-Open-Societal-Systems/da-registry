@@ -34,6 +34,7 @@ from sqlalchemy.orm import Session
 from ...geo_codes import geo_codes
 from ...register_domain.services.required_fields import incomplete_reason, load_sections_sync
 from ...register_domain.services.position_rights import import_problem
+from ...register_domain.services import location_depth
 from . import code_lists, master_data_api
 
 _logger = logging.getLogger("g2p-payload-enricher-service")
@@ -75,9 +76,11 @@ _HEADER_TO_FIELD = {alias: field for field, aliases in COLUMN_ALIASES.items() fo
 IMPORT_REQUIRED = {
     "first_name": "Name", "middle_name": "Father Name", "foundational_id": "Fayda ID",
 }
-# The four location columns go together: all four, or none. None is accepted
-# only where the metadata says the Work location is not required (an
-# administrator); _require_complete refuses it for everyone else.
+# The location columns go together, down to the level the row's position
+# needs (location_depth.py): Region to Kebele for a development agent, Region
+# to Woreda for a supervisor or an executive officer. A column below that level
+# is left out, and so is the whole location of a position that has none (an
+# administrator, a communication officer): such a row is not refused for it.
 GEO_LABELS = {"region": "Region", "zone": "Zone", "woreda": "Woreda", "kebele": "Kebele"}
 
 GEO_LEVELS = ("region", "zone", "woreda", "kebele")
@@ -175,14 +178,14 @@ class _MasterDataGeo:
         return cls._name_index[1]
 
     @classmethod
-    def resolve(cls, names: Dict[str, str]) -> dict:
-        """names: {"region": .., "zone": .., "woreda": .., "kebele": ..}.
-        Walks the chain so a kebele name repeated in another woreda never
-        matches the wrong one."""
+    def resolve(cls, names: Dict[str, str], levels: tuple = GEO_LEVELS) -> dict:
+        """names: {"region": .., "zone": .., "woreda": .., "kebele": ..}, read
+        down to the last of `levels`. Walks the chain so a kebele name repeated
+        in another woreda never matches the wrong one."""
         index = master_data_api.geo_index()
         by_name = cls._by_name(index)
         hierarchy, parent_id, trail = [], None, []
-        for level in GEO_LEVELS:
+        for level in levels:
             name = str(names[level] or "").strip().lower()
             rows = [n for n in by_name.get((level, name), []) if parent_id is None or n["parent_level_value_id"] == parent_id]
             where = f" in {' / '.join(trail)}" if trail else ""
@@ -219,16 +222,57 @@ class _MasterDataGeo:
         return {"hierarchy": chain, "lowest_level_value_id": kebele_id}
 
 
-def _geo_from_names(row: Dict) -> dict | None:
-    """The location chain of a row's four names; None when it names none. Some
-    but not all of them is a mistake in the row."""
-    given = [level for level in GEO_LEVELS if row.get(level)]
+def _geo_from_names(row: Dict, levels: tuple = GEO_LEVELS) -> dict | None:
+    """The location chain of a row's names down to the last of `levels`; None
+    when it names none of them. Some but not all of them is a mistake in the
+    row. A name below the last level is not read."""
+    given = [level for level in levels if row.get(level)]
     if not given:
         return None
-    missing = [GEO_LABELS[level] for level in GEO_LEVELS if not row.get(level)]
+    missing = [GEO_LABELS[level] for level in levels if not row.get(level)]
     if missing:
         raise ValueError("Missing: " + ", ".join(missing))
-    return _MasterDataGeo.resolve({level: row[level] for level in GEO_LEVELS})
+    return _MasterDataGeo.resolve({level: row[level] for level in levels}, levels)
+
+
+def _location_depth(row: Dict, session: Session) -> str | None:
+    """The level the row's location ends at for its position ("none": no
+    Work location), from the register metadata (location_depth.py); None when
+    the metadata has no such rule (all four levels, required as the metadata
+    says)."""
+    rule = location_depth.find_rule(load_sections_sync(session))
+    if not rule:
+        return None
+    position = code_lists.resolve_code("position", row.get("position"), session)
+    return location_depth.depth_for(rule, {location_depth.position_field(rule): position})
+
+
+def _geo_for_position(row: Dict, session: Session, kebele_id: str = "") -> dict | None:
+    """The row's location as its position needs it: none for a position that
+    has no Work location (whatever the row fills in), the chain down to the
+    position's level otherwise. A Kebele id (DA Services) is resolved and cut
+    back to that level."""
+    depth = _location_depth(row, session)
+    if depth == location_depth.NONE:
+        return None
+    if kebele_id:
+        geo = _MasterDataGeo.resolve_by_id(kebele_id)
+        fitted = location_depth.cut(geo, depth) if depth else None
+        return fitted if fitted is not None else geo
+    return _geo_from_names(row, location_depth.levels_down_to(depth) if depth else GEO_LEVELS)
+
+
+def _missing_location(row: Dict, session: Session) -> list[str]:
+    """The location columns a row must fill in for its position, when it fills
+    in none of them; [] when it fills some (_geo_from_names names the rest) or
+    its position has no Work location."""
+    depth = _location_depth(row, session)
+    if depth is None or depth == location_depth.NONE:
+        return []
+    levels = location_depth.levels_down_to(depth)
+    if any(row.get(level) for level in levels):
+        return []
+    return [GEO_LABELS[level] for level in levels]
 
 
 def _build_da_record(row: Dict, source: str, geo: dict | None, session: Session) -> Dict:
@@ -305,7 +349,10 @@ class DAImportFileEnricherService(G2PPayloadEnricherInterface):
         if missing:
             raise ValueError("Missing: " + ", ".join(missing))
 
-        geo = _geo_from_names(row)
+        missing = _missing_location(row, session)
+        if missing:
+            raise ValueError("Missing: " + ", ".join(missing))
+        geo = _geo_for_position(row, session)
         out = _build_da_record(row, SOURCE_CSV_IMPORT, geo, session)
         _require_complete(out, session)
         _logger.info("DA import row enriched: Fayda ID %s, kebele %s", out["foundational_id"], out["kebele_name"])
@@ -352,17 +399,26 @@ class DAServicesEnricherService(G2PPayloadEnricherInterface):
         row = {DA_SERVICES_FIELDS[k]: _clean(v) for k, v in da.items() if k in DA_SERVICES_FIELDS}
         missing = [name for field, name in DA_SERVICES_REQUIRED.items() if not row.get(field)]
         kebele_id = _clean(da.get("kebele_id"))
-        if not kebele_id and any(row.get(level) for level in GEO_LEVELS) \
-                and not all(row.get(level) for level in GEO_LEVELS):
-            missing.append("kebele_id (or region, zone, woreda, kebele)")
+        depth = _location_depth(row, session)
+        if depth == location_depth.NONE:
+            kebele_id = ""
+        elif depth is None:
+            if not kebele_id and any(row.get(level) for level in GEO_LEVELS) \
+                    and not all(row.get(level) for level in GEO_LEVELS):
+                missing.append("kebele_id (or region, zone, woreda, kebele)")
+        else:
+            levels = location_depth.levels_down_to(depth)
+            if not kebele_id and not all(row.get(level) for level in levels):
+                names = ", ".join(level for level in levels)
+                missing.append(f"kebele_id (or {names})" if depth == "kebele" else names)
         if missing:
             raise ValueError("Missing: " + ", ".join(missing))
 
         row["upstream_reference"] = reference
         row["upstream_approved_by"] = _clean(message.get("approved_by"))
-        # No location at all is accepted only where the metadata does not
-        # require one (an administrator); _require_complete decides.
-        geo = _MasterDataGeo.resolve_by_id(kebele_id) if kebele_id else _geo_from_names(row)
+        # The location the position needs: none for an administrator or a
+        # communication officer, down to the Woreda for a supervisor.
+        geo = _geo_for_position(row, session, kebele_id)
         out = _build_da_record(row, source, geo, session)
         _require_complete(out, session)
         _logger.info("DA Services record %s enriched: Fayda ID %s, kebele %s",

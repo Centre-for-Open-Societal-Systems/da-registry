@@ -123,12 +123,12 @@ registry shows up without a Frappe change. Today the DA form has six sections, i
 
 | `section_id` | Fields (required in **bold**) |
 |---|---|
-| `da_identity_section_01` | `prefix`, **`first_name`** (Name), **`middle_name`** (Father's name), `last_name` (Grandfather's name), **`foundational_id`** (Fayda FAN, 16 digits), **`gender`**, **`marital_status`**, **`birth_month_ec`** (1–13), **`birth_year_ec`** (EC, not in the future) |
+| `da_identity_section_01` | `prefix`, **`first_name`** (Name), **`middle_name`** (Father's name), `last_name` (Grandfather's name), **`foundational_id`** (Fayda FAN, 16 digits), **`gender`**, `marital_status`, **`birth_month_ec`** (1–13), **`birth_year_ec`** (EC, not in the future) |
 | `da_contact_section_04` | **`mobile_number`**, `telegram_number`, `alternate_number`, **`email`**, `address_line_1` (home address, one line, up to 100 characters) |
 | `da_service_section_02` | Position and reporting: **`position`**, `specialisation`, `joined_date`, `reports_to` (§2.3c) |
 | `da_qualification_section_05` | Education: a **list**; at least one record for a development agent and a senior DA (§2.3b) |
 | `da_dependent_section_06` | Family members / dependents: a list, may be empty (§2.3b) |
-| `da_location_section_03` | **`da_geo_hierarchy`**: Region / Zone / Woreda / Kebele, saved as `geo_lowest_level_value_id` + `geo_code_hierarchy_json` |
+| `da_location_section_03` | **`da_geo_hierarchy`**: Region / Zone / Woreda / Kebele, saved as `geo_lowest_level_value_id` + `geo_code_hierarchy_json`. How far down depends on the position: to the Kebele for `DEVELOPMENT_AGENT` and `SENIOR_DA`, to the Woreda for `SUPERVISOR` and `EXECUTIVE_OFFICER` (`geo_lowest_level_value_id` is then the Woreda's id), none for `ADMIN` and `COMMUNICATION_OFFICER`. The rule is the widget's `oan-location-depth`. A deeper value is cut back to the position's level and a location for a position that has none is emptied; a location that stops above the level is refused ("Work location: choose the Kebele") |
 
 Drop-down codes (send the code, not the label):
 
@@ -140,7 +140,7 @@ As seeded today:
 |---|---|---|
 | `prefix` | `PREFIX` | `MR`, `MRS`, `MISS`, `MS`, `DR` |
 | `gender` | `GENDER` | `MALE`, `FEMALE`, `OTHER`, `UNKNOWN` |
-| `marital_status` | `MARITAL_STATUS` | `SINGLE`, `MARRIED`, `WIDOWED`, `DIVORCED`, `SEPARATED`, `UNKNOWN` |
+| `marital_status` | `DA_MARITAL_STATUS` | `SINGLE`, `MARRIED`, `WIDOWED`, `DIVORCED`, `SEPARATED` (optional; there is no `UNKNOWN`: leave it empty) |
 | `education_level` | `DA_EDUCATION_LEVEL` | `CERTIFICATE`, `DIPLOMA`, `DEGREE`, `MASTERS` |
 | `specialisation` | `DA_SPECIALISATION` | `CROP_PRODUCTION`, `LIVESTOCK`, `NATURAL_RESOURCES`, `AGRONOMY`, `HORTICULTURE`, `OTHER` |
 | `position` | `DA_POSITION` | `DEVELOPMENT_AGENT`, `SENIOR_DA`, `SUPERVISOR`, `COMMUNICATION_OFFICER`, `EXECUTIVE_OFFICER`, `ADMIN` |
@@ -195,7 +195,7 @@ pagination_request: {"current_page": 1, "page_size": 500, "search_text": "", "so
 |---|---|
 | `prefix` | `PREFIX` |
 | `gender` | `GENDER` |
-| `marital_status` | `MARITAL_STATUS` |
+| `marital_status` | `DA_MARITAL_STATUS` |
 | `education_level` (qualification) | `DA_EDUCATION_LEVEL` |
 | `specialisation` | `DA_SPECIALISATION` |
 | `position` | `DA_POSITION` |
@@ -357,7 +357,7 @@ own id as `section_register_id` (like the contact section):
 | **`position`** | A `DA_POSITION` code. Required. |
 | `specialisation` | A `DA_SPECIALISATION` code. **Required** when the position is `DEVELOPMENT_AGENT` or `SENIOR_DA`. For any other position the form hides it and the registry empties it. |
 | `joined_date` | `YYYY-MM-DD`, not in the future. Optional. |
-| `reports_to` | The DA-ID of the person this one reports to, for example `DA-4071727521`. **Required** for every position but `ADMIN` when the record is filled in on a form (a save without `upstream_reference`, source `WEB_INTAKE`); optional in a file import and in a push. For `ADMIN` the registry empties it. |
+| `reports_to` | The DA-ID of the person this one reports to, for example `DA-4071727521`. **Required** for every position but `ADMIN`, on a form, in a file import and in a push: a file row or a push without it, or with a DA-ID no one has, is refused and stays in the exceptions list (§4 of the push contract); it does not go to approval. For `ADMIN` the registry empties it. |
 
 **Who may give a position.** For now any position may be given and changed
 through the form, a file import or a push. Rules that keep the positions above
@@ -555,6 +555,7 @@ codes, not names: 23 Woreda names and 790 Kebele names repeat.
 ```
 "filter_by": "{\"woreda_code\": {\"eq\": \"ET010101\"}}"
 "filter_by": "{\"woreda_code\": {\"in\": [\"ET010101\", \"ET010102\"]}}"
+"filter_by": "{\"kebele_code\": {\"eq\": \"ET010101101001\"}}"
 "filter_by": "{\"geo_lowest_level_value_id\": {\"eq\": \"kebele-ET010101101001\"}}"
 "filter_by": "{\"last_approved_at\": {\"gte\": \"2026-10-27\"}}"
 "filter_by": "{\"woreda_code\": {\"eq\": \"ET010101\"}, \"last_approved_at\": {\"gte\": \"2026-10-27\"}}"
@@ -563,11 +564,17 @@ codes, not names: 23 Woreda names and 790 Kebele names repeat.
 | Field | Operators | Value |
 |---|---|---|
 | `region_code`, `zone_code`, `woreda_code` | `eq`, `in` | Master Data P-code (`ET01`, `ET0101`, `ET010101`) |
+| `kebele_code` | `eq`, `in` | Kebele code: its Master Data id without the `kebele-` prefix (`ET010101101001`); the same place as `geo_lowest_level_value_id` |
 | `geo_lowest_level_value_id` | `eq`, `in` | Kebele id from the Kebele picker (§2.2) |
 | `last_approved_at` | `gt`, `gte`, `lt`, `lte`, `between` | ISO date; **compared by day**, the time part is ignored |
 | `record_status` | `eq`, `in` | `ACTIVE` (default when absent), `INACTIVE`, `ARCHIVED` |
 | `first_name`, `foundational_id`, `mobile_number`, `region_name`, `woreda_name`, `kebele_name` | `eq`, `contains` | text |
 | `education_level`, `specialisation`, `position`, `source` | `eq`, `in` | the dropdown codes |
+
+Every record (`get_subject_record`, the list) carries the four codes
+`region_code`, `zone_code`, `woreda_code` and `kebele_code`. Kebeles have no
+P-code in Master Data, so `kebele_code` is the Kebele's id without its prefix.
+Do not derive a Woreda from a Kebele code.
 
 Two platform behaviours to code for:
 
