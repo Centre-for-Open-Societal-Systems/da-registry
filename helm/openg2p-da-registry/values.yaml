@@ -279,6 +279,36 @@ ecrPullSecret:
 #       namespace: commons
 commonsServiceAliases: []
 
+# Reporting layer: the da_rpt_* materialized views (docker/db-seed/reporting_views.sql), applied by a
+# post-install/upgrade hook (templates/reporting-views.yaml) and refreshed by a CronJob
+# (templates/reporting-views-refresh.yaml). Both run in the registry's db-seed image. The database
+# settings default to the registry subchart's naming: database and user from the release name, password
+# in the Secret named after the release.
+reporting:
+  db:
+    host: ''
+    port: 5432
+    name: '{{ .Release.Name | replace "-" "_" }}'
+    user: '{{ printf "%s_user" .Release.Name | replace "-" "_" }}'
+    secret: '{{ .Release.Name }}'
+    passwordKey: '{{ .Release.Name }}-db-user'
+  image:
+    repository: ''
+    tag: ''
+  views:
+    enabled: false
+    waitForSchemaSeconds: 600
+    refreshSchedule: '*/30 * * * *'
+    refreshLog:
+      enabled: true
+      retentionDays: 90
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+
 # Sample approvers sign in with registry.global.aweApproverUserPassword (the platform default, `pass`).
 # keycloak-init creates them with it as a temporary password and never updates an existing user; this
 # post-install/upgrade hook makes it the permanent password for the users listed here

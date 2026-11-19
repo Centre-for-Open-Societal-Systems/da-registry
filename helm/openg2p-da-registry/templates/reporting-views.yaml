@@ -1,0 +1,61 @@
+{{- if .Values.reporting.views.enabled }}
+{{/*
+Create (or re-create) the DA reporting layer: apply
+reporting_views.sql, which ships in the registry's db-seed image.
+
+A hook rather than a plain Job so it re-runs on every upgrade: a REFRESH does
+not pick up an edited view definition, the DDL has to be applied again.
+
+The register tables are created by the staff-api's migrations when it starts,
+which on a fresh install can be after this hook fires, so the script waits for
+them rather than failing the release.
+*/}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-da-reporting-views
+  labels:
+    app.kubernetes.io/name: da-reporting-views
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "45"
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: da-reporting-views
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: reporting-views
+          image: {{ include "da.reporting.image" . | quote }}
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              i=0
+              # Every register table the views read (staff-api creates them when it migrates), and the DA columns
+              # added latest (reports_to and the location codes), so a half-migrated schema waits rather than
+              # failing the release. List labels come from g2p_attribute_values only where an older platform left
+              # it; the views do not wait for it.
+              until [ "$(psql -qtAX -c "SELECT bool_and(to_regclass('public.' || t) IS NOT NULL) FROM unnest(ARRAY['g2p_register_das', 'g2p_register_qualifications']) AS t")" = "t" ]                 && [ "$(psql -qtAX -c "SELECT count(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'g2p_register_das' AND column_name IN ('reports_to', 'region_code', 'kebele_code')")" = "3" ]; do
+                i=$((i + 1))
+                if [ "$i" -gt {{ div .Values.reporting.views.waitForSchemaSeconds 10 }} ]; then
+                  echo "[reporting-views] DA register tables or columns still missing; is staff-api running its migrations?" >&2
+                  exit 1
+                fi
+                echo "[reporting-views] waiting for the register schema..."
+                sleep 10
+              done
+              psql -v ON_ERROR_STOP=1 -X -f /seed/reporting_views.sql
+              echo "[reporting-views] da_rpt_* views applied"
+          env:
+            {{- include "da.reporting.dbEnv" . | nindent 12 }}
+          resources: {{- toYaml .Values.reporting.resources | nindent 12 }}
+{{- end }}

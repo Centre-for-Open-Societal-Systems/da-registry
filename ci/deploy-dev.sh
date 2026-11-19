@@ -126,6 +126,9 @@ registry:
   sanity:
     enabled: true
     image: {repository: '${IMAGE_REPOSITORY}/sanity-tests', tag: '${TAG}'}
+reporting:
+  views:
+    enabled: true
 EOF2
 VALUES=(-f "$CENTRAL_VALUES" -f "$WORK/ci-values.yaml")
 
