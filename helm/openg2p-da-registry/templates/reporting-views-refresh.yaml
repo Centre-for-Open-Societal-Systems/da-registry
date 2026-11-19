@@ -1,0 +1,55 @@
+{{- if and .Values.reporting.views.enabled .Values.reporting.views.refreshSchedule }}
+{{/*
+Keep the da_rpt_* views current.
+
+They are MATERIALIZED: Postgres never updates them when the register changes,
+so without this the reports stay frozen at the last install or upgrade.
+
+Views are refreshed in dependency order, resolved from the catalog
+(da_rpt_da_qualification reads da_rpt_da). files/reporting-views-refresh.sh is
+the same script the other registries use: every outcome is a JSON line on stdout
+and a row in reporting_refresh_log.
+*/}}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ .Release.Name }}-da-reporting-views-refresh
+  labels:
+    app.kubernetes.io/name: da-reporting-views-refresh
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+spec:
+  schedule: {{ .Values.reporting.views.refreshSchedule | quote }}
+  # A refresh that overruns its slot must not have a second one started on top.
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  startingDeadlineSeconds: 600
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: da-reporting-views-refresh
+            app.kubernetes.io/instance: {{ .Release.Name }}
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: refresh
+              image: {{ include "da.reporting.image" . | quote }}
+              command:
+                - sh
+                - -c
+                - |
+{{ .Files.Get "files/reporting-views-refresh.sh" | indent 18 }}
+              env:
+                - name: MATCH_PREFIX
+                  value: da_rpt_
+                - name: REFRESH_LOG_ENABLED
+                  value: {{ .Values.reporting.views.refreshLog.enabled | toString | quote }}
+                - name: REFRESH_LOG_RETENTION_DAYS
+                  value: {{ .Values.reporting.views.refreshLog.retentionDays | toString | quote }}
+                {{- include "da.reporting.dbEnv" . | nindent 16 }}
+              resources: {{- toYaml .Values.reporting.resources | nindent 16 }}
+{{- end }}
