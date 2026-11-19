@@ -329,9 +329,9 @@ class PipelineWiringTests(unittest.TestCase):
 
     def test_publishing_is_the_last_stage_and_follows_the_deploy(self):
         order = [self.text.index("stage('%s')" % n) for n in
-                 ("Build & Push", "Package chart", "Deploy to Development", "Publish chart")]
+                 ("Build & Push", "Checks green", "Package chart", "Deploy to Development", "Publish chart")]
         self.assertEqual(order, sorted(order))
-        self.assertEqual(self.text.count("stage('"), 8)
+        self.assertEqual(self.text.count("stage('"), 9)
         self.assertLess(self.text.index("stage('Publish chart')"), self.text.index("\n        post {"))
 
     def test_the_deploy_installs_the_packaged_chart_and_still_fails_the_build(self):
