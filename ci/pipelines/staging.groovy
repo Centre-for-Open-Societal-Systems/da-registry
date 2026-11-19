@@ -15,6 +15,16 @@ def call() {
                 description: 'Load the sample records (db-seed hook) during this staging deploy. Leave off for a clean registry.')
         }
         stages {
+            stage('Checks green') {
+                // Nothing reaches staging unless every GitHub check of this commit passed (ci/deploy/require-green-checks.sh).
+                when { allOf { branch 'staging'; not { changeRequest() } } }
+                steps {
+                    checkout scm
+                    withCredentials([usernamePassword(credentialsId: 'oan-helm-fork-token', usernameVariable: 'GH_USER', passwordVariable: 'GH_TOKEN')]) {
+                        sh 'bash ci/deploy/require-green-checks.sh Centre-for-Open-Societal-Systems/da-registry "$(git rev-parse --verify HEAD)"'
+                    }
+                }
+            }
             stage('Promote and deploy') {
                 when { allOf { branch 'staging'; not { changeRequest() } } }
                 steps {

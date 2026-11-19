@@ -123,6 +123,16 @@ def call() {
                 }
             }
 
+            stage('Checks green') {
+                // Nothing reaches New Dev unless every GitHub check of this commit passed (ci/deploy/require-green-checks.sh).
+                // The images were built meanwhile; a red or still-pending commit stops here.
+                when { allOf { branch 'develop'; not { changeRequest() } } }
+                steps {
+                    withCredentials([usernamePassword(credentialsId: "${OAN_HELM_FORK_CRED_ID}", usernameVariable: 'GH_USER', passwordVariable: 'GH_TOKEN')]) {
+                        sh 'bash ci/deploy/require-green-checks.sh Centre-for-Open-Societal-Systems/da-registry "$(git rev-parse --verify HEAD)"'
+                    }
+                }
+            }
             stage('Package chart') {
                 // helm/openg2p-da-registry with this build's images. The deploy installs this archive and
                 // 'Publish chart' publishes the same one, so what runs on New Dev is what oan-helm lists.
