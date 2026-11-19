@@ -123,6 +123,9 @@ registry:
   dbSeed:
     enabled: true
     image: {repository: '${IMAGE_REPOSITORY}/db-seed', tag: '${TAG}'}
+  sanity:
+    enabled: true
+    image: {repository: '${IMAGE_REPOSITORY}/sanity-tests', tag: '${TAG}'}
 EOF2
 VALUES=(-f "$CENTRAL_VALUES" -f "$WORK/ci-values.yaml")
 

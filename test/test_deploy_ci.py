@@ -365,7 +365,7 @@ class PipelineWiringTests(unittest.TestCase):
         self.assertIn('ECR_BASE       = "openg2p/da-registry"', self.text)
         package = (ROOT / "ci/deploy/package-chart.sh").read_text()
         deploy = (ROOT / "ci/deploy-dev.sh").read_text()
-        for component in ("staff-api", "staff-ui", "partner-api", "celery", "db-seed"):
+        for component in ("staff-api", "staff-ui", "partner-api", "celery", "db-seed", "sanity-tests"):
             self.assertIn("name: '%s'," % component, self.text)
             self.assertIn("    %s) paths=" % component, package)
             self.assertIn("{repository: '${IMAGE_REPOSITORY}/%s', tag: '${TAG}'}" % component, deploy)

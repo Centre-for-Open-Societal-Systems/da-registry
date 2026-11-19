@@ -46,8 +46,8 @@ While the commit and the two SHA-256 values are all zeros, every chart operation
 `ci/deploy-dev.sh <12-char-commit>` (run by the Jenkinsfile's "Deploy to Development" stage on
 every `develop` build) downloads and verifies the archive and values, requires the
 release to exist, renders the manifests, and runs `helm upgrade --reset-values` with the pinned
-values and this build's six images (`staff-api`, `partner-api`, `celery` for worker and beat,
-`staff-ui`, `db-seed`, each with `enabled: true`) on top. It never installs, never uninstalls and
+values and this build's seven images (`staff-api`, `partner-api`, `celery` for worker and beat,
+`staff-ui`, `db-seed`, `sanity-tests`, each with `enabled: true`) on top. It never installs, never uninstalls and
 never touches a database.
 
 Read-only verification: `python3 ci/deploy/oan_chart.py fetch registry <directory>` and

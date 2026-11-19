@@ -168,8 +168,25 @@ registry:
     postgres-init:
       postgresql:
         host: commons-postgresql.commons.svc.cluster.local
+  # The platform's sanity hooks with the DA overlay (docker/sanity-tests): a data-seed Job
+  # injects SANITY-DA-0001, then the test Job runs the smoke tests (and, with runE2e, the
+  # signed DCI search and a change request on it). The build switches it on with its image.
   sanity:
     enabled: false
+    image:
+      repository: ''
+      tag: ''
+    regType: DA
+    regRecordType: DA
+    searchText: SANITY-DA-0001
+    # openg2p_da_to_dci puts the whole record under one scope, da_details; nothing else may
+    # come back. qualifications names a scope a partner could ask for and must not get.
+    dataScopes: da_details
+    deniedScopes: qualifications
+    # The platform's names for the register's subject record: the DA register here.
+    farmerRegisterId: 6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3f90
+    crTabId: da_details_tab
+    crSectionId: da_identity_section_01
   staffUi:
     image:
       repository: ''
