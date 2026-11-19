@@ -17,6 +17,7 @@ while IFS=$'\t' read -r component digest; do
     partner-api) paths=registry.partnerApi.image ;;
     celery) paths='registry.celeryWorker.image registry.celeryBeat.image' ;;
     db-seed) paths=registry.dbSeed.image ;;
+    sanity-tests) paths=registry.sanity.image ;;
     *) echo "No chart image for $component" >&2; exit 1 ;;
   esac
   for path in $paths; do

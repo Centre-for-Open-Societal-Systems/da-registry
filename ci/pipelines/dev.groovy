@@ -93,6 +93,7 @@ def call() {
                             [name: 'partner-api', dockerfile: 'docker/partner-api/Dockerfile', args: "--build-arg RP_VERSION=${RP_VERSION}"],
                             [name: 'celery',      dockerfile: 'docker/celery/Dockerfile',      args: "--build-arg RP_VERSION=${RP_VERSION}"],
                             [name: 'db-seed',     dockerfile: 'docker/db-seed/Dockerfile',     args: "--build-arg RP_VERSION=${RP_VERSION}"],
+                            [name: 'sanity-tests', dockerfile: 'docker/sanity-tests/Dockerfile', args: "--build-arg RP_VERSION=${RP_VERSION}"],
                         ]
 
                         // The ECR digest of each image, for the stage 'Package chart': read from the
