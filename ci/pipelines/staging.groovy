@@ -38,6 +38,27 @@ def call() {
                 }
             }
         }
+        post {
+            failure {
+                script {
+                    // Mail the DevOps list and the commit author, as Farmer's pipelines do; a controller without SMTP
+                    // must not hide the failure.
+                    try {
+                        def author = ''
+                        try { author = sh(script: "git log -1 --pretty=format:'%ae'", returnStdout: true).trim() } catch (ignored) { author = '' }
+                        def recipients = ['simretyibeltal@gmail.com', 'pavanns.ns@gmail.com']
+                        if (author && !author.contains('noreply')) { recipients = [author] + recipients }
+                        mail(
+                            to: recipients.unique().join(', '),
+                            subject: "Build FAILED: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+                            body: "DA Registry staging promotion or deploy failed.\n\nJob:     ${env.JOB_NAME}\nBranch:  ${env.BRANCH_NAME}\nBuild:   #${env.BUILD_NUMBER}\nURL:     ${env.BUILD_URL}\nConsole: ${env.BUILD_URL}console\n\nJenkins"
+                        )
+                    } catch (err) {
+                        echo "notification not sent: ${err.message}"
+                    }
+                }
+            }
+        }
     }
 }
 return this
