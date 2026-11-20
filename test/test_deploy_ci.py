@@ -66,6 +66,11 @@ class DeployRollbackTests(unittest.TestCase):
         self.repo = base / "repo"
         (self.repo / "ci/deploy").mkdir(parents=True)
         shutil.copy(ROOT / "ci/deploy-dev.sh", self.repo / "ci/deploy-dev.sh")
+        # deploy-dev.sh names the images with ci/image_names.py, which reads init.yaml and the chart's Chart.yaml.
+        shutil.copy(ROOT / "ci/image_names.py", self.repo / "ci/image_names.py")
+        shutil.copy(ROOT / "init.yaml", self.repo / "init.yaml")
+        (self.repo / "helm/openg2p-da-registry").mkdir(parents=True, exist_ok=True)
+        shutil.copy(ROOT / "helm/openg2p-da-registry/Chart.yaml", self.repo / "helm/openg2p-da-registry/Chart.yaml")
         (self.repo / "ci/deploy/oan_chart.py").write_text(CHART_STUB)
         self.bin = base / "bin"
         self.bin.mkdir()
@@ -362,13 +367,28 @@ class PipelineWiringTests(unittest.TestCase):
         self.assertNotIn("Propose chart pin update", self.text)
 
     def test_every_component_the_pipeline_builds_has_a_chart_image(self):
-        self.assertIn('ECR_BASE       = "openg2p/da-registry"', self.text)
+        self.assertNotIn("ECR_BASE", self.text)                   # names come from ci/image_names.py
         package = (ROOT / "ci/deploy/package-chart.sh").read_text()
         deploy = (ROOT / "ci/deploy-dev.sh").read_text()
+        self.assertIn('"$ECR_REGISTRY/$repository"', package)
         for component in ("staff-api", "staff-ui", "partner-api", "celery", "db-seed", "sanity-tests"):
             self.assertIn("name: '%s'," % component, self.text)
             self.assertIn("    %s) paths=" % component, package)
-            self.assertIn("{repository: '${IMAGE_REPOSITORY}/%s', tag: '${TAG}'}" % component, deploy)
+            self.assertIn("{repository: '${IMAGE[%s]}', tag: '${TAG}'}" % component, deploy)
+
+    def test_images_are_named_and_tagged_by_ci_image_names(self):
+        self.assertIn('python3 ci/image_names.py tag "$BRANCH_NAME" "$BUILD_NUMBER"', self.text)
+        self.assertIn('python3 ci/image_names.py repository ${c.name}', self.text)
+        self.assertNotIn("take(12)", self.text)
+
+    def test_every_pushed_repository_gets_the_standard_ecr_settings_first(self):
+        self.assertIn('sh "python3 ci/ecr_repository.py ensure ${repository} ${legacy}"', self.text)
+        self.assertNotIn("create-repository", self.text)
+        self.assertLess(self.text.index("ci/ecr_repository.py ensure"), self.text.index("docker push ${image}"))
+
+    def test_tags_are_immutable_so_nothing_pushes_a_moving_tag(self):
+        for gone in ("movingTag", "--cache-from", "docker push ${latest}"):
+            self.assertNotIn(gone, self.text)
 
     def test_the_chart_has_no_fixed_version(self):
         chart = (ROOT / "helm/openg2p-da-registry/Chart.yaml").read_text(encoding="utf-8")
