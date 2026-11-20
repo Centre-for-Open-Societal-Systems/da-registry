@@ -9,6 +9,7 @@ service and the enrichers need the platform, so they run in the container.
 import importlib
 import sys
 import unittest
+from types import SimpleNamespace
 from unittest import mock
 
 from openg2p_registry_da_extension.register_domain.services import required_fields as rf
@@ -36,6 +37,16 @@ CONDITIONAL = schema(
     widget("mobile_number", "Mobile Number", True, HIDE_WHEN_NO_PHONE),
     widget("reason", "Reason", False, {"actions": [
         {"action": "require", "condition": {"field": f"{REG}.has_phone", "operator": "equals", "value": False}}]}),
+)
+SHOW_FOR = lambda position: {"actions": [{"action": "show", "condition": {"field": f"{REG}.position", "operator": "equals", "value": position}}]}
+# The live "Position and reporting" section (85_position_and_reporting.sql).
+POSITION = schema(
+    widget("position", "Position"),
+    widget("specialisation", "Specialisation", True, SHOW_FOR("DEVELOPMENT_AGENT")),
+    widget("specialisation", "Specialisation", True, SHOW_FOR("SENIOR_DA")),
+    widget("joined_date", "Joining date", False),
+    widget("reports_to", "Reports to (ID)", True, {"actions": [
+        {"action": "hide", "condition": {"field": f"{REG}.position", "operator": "equals", "value": "ADMIN"}}]}),
 )
 TABLE = schema({
     "widget": "dialog-table", "widget-label": "Training Courses", "widget-required": True,
@@ -124,6 +135,12 @@ class TestIntakeService(unittest.IsolatedAsyncioTestCase):
         return svc
 
     @staticmethod
+    def no_location_rule():
+        """A position save also fits the stored Work location; these tests have none."""
+        mixin = importlib.import_module("openg2p_registry_da_extension.register_domain.services.required_fields_mixin")
+        return mock.patch.object(mixin, "load_sections", mock.AsyncMock(return_value=[]))
+
+    @staticmethod
     def section(section_id, ui, name, is_list=False):
         return mock.Mock(section_id=section_id, section_ui_schema=ui, section_description=name, is_list=is_list)
 
@@ -151,6 +168,39 @@ class TestIntakeService(unittest.IsolatedAsyncioTestCase):
         with mock.patch.object(parent, "save_intake_form_submission_with_session", new=mock.AsyncMock(return_value="saved")):
             record = {"edit_action": "ADD", "has_phone": False, "reason": "No phone"}
             self.assertEqual(await svc.save_intake_form_submission_with_session(None, "c", [record], REG, "f1", REG, "u", None), "saved")
+
+    async def test_update_leaving_out_a_required_field_the_record_lacks_is_refused(self):
+        # Personal details created the record; "Position and reporting" is then
+        # saved as an UPDATE that leaves out the specialisation it never had.
+        stored = {"rec-1": SimpleNamespace(internal_record_id="rec-1", first_name="Abebe", position=None,
+                                           specialisation=None, reports_to=None)}
+        svc = self.service([self.section("p", POSITION, "Position and reporting")], stored=stored)
+        parent = self.guard.G2PIntakeFormDataService
+        update = {"edit_action": "UPDATE", "internal_record_id": "rec-1", "source": "WEB_INTAKE",
+                  "position": "DEVELOPMENT_AGENT", "reports_to": "DA-5167618350"}
+        with mock.patch.object(parent, "save_intake_form_submission_with_session", new=mock.AsyncMock(return_value="saved")) as sup,                 self.no_location_rule():
+            with self.assertRaises(self.errors.G2PRegistryException) as ctx:
+                await svc.save_intake_form_submission_with_session("sub", "p", [update], REG, "f1", REG, "u", None)
+            self.assertIn("Required: Position and reporting: fill in Specialisation", str(ctx.exception))
+            sup.assert_not_called()
+            senior = {**update, "position": "SENIOR_DA"}
+            with self.assertRaises(self.errors.G2PRegistryException):
+                await svc.save_intake_form_submission_with_session("sub", "p", [senior], REG, "f1", REG, "u", None)
+            for ok in ({**update, "specialisation": "CROP_PRODUCTION"},
+                       {**update, "position": "SUPERVISOR"}):
+                self.assertEqual(await svc.save_intake_form_submission_with_session(
+                    "sub", "p", [ok], REG, "f1", REG, "u", None), "saved")
+
+    async def test_update_leaving_out_a_field_the_record_already_holds_passes(self):
+        stored = {"rec-1": SimpleNamespace(internal_record_id="rec-1", position="DEVELOPMENT_AGENT",
+                                           specialisation="LIVESTOCK", reports_to="DA-5167618350")}
+        svc = self.service([self.section("p", POSITION, "Position and reporting")], stored=stored)
+        parent = self.guard.G2PIntakeFormDataService
+        update = {"edit_action": "UPDATE", "internal_record_id": "rec-1", "source": "WEB_INTAKE",
+                  "position": "DEVELOPMENT_AGENT", "joined_date": "2026-01-01"}
+        with mock.patch.object(parent, "save_intake_form_submission_with_session", new=mock.AsyncMock(return_value="saved")),                 self.no_location_rule():
+            self.assertEqual(await svc.save_intake_form_submission_with_session(
+                "sub", "p", [update], REG, "f1", REG, "u", None), "saved")
 
     async def test_save_list_section_with_no_rows_is_refused(self):
         svc = self.service([self.section("t", TABLE, "Training", is_list=True)])
