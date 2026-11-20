@@ -4,8 +4,10 @@ widget-required (with the show / hide / require conditions of
 widget-data-options, see required_fields.py) is the single source of truth.
 
 - save ("Next"): a new record of a web-intake section must carry every
-  required, visible field of that section. A partial update only has its blank
-  fields refused. A list section whose table is marked required (education &
+  required, visible field of that section. An update is checked with what the
+  submission already stores for the section's fields: the staff form leaves out
+  a field it never had a value for (the specialisation that appears once a
+  position is chosen), so a required field empty in both is refused too. A list section whose table is marked required (education &
   professional records) is refused with no rows; one that is not (dependents)
   may stay empty.
 - submit (finalize): every section of the submission is checked on the server
@@ -25,6 +27,7 @@ from openg2p_registry_da_extension.register_domain.services.required_fields impo
     DA_REGISTER_ID,
     condition_fields,
     describe,
+    fields_in_schema,
     has_requirements,
     list_requires_row,
     load_sections,
@@ -47,6 +50,15 @@ def _add(found: dict[str, list[str]], name: str, phrases: list[str]) -> None:
             bucket.append(phrase)
     if not bucket:
         del found[name]
+
+
+def _values(row) -> dict:
+    """A stored intake row as {column: value}."""
+    if hasattr(row, "to_dict"):
+        values = row.to_dict()
+        if isinstance(values, dict):
+            return dict(values)
+    return {key: value for key, value in vars(row).items() if not key.startswith("_")}
 
 
 def _sentence(found: dict[str, list[str]]) -> str:
@@ -85,6 +97,10 @@ class RequiredFieldsMixin:
                         _add(found, name, row_problems(schema, record, absent_is_missing=new))
                 else:
                     seen = {**{k: v for k, v in context.items() if k not in record}, **record}
+                    if not new:
+                        stored = await self._stored_record(
+                            submission_id, section_register_id, record.get("internal_record_id"), session)
+                        seen = {**{f: stored[f] for f in fields_in_schema(schema) if f in stored}, **seen}
                     _add(found, name, problems(schema, seen, absent_is_missing=new))
             if is_list and list_requires_row(schema, await self._parent_record(submission_id, session)):
                 kept = {str(r.get("internal_record_id")) for r in records if r.get("internal_record_id")} | existing
@@ -150,10 +166,26 @@ class RequiredFieldsMixin:
             _logger.warning("intake guard: no DA record for submission %s (%s)", submission_id, exc)
             return {}
         for row in rows.values() if isinstance(rows, dict) else rows:
-            if hasattr(row, "to_dict"):
-                return dict(row.to_dict())
-            return {key: value for key, value in vars(row).items() if not key.startswith("_")}
+            return _values(row)
         return {}
+
+    async def _stored_record(self, submission_id, section_register_id, internal_record_id, session) -> dict:
+        """The values the submission stores for one record of the register, by
+        column; empty when it stores none."""
+        if not submission_id or not internal_record_id:
+            return {}
+        try:
+            submission = await self._get_submission_or_error(submission_id, session)
+            intake_class = await self._resolve_intake_form_class(section_register_id, session)
+            rows = await self._get_intake_rows(intake_class, submission.submission_id, session)
+        except Exception as exc:  # noqa: BLE001 - nothing stored: the record is checked as sent
+            _logger.warning("intake guard: no stored record for submission %s (%s)", submission_id, exc)
+            return {}
+        if isinstance(rows, dict):
+            row = rows.get(str(internal_record_id), rows.get(internal_record_id))
+        else:
+            row = next((r for r in rows if str(getattr(r, "internal_record_id", "")) == str(internal_record_id)), None)
+        return _values(row) if row is not None else {}
 
     async def _existing_record_ids(self, submission_id, section_register_id, session) -> set[str]:
         """internal_record_ids the submission already stores for this register."""
