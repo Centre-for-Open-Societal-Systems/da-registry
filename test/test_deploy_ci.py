@@ -257,6 +257,11 @@ class ProposePinTests(unittest.TestCase):
     def propose(self):
         return self.bump.proposal(self.old, fetch=self.fetch, head=lambda: self.HEAD)
 
+    def newer(self):
+        """The chart version after the committed pin's, so these tests hold whenever the pin moves."""
+        base, build = self.pinned["version"].rsplit(".", 1)
+        return "%s.%d" % (base, int(build) + 1)
+
     def test_version_order(self):
         key = self.bump.version_key
         self.assertLess(key("1.0.0-dev.9"), key("1.0.0-dev.10"))     # numeric, not text order
@@ -266,10 +271,10 @@ class ProposePinTests(unittest.TestCase):
             key("latest")
 
     def test_newer_chart_is_proposed(self):
-        self.publish("1.0.0-dev.21", "1.2.2-rc.700")
+        self.publish(self.newer(), "1.2.2-rc.700")
         new, why = self.propose()
         self.assertIsNotNone(new)
-        self.assertIn("newer chart 1.0.0-dev.21", why)
+        self.assertIn("newer chart " + self.newer(), why)
         self.assertTrue(new["registry"]["repository"].endswith("/oan-helm/" + self.HEAD + "/repository/"))
 
     def test_same_chart_and_values_is_up_to_date(self):
@@ -305,12 +310,12 @@ class ProposePinTests(unittest.TestCase):
             self.bump.head_commit(run=lambda cmd: "")
 
     def test_files_that_must_agree_are_updated_with_the_pin(self):
-        self.publish("1.0.0-dev.21", "1.2.2-rc.700")
+        self.publish(self.newer(), "1.2.2-rc.700")
         new, _ = self.propose()
         changed = self.bump.update_companions(self.pinned, new["registry"], root=self.root)
         text = lambda rel: (self.root / rel).read_text(encoding="utf-8")
         self.assertIn('RP_VERSION     = "1.2.2-rc.700"', text("ci/pipelines/dev.groovy"))
-        self.assertIn('self.assertEqual(pin["version"], "1.0.0-dev.21")', text("test/test_oan_chart.py"))
+        self.assertIn('self.assertEqual(pin["version"], "%s")' % self.newer(), text("test/test_oan_chart.py"))
         self.assertIn("ARG RP_VERSION=1.2.2-rc.700", text("docker/staff-api/Dockerfile"))
         self.assertIn("ARG RP_VERSION=1.2.2-rc.700", text("docker/local-dev/data-loaders/Dockerfile"))
         self.assertEqual(sorted(changed), sorted(["ci/pipelines/dev.groovy", "test/test_oan_chart.py", "docker/staff-api/Dockerfile",

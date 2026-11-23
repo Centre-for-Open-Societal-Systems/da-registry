@@ -20,7 +20,10 @@ global:
   keycloakInternalUrl: http://commons-keycloak.commons.svc.cluster.local:80
   keycloakExternalIssuerUrl: https://keycloak.development.oanstaging.com/realms/staff
   masterDataTokenUrl: https://keycloak.development.oanstaging.com/realms/staff/protocol/openid-connect/token
-  minioHost: minio-farmer.development.oanstaging.com
+  # Public host of the Commons object store (Garage, commons-base 2.3.4). Each
+  # environment's public values in oan-helm set it, together with the staff UI's
+  # CSP_SRC_IMG, which must list it (ci/deploy/oan_chart.py require_image_csp).
+  minioHost: garage.development.oanstaging.com
   minioSecure: true
   iamServiceUrl: http://commons-services-iam-staff-portal-api.commons.svc.cluster.local
   masterDataApiUrl: http://commons-services-master-data-api.commons.svc.cluster.local
