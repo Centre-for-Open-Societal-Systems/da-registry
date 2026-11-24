@@ -122,6 +122,29 @@ def require_deployable(pin, environment):
         raise ValueError("Deployment blocked: refactor acceptance and environment preservation evidence are required; existing environments are unchanged")
 
 
+def require_image_csp(document):
+    """The staff UI's image CSP must name the object store's public host.
+
+    The staff UI shows photos and documents through links signed for
+    global.minioHost. Left unset, CSP_SRC_IMG falls back to the platform's
+    default of that one host, so a change of host silently drops the links
+    signed for the other one and nothing else (a second object-store host, map
+    tiles) can be allowed. The values therefore set it themselves, with
+    https://<minioHost> in it; values that name no object store are not checked.
+    """
+    host = str((document.get('global') or {}).get('minioHost') or '').strip()
+    if not host:
+        return
+    staff_ui = ((document.get('registry') or {}).get('staffUi') or {}).get('envVars') or {}
+    sources = str(staff_ui.get('CSP_SRC_IMG') or '').split()
+    if not sources:
+        raise ValueError('Deployment blocked: the public values set global.minioHost but not registry.staffUi.envVars.CSP_SRC_IMG; '
+                         'set the staff UI image CSP explicitly, with https://' + host)
+    if 'https://' + host not in sources:
+        raise ValueError('Deployment blocked: registry.staffUi.envVars.CSP_SRC_IMG does not list the object store host https://'
+                         + host + '; photos and documents would be blocked in the staff portal')
+
+
 def fetch_values(pin, destination):
     """Retrieve reviewed public values from the same immutable central commit."""
     validate_pin(pin)
@@ -139,8 +162,10 @@ def fetch_values(pin, destination):
             data = response.read(1024*1024+1)
     if len(data)>1024*1024 or hashlib.sha256(data).hexdigest()!=values['sha256']:
         raise ValueError('Central public-values checksum mismatch')
-    if not isinstance(yaml_document(data),dict):
+    document = yaml_document(data)
+    if not isinstance(document,dict):
         raise ValueError('Invalid central public-values document')
+    require_image_csp(document)
     target=Path(destination)
     target.parent.mkdir(parents=True,exist_ok=True)
     target.write_bytes(data)

@@ -167,11 +167,66 @@ class CentralChartTests(unittest.TestCase):
             chart.fetch_values(self.pin, Path(self.temp.name) / "out.yaml")
 
 
+GARAGE = "garage.development.oanstaging.com"
+OLD_HOST = "minio-farmer.development.oanstaging.com"
+
+
+def public_values(csp, host=GARAGE):
+    """Public values as oan-helm's environments/dev/values/da.yaml shapes them."""
+    values = {"global": {"minioHost": host, "minioSecure": True}, "registry": {"staffUi": {"envVars": {}}}}
+    if csp is not None:
+        values["registry"]["staffUi"]["envVars"]["CSP_SRC_IMG"] = csp
+    return values
+
+
+class ImageCspTests(unittest.TestCase):
+    """The staff UI's image CSP lists the object store host (G2R-614): a change
+    of host must not silently block photos and documents in the staff portal."""
+
+    def test_csp_with_the_object_store_host_is_accepted(self):
+        chart.require_image_csp(public_values("'self' blob: data: https://%s https://%s" % (GARAGE, OLD_HOST)))
+
+    def test_csp_without_the_object_store_host_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "does not list the object store host https://" + GARAGE):
+            chart.require_image_csp(public_values("'self' blob: data: https://" + OLD_HOST))
+
+    def test_csp_left_to_the_platform_default_is_rejected(self):
+        for csp in (None, "", "   "):
+            with self.assertRaisesRegex(ValueError, "CSP_SRC_IMG"):
+                chart.require_image_csp(public_values(csp))
+
+    def test_a_host_that_only_contains_the_name_is_not_enough(self):
+        with self.assertRaisesRegex(ValueError, "does not list"):
+            chart.require_image_csp(public_values("'self' https://%s.example.org" % GARAGE))
+        with self.assertRaisesRegex(ValueError, "does not list"):
+            chart.require_image_csp(public_values("'self' http://" + GARAGE))
+
+    def test_values_without_an_object_store_are_not_checked(self):
+        chart.require_image_csp({"global": {"registryHostname": "example"}})
+        chart.require_image_csp({})
+
+    def test_a_deploy_stops_on_values_whose_csp_misses_the_host(self):
+        pin = {"repository": BASE + "a" * 40 + "/repository/", "name": "openg2p-da-registry", "version": "1.0.0-dev.17",
+               "sha256": "c" * 64}
+        body = yaml.safe_dump(public_values("'self' blob: data: https://" + OLD_HOST)).encode()
+        pin["values"] = {"path": "environments/dev/values/da.yaml", "sha256": hashlib.sha256(body).hexdigest()}
+        with tempfile.TemporaryDirectory() as folder:
+            cached = Path(folder) / "cache" / pin["values"]["sha256"] / "da.yaml"
+            cached.parent.mkdir(parents=True)
+            cached.write_bytes(body)
+            out = Path(folder) / "out.yaml"
+            with patch.object(chart, "CENTRAL_CACHE", Path(folder) / "cache"), \
+                    patch.object(chart.urllib.request, "urlopen", side_effect=AssertionError("offline")):
+                with self.assertRaisesRegex(ValueError, "Deployment blocked"):
+                    chart.fetch_values(pin, out)
+            self.assertFalse(out.exists())
+
+
 class CommittedProfileTests(unittest.TestCase):
     def test_profile_targets_the_live_da_release(self):
         pin = committed_pin()
         self.assertEqual(pin["name"], "openg2p-da-registry")
-        self.assertEqual(pin["version"], "1.0.0-dev.20")
+        self.assertEqual(pin["version"], "1.0.0-dev.23")
         self.assertEqual((pin["release"], pin["namespace"], pin["environment"]), ("da-registry", "da-registry", "dev"))
         self.assertEqual(pin["values"]["path"], "environments/dev/values/da.yaml")
 
