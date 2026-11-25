@@ -61,7 +61,7 @@ def call() {
                 // reporting views, the sample loader), with no network or cluster. In the pinned Python image the
                 // chart's hook Jobs use, before any image is built.
                 steps {
-                    sh 'docker run --rm -e PYTHONDONTWRITEBYTECODE=1 -v "$PWD:/work:ro" -w /work python:3.11.14-slim sh -c "pip install -q --root-user-action=ignore --disable-pip-version-check pytest==8.4.2 ruff==0.17.2 PyYAML==6.0.2 && bash ci/validate.sh"'
+                    sh 'docker run --rm -e PYTHONDONTWRITEBYTECODE=1 -v "$PWD:/work:ro" -w /work python:3.11.14-slim sh -c "pip install -q --root-user-action=ignore --disable-pip-version-check pytest==8.4.2 ruff==0.17.2 PyYAML==6.0.2 Jinja2==3.1.6 && bash ci/validate.sh"'
                 }
             }
 
