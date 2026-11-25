@@ -1,0 +1,10 @@
+# The lint ci/validate.sh runs over every Python file of the repository (ci/README.md). Only rules that find
+# mistakes, not style, and only rules the code passes today, so a new finding is a regression.
+extend-exclude = ["ci/deploy/vendor"]
+
+[lint]
+# F: pyflakes. E7 comparisons and bare except. PLE: pylint errors.
+select = ["F", "E711", "E712", "E721", "E722", "E742", "E743", "PLE"]
+# Not enforced yet, each with its count on 2026-11-25: unused imports (F401 34), f-strings without placeholders
+# (F541 4) and unused variables (F841 1).
+ignore = ["F401", "F541", "F841"]

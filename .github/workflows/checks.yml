@@ -32,8 +32,9 @@ jobs:
           cache-from: type=gha,scope=staff-api
           cache-to: type=gha,mode=max,scope=staff-api
       - name: Installed DA extension tests
+        # With a coverage report of the installed extension, and no minimum until one is agreed (ci/README.md).
         run: |
-          docker run --rm -v "$PWD:/repo:ro" -w /repo/da-extension -e PYTHONPATH=/repo/da-extension/tests --entrypoint sh registry/staff-api:ci -c 'pip install --quiet pytest==8.4.2 pytest-asyncio==0.24.0 && python -m pytest -q -p no:cacheprovider tests'
+          docker run --rm -v "$PWD:/repo:ro" -w /repo/da-extension -e PYTHONPATH=/repo/da-extension/tests -e COVERAGE_FILE=/tmp/da-registry.coverage --entrypoint sh registry/staff-api:ci -c 'pip install --quiet pytest==8.4.2 pytest-asyncio==0.24.0 pytest-cov==7.1.0 && python -m pytest -q -p no:cacheprovider tests --cov=openg2p_registry_da_extension --cov-report=term:skip-covered'
 
   chart:
     # Required check: the registry chart must build its dependencies, lint and render.
