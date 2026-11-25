@@ -399,6 +399,15 @@ class PipelineWiringTests(unittest.TestCase):
         chart = (ROOT / "helm/openg2p-da-registry/Chart.yaml").read_text(encoding="utf-8")
         self.assertIn("version: 0.0.0\n", chart)
 
+    def test_every_test_runs_through_validate_sh_in_both_ci_systems(self):
+        stage = self.stage("Check deploy script", "stage('ECR Login')")
+        self.assertIn("bash ci/validate.sh", stage)
+        self.assertNotIn("unittest discover", stage)                     # no hand-picked list beside it
+        checks = (ROOT / ".github/workflows/checks.yml").read_text(encoding="utf-8")
+        self.assertIn("bash ci/validate.sh", checks)
+        validate = (ROOT / "ci/validate.sh").read_text(encoding="utf-8")
+        self.assertIn("pytest -q -p no:cacheprovider test --ignore=test/sanity\n", validate)
+
     def test_braces_balance(self):
         self.assertEqual(self.text.count("{"), self.text.count("}"))
 

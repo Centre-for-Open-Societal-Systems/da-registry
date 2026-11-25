@@ -16,11 +16,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Source syntax
+      - name: Source and deployment contracts
         run: |
-          pip install ruff==0.17.2
-          python -m ruff check --select E9,F63,F7,F82 da-extension/src da-extension/tests
-          python -m unittest discover -s test -p 'test_require_green_checks.py'
+          pip install pytest==8.4.2 ruff==0.17.2 PyYAML==6.0.2
+          bash ci/validate.sh
       - uses: docker/setup-buildx-action@v3
       - name: Build the staff-api image
         uses: docker/build-push-action@v6
