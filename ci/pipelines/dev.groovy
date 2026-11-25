@@ -56,20 +56,12 @@ def call() {
             }
 
             stage('Check deploy script') {
-                // Rollback behaviour and the pin updater, with stand-in helm/kubectl:
-                // no network, no cluster.
+                // ci/validate.sh, the checks GitHub runs too: every test in test/ (rollback behaviour and the pin
+                // updater with stand-in helm/kubectl, image names and ECR settings, the sample-approver hook, the
+                // reporting views, the sample loader), with no network or cluster. In the pinned Python image the
+                // chart's hook Jobs use, before any image is built.
                 steps {
-                    sh 'python3 -m unittest discover -s test -p "test_deploy_ci.py" -v'
-                    // The ECR names of the images and the settings of their repositories.
-                    sh 'python3 -m unittest discover -s test -p test_image_names.py -v'
-                    sh 'python3 -m unittest discover -s test -p test_ecr_repository.py -v'
-                    // Sample-approver password hook against a fake Keycloak (stdlib only, no network).
-                    sh 'python3 -m unittest discover -s test -p test_sample_approver_password.py -v'
-                    // The da_rpt_* reporting views, their hook and refresh CronJob (files only, no database).
-                    sh 'python3 -m unittest discover -s test -p test_db_seed_reporting_views.py -v'
-                    // Sample loader (sign-in, approvals, retries) against stand-ins, no cluster: pytest in the
-                    // pinned Python image the chart's hook Jobs use, before the db-seed image is built.
-                    sh 'docker run --rm -v "$PWD:/work:ro" -w /work python:3.11.14-slim sh -c "pip install -q --root-user-action=ignore --disable-pip-version-check pytest==8.3.4 && python -B -m pytest -q -p no:cacheprovider test/test_sample_loader.py"'
+                    sh 'docker run --rm -e PYTHONDONTWRITEBYTECODE=1 -v "$PWD:/work:ro" -w /work python:3.11.14-slim sh -c "pip install -q --root-user-action=ignore --disable-pip-version-check pytest==8.4.2 ruff==0.17.2 PyYAML==6.0.2 && bash ci/validate.sh"'
                 }
             }
 
