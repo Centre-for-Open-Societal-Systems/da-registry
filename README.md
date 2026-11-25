@@ -9,6 +9,9 @@ Services, which read DA records from this registry.
 This repository only adds the DA domain on top of the platform images; it
 follows the same build model as the farmer registry.
 
+How the registry reaches each environment, and the reporting views: [deployment](docs/deployment.md). How a
+version is numbered and promoted: [release](docs/release.md). What changed: [CHANGELOG.md](CHANGELOG.md).
+
 ## Layout
 
 | Path | What it is |
