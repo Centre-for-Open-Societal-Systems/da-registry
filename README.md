@@ -177,7 +177,7 @@ Management or Consent Manager. Keep both checks on in deployments.
 ## Tests
 
 `bash ci/validate.sh` runs the checks GitHub and Jenkins run before a build: lint, every test in `test/` and a syntax
-check of the shell scripts. It needs Python with `pytest`, `ruff` and `PyYAML`, and no network or cluster.
+check of the shell scripts. It needs Python with `pytest`, `ruff`, `PyYAML` and `Jinja2`, and no network or cluster.
 
 The extension tests import the platform, so run them inside an image:
 

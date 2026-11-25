@@ -18,7 +18,7 @@ jobs:
           python-version: '3.12'
       - name: Source and deployment contracts
         run: |
-          pip install pytest==8.4.2 ruff==0.17.2 PyYAML==6.0.2
+          pip install pytest==8.4.2 ruff==0.17.2 PyYAML==6.0.2 Jinja2==3.1.6
           bash ci/validate.sh
       - uses: docker/setup-buildx-action@v3
       - name: Build the staff-api image
