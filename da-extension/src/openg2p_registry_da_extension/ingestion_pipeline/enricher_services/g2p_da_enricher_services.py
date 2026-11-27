@@ -78,7 +78,7 @@ IMPORT_REQUIRED = {
 }
 # The location columns go together, down to the level the row's position
 # needs (location_depth.py): Region to Kebele for a development agent, Region
-# to Woreda for a supervisor or an executive officer. A column below that level
+# to Woreda for a supervisor, Region and Zone for an executive officer. A column below that level
 # is left out, and so is the whole location of a position that has none (an
 # administrator, a communication officer): such a row is not refused for it.
 GEO_LABELS = {"region": "Region", "zone": "Zone", "woreda": "Woreda", "kebele": "Kebele"}

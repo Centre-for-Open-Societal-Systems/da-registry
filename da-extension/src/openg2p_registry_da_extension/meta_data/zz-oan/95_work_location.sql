@@ -7,10 +7,12 @@ WHERE "section_id" = 'da_location_section_03';
 UPDATE "public"."g2p_register_sections" SET "section_description" = 'Work location' WHERE "section_id" = 'da_location_section_03';
 
 -- How far down the Work location goes depends on the position (decision of
--- 18 Nov 2026, location_depth.py):
+-- 18 Nov 2026; the executive officer's level changed to the Zone on 27 Nov 2026;
+-- location_depth.py):
 --
 --   Development agent, Senior DA          Region, Zone, Woreda and Kebele
---   Supervisor, Executive officer         Region, Zone and Woreda
+--   Supervisor                            Region, Zone and Woreda
+--   Executive officer                     Region and Zone
 --   Admin, Communication officer          no Work location
 --
 -- The rule is the geo widget's "oan-location-depth": a level per position
@@ -20,7 +22,8 @@ UPDATE "public"."g2p_register_sections" SET "section_description" = 'Work locati
 -- server reads the same key as the widget's hide and require actions
 -- (required_fields.py), for the form, a file import and a DA Services push.
 -- What goes deeper than the position's level is left out, not refused: a
--- Kebele given for a supervisor, a location given for an administrator.
+-- Kebele given for a supervisor, a Woreda given for an executive officer, a
+-- location given for an administrator.
 --
 -- The widget carries no show / hide / require actions of its own: the
 -- platform form applies only the last of several, and this rule needs more
@@ -39,7 +42,7 @@ SET "section_ui_schema" = jsonb_set(jsonb_set(jsonb_set(s."section_ui_schema"::j
         'field', (SELECT d."register_id" FROM "public"."g2p_register_definitions" d WHERE d."register_mnemonic" = 'DA') || '.position',
         'levels', jsonb_build_object(
           'DEVELOPMENT_AGENT', 'kebele', 'SENIOR_DA', 'kebele',
-          'SUPERVISOR', 'woreda', 'EXECUTIVE_OFFICER', 'woreda',
+          'SUPERVISOR', 'woreda', 'EXECUTIVE_OFFICER', 'zone',
           'ADMIN', 'none', 'COMMUNICATION_OFFICER', 'none'),
         'default', 'kebele'))
 WHERE s."section_id" = 'da_location_section_03'

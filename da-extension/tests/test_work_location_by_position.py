@@ -1,7 +1,7 @@
 """Work location by position (18 Nov 2026, location_depth.py).
 
-Development agent, Senior DA: Region to Kebele. Supervisor, Executive officer:
-Region to Woreda. Admin, Communication officer: no Work location. One key on
+Development agent, Senior DA: Region to Kebele. Supervisor: Region to Woreda.
+Executive officer: Region and Zone (27 Nov 2026). Admin, Communication officer: no Work location. One key on
 the geo widget, "oan-location-depth", read by the form's checks, the API, a
 file import and a DA Services push. What goes deeper than the position's level
 is left out, not refused.
@@ -25,7 +25,7 @@ SRC = pathlib.Path(__file__).resolve().parents[1] / "src" / "openg2p_registry_da
 RULE = {
     "field": "reg.position",
     "levels": {"DEVELOPMENT_AGENT": "kebele", "SENIOR_DA": "kebele", "SUPERVISOR": "woreda",
-               "EXECUTIVE_OFFICER": "woreda", "ADMIN": "none", "COMMUNICATION_OFFICER": "none"},
+               "EXECUTIVE_OFFICER": "zone", "ADMIN": "none", "COMMUNICATION_OFFICER": "none"},
     "default": "kebele",
 }
 LOCATION = {"panels": [{"panels": [{"widgets": [{
@@ -57,7 +57,7 @@ PLACE = {"geo_lowest_level_value_id": "ET01010101", "geo_code_hierarchy_json": C
 class RuleTests(unittest.TestCase):
     def test_level_per_position(self):
         for position, level in (("DEVELOPMENT_AGENT", "kebele"), ("SENIOR_DA", "kebele"), ("SUPERVISOR", "woreda"),
-                                ("EXECUTIVE_OFFICER", "woreda"), ("ADMIN", "none"),
+                                ("EXECUTIVE_OFFICER", "zone"), ("ADMIN", "none"),
                                 ("COMMUNICATION_OFFICER", "none"), ("", "kebele"), ("NEW_POSITION", "kebele")):
             self.assertEqual(ld.depth_for(RULE, {"position": position}), level, position)
 
@@ -97,9 +97,22 @@ class FitRecordTests(unittest.TestCase):
         self.assertEqual(record["geo_code_hierarchy_json"], TO_WOREDA)
 
     def test_the_position_may_come_from_the_stored_record(self):
-        problem, record = self.fit(dict(PLACE), {"position": "EXECUTIVE_OFFICER"})
+        problem, record = self.fit(dict(PLACE), {"position": "SUPERVISOR"})
         self.assertIsNone(problem)
         self.assertEqual(record["geo_lowest_level_value_id"], "ET010101")
+
+    def test_a_woreda_or_a_kebele_for_an_executive_officer_is_left_out(self):
+        for place in (PLACE, {"geo_lowest_level_value_id": "ET010101", "geo_code_hierarchy_json": TO_WOREDA}):
+            problem, record = self.fit({"position": "EXECUTIVE_OFFICER", **place})
+            self.assertIsNone(problem)
+            self.assertEqual(record["geo_lowest_level_value_id"], "ET0101")
+            self.assertEqual(record["geo_code_hierarchy_json"], TO_ZONE)
+
+    def test_an_executive_officer_needs_the_zone(self):
+        to_region = {**CHAIN, "hierarchy": CHAIN["hierarchy"][:2], "lowest_level_value_id": "ET01"}
+        problem, _ = self.fit({"position": "EXECUTIVE_OFFICER", "geo_lowest_level_value_id": "ET01",
+                               "geo_code_hierarchy_json": to_region})
+        self.assertEqual(problem, "Work location: choose the Zone")
 
     def test_no_location_for_an_administrator_or_a_communication_officer(self):
         for position in ("ADMIN", "COMMUNICATION_OFFICER"):
@@ -183,8 +196,19 @@ class ImportAndPushTests(unittest.TestCase):
         self.assertEqual((out["woreda_code"], out["kebele_code"]), ("ET010101", None))
 
     def test_a_supervisor_row_needs_no_kebele_column(self):
-        out = self.row(Kebele="", Position="Executive officer")
+        out = self.row(Kebele="")
         self.assertEqual(out["geo_lowest_level_value_id"], "ET010101")
+
+    def test_an_executive_officer_row_goes_down_to_the_zone(self):
+        for changes in ({}, {"Woreda": "", "Kebele": ""}):
+            self.resolve.reset_mock()
+            out = self.row(Position="Executive officer", **changes)
+            self.resolve.assert_called_once_with({"region": "Tigray", "zone": "North Western"}, ("region", "zone"))
+            self.assertEqual(out["geo_lowest_level_value_id"], "ET0101")
+            self.assertEqual((out["zone_name"], out["woreda_name"], out["kebele_name"]), ("North Western", None, None))
+            self.assertEqual((out["zone_code"], out["woreda_code"], out["kebele_code"]), ("ET0101", None, None))
+        with self.assertRaisesRegex(ValueError, "^Missing: Zone$"):
+            self.row(Position="Executive officer", Zone="")
 
     def test_a_supervisor_row_without_the_woreda_is_refused(self):
         with self.assertRaisesRegex(ValueError, "^Missing: Woreda$"):
@@ -215,6 +239,15 @@ class ImportAndPushTests(unittest.TestCase):
         self.assertEqual(out["geo_lowest_level_value_id"], "ET010101")
         with self.assertRaisesRegex(ValueError, "Missing: region, zone, woreda"):
             self.push(position="SUPERVISOR", region="Tigray")
+
+    def test_a_push_for_an_executive_officer_goes_down_to_the_zone(self):
+        out = self.push(position="EXECUTIVE_OFFICER", kebele_id="ET01010101")
+        self.assertEqual(out["geo_lowest_level_value_id"], "ET0101")
+        self.assertEqual(out["geo_code_hierarchy_json"], TO_ZONE)
+        out = self.push(position="EXECUTIVE_OFFICER", region="Tigray", zone="North Western")
+        self.assertEqual(out["geo_lowest_level_value_id"], "ET0101")
+        with self.assertRaisesRegex(ValueError, "Missing: region, zone"):
+            self.push(position="EXECUTIVE_OFFICER", region="Tigray")
 
     def test_a_push_for_an_administrator_keeps_no_location(self):
         out = self.push(position="COMMUNICATION_OFFICER", kebele_id="ET01010101")
@@ -332,7 +365,7 @@ class MetadataTests(unittest.TestCase):
         self.assertIn("'{panels,0,panels,0,widgets,0,widget-data-options}', '{}'::jsonb", self.SQL)
         self.assertIn("'{panels,0,panels,0,widgets,0,oan-location-depth}'", self.SQL)
         for pair in ("'DEVELOPMENT_AGENT', 'kebele'", "'SENIOR_DA', 'kebele'", "'SUPERVISOR', 'woreda'",
-                     "'EXECUTIVE_OFFICER', 'woreda'", "'ADMIN', 'none'", "'COMMUNICATION_OFFICER', 'none'",
+                     "'EXECUTIVE_OFFICER', 'zone'", "'ADMIN', 'none'", "'COMMUNICATION_OFFICER', 'none'",
                      "'default', 'kebele'"):
             self.assertIn(pair, self.SQL)
 
