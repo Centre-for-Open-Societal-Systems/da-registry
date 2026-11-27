@@ -1,5 +1,6 @@
 # The version of this repository's builds (oan-helm docs/release/naming-standard.md, section 6).
-# Builds add -<branch>.<BUILD_NUMBER>: develop 1.0.0-develop.57, staging 1.0.0-staging.12 (the same digests).
+# Builds add -<branch>.<BUILD_NUMBER>: develop 1.0.1-develop.57, staging 1.0.1-staging.12 (the same digests).
+# Bump it when the Jenkins job is recreated: BUILD_NUMBER restarts at 1.
 # The OpenG2P platform version is not here: it is appVersion of helm/openg2p-da-registry/Chart.yaml, equal to
 # the ARG RP_VERSION default of every platform Dockerfile (test/test_image_names.py checks they agree).
-version: 1.0.0
+version: 1.0.1

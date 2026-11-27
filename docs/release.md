@@ -7,8 +7,8 @@ How a DA Registry version is numbered, built and promoted. Where each version go
 
 | What | Where it is set | Example |
 | --- | --- | --- |
-| Repository version | `version` in [`init.yaml`](../init.yaml) | `1.0.0` |
-| Build version: image tag | `<version>-<branch>.<BUILD_NUMBER>` ([`ci/image_names.py`](../ci/image_names.py)) | `1.0.0-develop.90` |
+| Repository version | `version` in [`init.yaml`](../init.yaml) | `1.0.1` |
+| Build version: image tag | `<version>-<branch>.<BUILD_NUMBER>` ([`ci/image_names.py`](../ci/image_names.py)) | `1.0.1-develop.90` |
 | Chart version | set by oan-helm `scripts/ci/package_chart.py` when the build packages the chart; `helm/openg2p-da-registry/Chart.yaml` keeps `version: 0.0.0` | |
 | Staging version | the rc of a develop build, added by the staging promotion | |
 | OpenG2P platform (`rpVersion`) | `appVersion` and the `openg2p-registry` dependency in `helm/openg2p-da-registry/Chart.yaml`, `ARG RP_VERSION` in every Dockerfile, `RP_VERSION` in `ci/pipelines/dev.groovy`, and `platformVersion` in `ci/deploy/oan-chart.json` | `1.2.2-rc.614` |
