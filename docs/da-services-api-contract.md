@@ -129,7 +129,8 @@ what is seeded today, read them live from Master Data
 | `position` | Location sent | Kept in the registry |
 |---|---|---|
 | `DEVELOPMENT_AGENT`, `SENIOR_DA` | `kebele_id`, or `region`, `zone`, `woreda`, `kebele` | down to the Kebele; required |
-| `SUPERVISOR`, `EXECUTIVE_OFFICER` | `kebele_id` (cut back to its Woreda), or `region`, `zone`, `woreda` | down to the Woreda; required. A `kebele` name is not read; `kebele_code` and `kebele_name` stay empty |
+| `SUPERVISOR` | `kebele_id` (cut back to its Woreda), or `region`, `zone`, `woreda` | down to the Woreda; required. A `kebele` name is not read; `kebele_code` and `kebele_name` stay empty |
+| `EXECUTIVE_OFFICER` | `kebele_id` (cut back to its Zone), or `region`, `zone` | down to the Zone; required. `woreda` and `kebele` names are not read; the Woreda and Kebele codes and names stay empty |
 | `ADMIN`, `COMMUNICATION_OFFICER` | nothing | no location. A location sent anyway is not kept, and the push is not refused for it |
 
 A push that stops above the position's level (a Supervisor with no `woreda`) is

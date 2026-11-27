@@ -1,13 +1,14 @@
-"""How far down the Work location goes, by position (decision of 18 Nov 2026).
+"""How far down the Work location goes, by position (decision of 18 Nov 2026;
+the executive officer's level changed to the Zone on 27 Nov 2026).
 
-A development agent works in one Kebele; a supervisor or an executive officer
-looks after a whole Woreda; an administrator or a communication officer works
-at no one place. The Work location's geo widget says so in the register
+A development agent works in one Kebele; a supervisor looks after a whole
+Woreda and an executive officer a whole Zone; an administrator or a
+communication officer works at no one place. The Work location's geo widget says so in the register
 metadata (95_work_location.sql), under a key of OAN's own:
 
     "oan-location-depth": {
         "field": "<register_id>.position",
-        "levels": {"SUPERVISOR": "woreda", "EXECUTIVE_OFFICER": "woreda",
+        "levels": {"SUPERVISOR": "woreda", "EXECUTIVE_OFFICER": "zone",
                    "ADMIN": "none", "COMMUNICATION_OFFICER": "none"},
         "default": "kebele"
     }
