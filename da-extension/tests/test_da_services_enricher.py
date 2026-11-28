@@ -91,7 +91,9 @@ class TestDAServicesEnricher(unittest.TestCase):
         cases = [
             ({k: v for k, v in MESSAGE.items() if k != "reference_id"}, "Missing: reference_id"),
             (dict(MESSAGE, source="SMS"), "Source 'SMS' is not one of"),
-            (dict(MESSAGE, da={"first_name": "A"}), "Missing: father_name, fayda_id, kebele_id"),
+            (dict(MESSAGE, da={"first_name": "A"}), "Missing: father_name, fayda_id"),
+            (dict(MESSAGE, da={"first_name": "A", "father_name": "B", "fayda_id": "1", "region": "Tigray"}),
+             "Missing: kebele_id \\(or region, zone, woreda, kebele\\)"),
             (dict(MESSAGE, da="not an object"), "development agent details"),
         ]
         for message, text in cases:

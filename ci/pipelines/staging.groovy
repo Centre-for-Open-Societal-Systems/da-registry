@@ -15,6 +15,16 @@ def call() {
                 description: 'Load the sample records (db-seed hook) during this staging deploy. Leave off for a clean registry.')
         }
         stages {
+            stage('Checks green') {
+                // Nothing reaches staging unless every GitHub check of this commit passed (ci/deploy/require-green-checks.sh).
+                when { allOf { branch 'staging'; not { changeRequest() } } }
+                steps {
+                    checkout scm
+                    withCredentials([usernamePassword(credentialsId: 'oan-helm-fork-token', usernameVariable: 'GH_USER', passwordVariable: 'GH_TOKEN')]) {
+                        sh 'bash ci/deploy/require-green-checks.sh Centre-for-Open-Societal-Systems/da-registry "$(git rev-parse --verify HEAD)"'
+                    }
+                }
+            }
             stage('Promote and deploy') {
                 when { allOf { branch 'staging'; not { changeRequest() } } }
                 steps {
@@ -34,6 +44,27 @@ def call() {
                           git -C .oan-helm sparse-checkout set scripts/ci environments/staging/values
                           bash .oan-helm/scripts/ci/deliver_staging.sh openg2p-da-registry da-registry da-registry da.yaml $sample
                         '''
+                    }
+                }
+            }
+        }
+        post {
+            failure {
+                script {
+                    // Mail the DevOps list and the commit author, as Farmer's pipelines do; a controller without SMTP
+                    // must not hide the failure.
+                    try {
+                        def author = ''
+                        try { author = sh(script: "git log -1 --pretty=format:'%ae'", returnStdout: true).trim() } catch (ignored) { author = '' }
+                        def recipients = ['simretyibeltal@gmail.com', 'pavanns.ns@gmail.com']
+                        if (author && !author.contains('noreply')) { recipients = [author] + recipients }
+                        mail(
+                            to: recipients.unique().join(', '),
+                            subject: "Build FAILED: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+                            body: "DA Registry staging promotion or deploy failed.\n\nJob:     ${env.JOB_NAME}\nBranch:  ${env.BRANCH_NAME}\nBuild:   #${env.BUILD_NUMBER}\nURL:     ${env.BUILD_URL}\nConsole: ${env.BUILD_URL}console\n\nJenkins"
+                        )
+                    } catch (err) {
+                        echo "notification not sent: ${err.message}"
                     }
                 }
             }

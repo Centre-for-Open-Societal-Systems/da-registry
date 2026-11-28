@@ -20,7 +20,10 @@ global:
   keycloakInternalUrl: http://commons-keycloak.commons.svc.cluster.local:80
   keycloakExternalIssuerUrl: https://keycloak.development.oanstaging.com/realms/staff
   masterDataTokenUrl: https://keycloak.development.oanstaging.com/realms/staff/protocol/openid-connect/token
-  minioHost: minio-farmer.development.oanstaging.com
+  # Public host of the Commons object store (Garage, commons-base 2.3.4). Each
+  # environment's public values in oan-helm set it, together with the staff UI's
+  # CSP_SRC_IMG, which must list it (ci/deploy/oan_chart.py require_image_csp).
+  minioHost: garage.development.oanstaging.com
   minioSecure: true
   iamServiceUrl: http://commons-services-iam-staff-portal-api.commons.svc.cluster.local
   masterDataApiUrl: http://commons-services-master-data-api.commons.svc.cluster.local
@@ -115,6 +118,11 @@ registry:
       COMMON_DB_HOSTNAME: commons-postgresql.commons.svc.cluster.local
       NOTIFICATION_ENABLED: 'false'
       NOTIFICATION_PROVIDER_URL: ''
+      # A Keycloak account for each person in the DA register, made by this
+      # worker (docs/keycloak-users.md). Off until the service account has the
+      # rights and the realm has the attribute; then set it to 'true' and add
+      # DA_KEYCLOAK_ROLES, and DA_KEYCLOAK_INITIAL_PASSWORD from a secret.
+      DA_KEYCLOAK_USERS_ENABLED: 'false'
     envVarsFrom:
       REGISTRY_CELERY_WORKERS_MASTER_DATA_DB_PASSWORD:
         secretKeyRef:
@@ -163,8 +171,25 @@ registry:
     postgres-init:
       postgresql:
         host: commons-postgresql.commons.svc.cluster.local
+  # The platform's sanity hooks with the DA overlay (docker/sanity-tests): a data-seed Job
+  # injects SANITY-DA-0001, then the test Job runs the smoke tests (and, with runE2e, the
+  # signed DCI search and a change request on it). The build switches it on with its image.
   sanity:
     enabled: false
+    image:
+      repository: ''
+      tag: ''
+    regType: DA
+    regRecordType: DA
+    searchText: SANITY-DA-0001
+    # openg2p_da_to_dci puts the whole record under one scope, da_details; nothing else may
+    # come back. qualifications names a scope a partner could ask for and must not get.
+    dataScopes: da_details
+    deniedScopes: qualifications
+    # The platform's names for the register's subject record: the DA register here.
+    farmerRegisterId: 6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3f90
+    crTabId: da_details_tab
+    crSectionId: da_identity_section_01
   staffUi:
     image:
       repository: ''
@@ -256,6 +281,36 @@ ecrPullSecret:
 #     - name: commons-services-awe
 #       namespace: commons
 commonsServiceAliases: []
+
+# Reporting layer: the da_rpt_* materialized views (docker/db-seed/reporting_views.sql), applied by a
+# post-install/upgrade hook (templates/reporting-views.yaml) and refreshed by a CronJob
+# (templates/reporting-views-refresh.yaml). Both run in the registry's db-seed image. The database
+# settings default to the registry subchart's naming: database and user from the release name, password
+# in the Secret named after the release.
+reporting:
+  db:
+    host: ''
+    port: 5432
+    name: '{{ .Release.Name | replace "-" "_" }}'
+    user: '{{ printf "%s_user" .Release.Name | replace "-" "_" }}'
+    secret: '{{ .Release.Name }}'
+    passwordKey: '{{ .Release.Name }}-db-user'
+  image:
+    repository: ''
+    tag: ''
+  views:
+    enabled: false
+    waitForSchemaSeconds: 600
+    refreshSchedule: '*/30 * * * *'
+    refreshLog:
+      enabled: true
+      retentionDays: 90
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
 
 # Sample approvers sign in with registry.global.aweApproverUserPassword (the platform default, `pass`).
 # keycloak-init creates them with it as a temporary password and never updates an existing user; this

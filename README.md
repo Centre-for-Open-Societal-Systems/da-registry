@@ -9,6 +9,9 @@ Services, which read DA records from this registry.
 This repository only adds the DA domain on top of the platform images; it
 follows the same build model as the farmer registry.
 
+How the registry reaches each environment, and the reporting views: [deployment](docs/deployment.md). How a
+version is numbered and promoted: [release](docs/release.md). What changed: [CHANGELOG.md](CHANGELOG.md).
+
 ## Layout
 
 | Path | What it is |
@@ -21,7 +24,7 @@ follows the same build model as the farmer registry.
 | `docker/local-dev/` | Config for the local stack (Keycloak, IAM, AWE, ID generator, Postgres, geo seed) |
 | `import-templates/` | Blank CSV and Excel templates for bulk import |
 | `docker-compose.yml` | Self-contained local stack |
-| `Jenkinsfile`, `ci/pipelines/` | CI/CD: builds and pushes images to ECR (`openg2p/da-registry/<component>`, tag `<commit>`); on `develop`, also upgrades the existing dev release `da-registry` (namespace `da-registry`) |
+| `Jenkinsfile`, `ci/pipelines/` | CI/CD: builds and pushes images to ECR (`eoan/da-registry/<component>-<RP version>`, tag `<version>-<branch>.<build>` from `init.yaml`); on `develop`, also upgrades the existing dev release `da-registry` (namespace `da-registry`) |
 | `ci/deploy/` | The pinned central chart: `oan-chart.json` (oan-helm commit, chart version, archive and public-values SHA-256), `oan_chart.py` (download and verification), see `ci/deploy/README.md` |
 | `ci/deploy-dev.sh` | The dev deploy the Jenkinsfile runs: verified chart and values, `helm upgrade --reset-values` on the existing release, never an install |
 | `test/` | Unit tests of the chart pin consumer |
@@ -175,6 +178,10 @@ and consent checks (`REGISTRY_PARTNER_API_SIGNATURE_VALIDATION_ENABLED` /
 Management or Consent Manager. Keep both checks on in deployments.
 
 ## Tests
+
+`bash ci/validate.sh` runs the checks GitHub and Jenkins run before a build: lint, every test in `test/` and a syntax
+check of the shell scripts. It needs Python with `pytest`, `ruff`, `PyYAML` and `Jinja2`, and no network or cluster.
+What checks a change, where it runs, the lint rules and the coverage baseline: [ci/README.md](ci/README.md).
 
 The extension tests import the platform, so run them inside an image:
 

@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Upgrade the DA registry release on the dev cluster with the chart this build packaged.
 #
-# The Jenkinsfile's "Deploy to Development" stage runs this on the oan-ci-deploy-agent-1 node
-# with the da-dev-kubeconfig credential. A deploy by hand is the same command:
+# The "Deploy to Development" stage of ci/pipelines/dev.groovy runs this on an oan-ci-deploy agent
+# with the da-registry-newdev-kubeconfig credential (DEV_KUBECONFIG_CRED_ID), against the release
+# da-registry in the namespace da-registry. A deploy by hand is the same command:
 #
 #   KUBECONFIG=<kubeconfig> AWS_ACCOUNT_ID=<id> ./ci/deploy-dev.sh <12-char-commit-sha>
 #
@@ -23,11 +24,11 @@
 #      db-seed or init hook, so a failure that already migrated data still needs a look.
 #
 # Env:
-#   IMAGE_TAG        first argument: the 12-character commit the images were built from  required
+#   IMAGE_TAG        first argument: the build tag of the images, <version>-<branch>.<build>  required
 #   AWS_ACCOUNT_ID   owner of the ECR registry                                           required
 #   KUBECONFIG       kubeconfig for the dev cluster                                      required
 #   AWS_REGION       default ap-south-1
-#   ECR_BASE         default openg2p/da-registry
+#   (image repositories: eoan/da-registry/<component>-<RP version>, from ci/image_names.py)
 #   BUILT_CHART_DIR  folder with the archive this build packaged (Jenkins sets it); else the pinned chart
 #   HELM_TIMEOUT     default 20m
 #   ROLLOUT_TIMEOUT  per-Deployment rollout wait, default 420s
@@ -42,10 +43,14 @@ TAG="${1:-${IMAGE_TAG:-}}"
 : "${AWS_ACCOUNT_ID:?set AWS_ACCOUNT_ID}"
 : "${KUBECONFIG:?set KUBECONFIG}"
 AWS_REGION="${AWS_REGION:-ap-south-1}"
-ECR_BASE="${ECR_BASE:-openg2p/da-registry}"
 HELM_TIMEOUT="${HELM_TIMEOUT:-20m}"
 ROLLOUT_TIMEOUT="${ROLLOUT_TIMEOUT:-420s}"
-IMAGE_REPOSITORY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_BASE}"
+ECR_HOST="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+# ci/image_names.py, resolved before anything is changed: a failed lookup stops here.
+declare -A IMAGE
+for component in staff-api partner-api celery db-seed staff-ui sanity-tests; do
+  IMAGE[$component]="${ECR_HOST}/$(python3 ci/image_names.py repository "$component")"
+done
 
 say() { echo "=== $* ==="; }
 
@@ -68,7 +73,7 @@ CENTRAL_VALUES="$(python3 ci/deploy/oan_chart.py values registry "$WORK/public-v
 echo "chart:     $(basename "$CHART_ARCHIVE") (platform $(python3 ci/deploy/oan_chart.py platform registry))"
 echo "release:   ${HELM_RELEASE}"
 echo "namespace: ${HELM_NAMESPACE}"
-echo "images:    ${IMAGE_REPOSITORY}/<component>:${TAG}"
+echo "images:    ${ECR_HOST}/$(python3 ci/image_names.py repository staff-api) (and the other components):${TAG}"
 
 say "Release check"
 # Upgrade only. A missing release is an error, never a first install.
@@ -93,22 +98,41 @@ cat > "$WORK/ci-values.yaml" <<EOF2
 registry:
   staffApi:
     enabled: true
-    image: {repository: '${IMAGE_REPOSITORY}/staff-api', tag: '${TAG}'}
+    image: {repository: '${IMAGE[staff-api]}', tag: '${TAG}'}
   partnerApi:
     enabled: true
-    image: {repository: '${IMAGE_REPOSITORY}/partner-api', tag: '${TAG}'}
+    image: {repository: '${IMAGE[partner-api]}', tag: '${TAG}'}
   celeryWorker:
     enabled: true
-    image: {repository: '${IMAGE_REPOSITORY}/celery', tag: '${TAG}'}
+    image: {repository: '${IMAGE[celery]}', tag: '${TAG}'}
+    # Dev only (18 Nov 2026, for the team demo): a Keycloak account for each
+    # approved person (docs/keycloak-users.md). Test values: everyone gets the
+    # same first password and may keep it; never copy these to staging. The
+    # worker signs in with its DA_AWE_* client; that client's service account
+    # needs the realm-management roles manage-users, view-users, query-users
+    # and view-clients in realm staff. The attribute is the one created on dev.
+    envVars:
+      DA_KEYCLOAK_USERS_ENABLED: 'true'
+      DA_KEYCLOAK_INITIAL_PASSWORD: 'password'
+      DA_KEYCLOAK_FORCE_PASSWORD_CHANGE: 'false'
+      DA_KEYCLOAK_RECORD_ATTRIBUTE: 'da_id'
+      DA_KEYCLOAK_RETRY_SECONDS: '120'
+      DA_KEYCLOAK_ROLES: '{"DEVELOPMENT_AGENT": ["oan-client:Development Agent"], "SENIOR_DA": ["oan-client:Development Agent"], "SUPERVISOR": ["da-registry-staff-portal:Data Editor", "oan-client:Supervisor"], "EXECUTIVE_OFFICER": ["da-registry-staff-portal:Data Editor", "oan-client:executive"], "COMMUNICATION_OFFICER": ["oan-client:Communications Officer"], "ADMIN": ["da-registry-staff-portal:Data Editor", "da-registry-staff-portal:Integration Manager", "da-registry-staff-portal:Intake Officer", "oan-client:Supervisor", "oan-client:OAN Administrator"]}'
   celeryBeat:
     enabled: true
-    image: {repository: '${IMAGE_REPOSITORY}/celery', tag: '${TAG}'}
+    image: {repository: '${IMAGE[celery]}', tag: '${TAG}'}
   staffUi:
     enabled: true
-    image: {repository: '${IMAGE_REPOSITORY}/staff-ui', tag: '${TAG}'}
+    image: {repository: '${IMAGE[staff-ui]}', tag: '${TAG}'}
   dbSeed:
     enabled: true
-    image: {repository: '${IMAGE_REPOSITORY}/db-seed', tag: '${TAG}'}
+    image: {repository: '${IMAGE[db-seed]}', tag: '${TAG}'}
+  sanity:
+    enabled: true
+    image: {repository: '${IMAGE[sanity-tests]}', tag: '${TAG}'}
+reporting:
+  views:
+    enabled: true
 EOF2
 VALUES=(-f "$CENTRAL_VALUES" -f "$WORK/ci-values.yaml")
 

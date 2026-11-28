@@ -41,13 +41,20 @@ the platform version changes, `RP_VERSION` in the Jenkinsfile and the Dockerfile
 While the commit and the two SHA-256 values are all zeros, every chart operation fails with
 "still a placeholder", so a deploy cannot start from an unfinished pin.
 
+**Object store and image CSP.** The public values name the Commons object store (`global.minioHost`, `minioSecure`; the credentials
+come from the `commons-minio` secret, the platform chart's default) and set the staff UI's `registry.staffUi.envVars.CSP_SRC_IMG`
+themselves. Reading the values (`oan_chart.py values` and `prefetch`, so every deploy) fails with "Deployment blocked" when that CSP
+is missing or does not list `https://<minioHost>`: the staff portal shows photos and documents through links signed for that host,
+and a host the CSP leaves out is blocked by the browser without any error on the server. Nothing about the object store is set in
+`ci/deploy-dev.sh`.
+
 ## Deploy
 
 `ci/deploy-dev.sh <12-char-commit>` (run by the Jenkinsfile's "Deploy to Development" stage on
 every `develop` build) downloads and verifies the archive and values, requires the
 release to exist, renders the manifests, and runs `helm upgrade --reset-values` with the pinned
-values and this build's six images (`staff-api`, `partner-api`, `celery` for worker and beat,
-`staff-ui`, `db-seed`, each with `enabled: true`) on top. It never installs, never uninstalls and
+values and this build's seven images (`staff-api`, `partner-api`, `celery` for worker and beat,
+`staff-ui`, `db-seed`, `sanity-tests`, each with `enabled: true`) on top. It never installs, never uninstalls and
 never touches a database.
 
 Read-only verification: `python3 ci/deploy/oan_chart.py fetch registry <directory>` and

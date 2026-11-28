@@ -24,7 +24,7 @@ CHAIN = {
         {"level_mnemonic": "kebele", "level_value_id": "kebele-ET040301888007", "level_value_mnemonic": "Meti Guda"},
     ],
 }
-CODES = {"region_code": "ET04", "zone_code": "ET0403", "woreda_code": "ET040301"}
+CODES = {"region_code": "ET04", "zone_code": "ET0403", "woreda_code": "ET040301", "kebele_code": "ET040301888007"}
 
 
 class TestGeoCodes(unittest.TestCase):
@@ -36,11 +36,16 @@ class TestGeoCodes(unittest.TestCase):
 
     def test_staff_form_chain_uses_level(self):
         chain = {"hierarchy": [{"level": "woreda", "level_value_id": "woreda-ET010101"}]}
-        self.assertEqual(geo_codes(chain), {"region_code": None, "zone_code": None, "woreda_code": "ET010101"})
+        self.assertEqual(geo_codes(chain), {"region_code": None, "zone_code": None, "woreda_code": "ET010101", "kebele_code": None})
 
     def test_no_chain(self):
         for value in (None, "", "not json", {"hierarchy": None}, [1, 2]):
-            self.assertEqual(geo_codes(value), {"region_code": None, "zone_code": None, "woreda_code": None})
+            self.assertEqual(geo_codes(value), {"region_code": None, "zone_code": None, "woreda_code": None, "kebele_code": None})
+
+    def test_kebele_without_prefix(self):
+        # Dev's Master Data ids carry no "kebele-" prefix; the code is the id.
+        chain = {"hierarchy": [{"level": "kebele", "level_value_id": "ET01010101"}]}
+        self.assertEqual(geo_codes(chain)["kebele_code"], "ET01010101")
 
     def test_code_of(self):
         self.assertEqual(code_of("woreda-ET040301"), "ET040301")

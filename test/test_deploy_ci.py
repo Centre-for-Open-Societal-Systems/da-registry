@@ -66,6 +66,11 @@ class DeployRollbackTests(unittest.TestCase):
         self.repo = base / "repo"
         (self.repo / "ci/deploy").mkdir(parents=True)
         shutil.copy(ROOT / "ci/deploy-dev.sh", self.repo / "ci/deploy-dev.sh")
+        # deploy-dev.sh names the images with ci/image_names.py, which reads init.yaml and the chart's Chart.yaml.
+        shutil.copy(ROOT / "ci/image_names.py", self.repo / "ci/image_names.py")
+        shutil.copy(ROOT / "init.yaml", self.repo / "init.yaml")
+        (self.repo / "helm/openg2p-da-registry").mkdir(parents=True, exist_ok=True)
+        shutil.copy(ROOT / "helm/openg2p-da-registry/Chart.yaml", self.repo / "helm/openg2p-da-registry/Chart.yaml")
         (self.repo / "ci/deploy/oan_chart.py").write_text(CHART_STUB)
         self.bin = base / "bin"
         self.bin.mkdir()
@@ -252,6 +257,11 @@ class ProposePinTests(unittest.TestCase):
     def propose(self):
         return self.bump.proposal(self.old, fetch=self.fetch, head=lambda: self.HEAD)
 
+    def newer(self):
+        """The chart version after the committed pin's, so these tests hold whenever the pin moves."""
+        base, build = self.pinned["version"].rsplit(".", 1)
+        return "%s.%d" % (base, int(build) + 1)
+
     def test_version_order(self):
         key = self.bump.version_key
         self.assertLess(key("1.0.0-dev.9"), key("1.0.0-dev.10"))     # numeric, not text order
@@ -261,10 +271,10 @@ class ProposePinTests(unittest.TestCase):
             key("latest")
 
     def test_newer_chart_is_proposed(self):
-        self.publish("1.0.0-dev.21", "1.2.2-rc.700")
+        self.publish(self.newer(), "1.2.2-rc.700")
         new, why = self.propose()
         self.assertIsNotNone(new)
-        self.assertIn("newer chart 1.0.0-dev.21", why)
+        self.assertIn("newer chart " + self.newer(), why)
         self.assertTrue(new["registry"]["repository"].endswith("/oan-helm/" + self.HEAD + "/repository/"))
 
     def test_same_chart_and_values_is_up_to_date(self):
@@ -300,12 +310,12 @@ class ProposePinTests(unittest.TestCase):
             self.bump.head_commit(run=lambda cmd: "")
 
     def test_files_that_must_agree_are_updated_with_the_pin(self):
-        self.publish("1.0.0-dev.21", "1.2.2-rc.700")
+        self.publish(self.newer(), "1.2.2-rc.700")
         new, _ = self.propose()
         changed = self.bump.update_companions(self.pinned, new["registry"], root=self.root)
         text = lambda rel: (self.root / rel).read_text(encoding="utf-8")
         self.assertIn('RP_VERSION     = "1.2.2-rc.700"', text("ci/pipelines/dev.groovy"))
-        self.assertIn('self.assertEqual(pin["version"], "1.0.0-dev.21")', text("test/test_oan_chart.py"))
+        self.assertIn('self.assertEqual(pin["version"], "%s")' % self.newer(), text("test/test_oan_chart.py"))
         self.assertIn("ARG RP_VERSION=1.2.2-rc.700", text("docker/staff-api/Dockerfile"))
         self.assertIn("ARG RP_VERSION=1.2.2-rc.700", text("docker/local-dev/data-loaders/Dockerfile"))
         self.assertEqual(sorted(changed), sorted(["ci/pipelines/dev.groovy", "test/test_oan_chart.py", "docker/staff-api/Dockerfile",
@@ -329,9 +339,9 @@ class PipelineWiringTests(unittest.TestCase):
 
     def test_publishing_is_the_last_stage_and_follows_the_deploy(self):
         order = [self.text.index("stage('%s')" % n) for n in
-                 ("Build & Push", "Package chart", "Deploy to Development", "Publish chart")]
+                 ("Build & Push", "Checks green", "Package chart", "Deploy to Development", "Publish chart")]
         self.assertEqual(order, sorted(order))
-        self.assertEqual(self.text.count("stage('"), 8)
+        self.assertEqual(self.text.count("stage('"), 9)
         self.assertLess(self.text.index("stage('Publish chart')"), self.text.index("\n        post {"))
 
     def test_the_deploy_installs_the_packaged_chart_and_still_fails_the_build(self):
@@ -362,17 +372,41 @@ class PipelineWiringTests(unittest.TestCase):
         self.assertNotIn("Propose chart pin update", self.text)
 
     def test_every_component_the_pipeline_builds_has_a_chart_image(self):
-        self.assertIn('ECR_BASE       = "openg2p/da-registry"', self.text)
+        self.assertNotIn("ECR_BASE", self.text)                   # names come from ci/image_names.py
         package = (ROOT / "ci/deploy/package-chart.sh").read_text()
         deploy = (ROOT / "ci/deploy-dev.sh").read_text()
-        for component in ("staff-api", "staff-ui", "partner-api", "celery", "db-seed"):
+        self.assertIn('"$ECR_REGISTRY/$repository"', package)
+        for component in ("staff-api", "staff-ui", "partner-api", "celery", "db-seed", "sanity-tests"):
             self.assertIn("name: '%s'," % component, self.text)
             self.assertIn("    %s) paths=" % component, package)
-            self.assertIn("{repository: '${IMAGE_REPOSITORY}/%s', tag: '${TAG}'}" % component, deploy)
+            self.assertIn("{repository: '${IMAGE[%s]}', tag: '${TAG}'}" % component, deploy)
+
+    def test_images_are_named_and_tagged_by_ci_image_names(self):
+        self.assertIn('python3 ci/image_names.py tag "$BRANCH_NAME" "$BUILD_NUMBER"', self.text)
+        self.assertIn('python3 ci/image_names.py repository ${c.name}', self.text)
+        self.assertNotIn("take(12)", self.text)
+
+    def test_every_pushed_repository_gets_the_standard_ecr_settings_first(self):
+        self.assertIn('sh "python3 ci/ecr_repository.py ensure ${repository} ${legacy}"', self.text)
+        self.assertNotIn("create-repository", self.text)
+        self.assertLess(self.text.index("ci/ecr_repository.py ensure"), self.text.index("docker push ${image}"))
+
+    def test_tags_are_immutable_so_nothing_pushes_a_moving_tag(self):
+        for gone in ("movingTag", "--cache-from", "docker push ${latest}"):
+            self.assertNotIn(gone, self.text)
 
     def test_the_chart_has_no_fixed_version(self):
         chart = (ROOT / "helm/openg2p-da-registry/Chart.yaml").read_text(encoding="utf-8")
         self.assertIn("version: 0.0.0\n", chart)
+
+    def test_every_test_runs_through_validate_sh_in_both_ci_systems(self):
+        stage = self.stage("Check deploy script", "stage('ECR Login')")
+        self.assertIn("bash ci/validate.sh", stage)
+        self.assertNotIn("unittest discover", stage)                     # no hand-picked list beside it
+        checks = (ROOT / ".github/workflows/checks.yml").read_text(encoding="utf-8")
+        self.assertIn("bash ci/validate.sh", checks)
+        validate = (ROOT / "ci/validate.sh").read_text(encoding="utf-8")
+        self.assertIn("pytest -q -p no:cacheprovider test --ignore=test/sanity\n", validate)
 
     def test_braces_balance(self):
         self.assertEqual(self.text.count("{"), self.text.count("}"))

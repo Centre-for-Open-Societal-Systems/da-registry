@@ -5,22 +5,22 @@
 set -euo pipefail
 : "${BRANCH_NAME:?Jenkins sets the branch}"
 : "${ECR_REGISTRY:?Missing ECR registry}"
-: "${ECR_BASE:?Missing ECR base}"
 : "${IMAGE_TAG:?Missing image tag}"
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 
-while IFS=$'\t' read -r component digest; do
+while IFS=$'\t' read -r component repository digest; do
   case "$component" in
     staff-api) paths=registry.staffApi.image ;;
     staff-ui) paths=registry.staffUi.image ;;
     partner-api) paths=registry.partnerApi.image ;;
     celery) paths='registry.celeryWorker.image registry.celeryBeat.image' ;;
     db-seed) paths=registry.dbSeed.image ;;
+    sanity-tests) paths=registry.sanity.image ;;
     *) echo "No chart image for $component" >&2; exit 1 ;;
   esac
   for path in $paths; do
-    printf '%s\t%s\t%s@%s\n' "$path" "$ECR_REGISTRY/$ECR_BASE/$component" "$IMAGE_TAG" "$digest"
+    printf '%s\t%s\t%s@%s\n' "$path" "$ECR_REGISTRY/$repository" "$IMAGE_TAG" "$digest"
   done
 done < .build/image-digests.tsv > "$WORK/images.tsv"
 

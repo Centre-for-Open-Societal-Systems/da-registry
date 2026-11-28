@@ -186,6 +186,25 @@ assign_realm_management_role() {
     --rolename "${role_name}" >/dev/null 2>&1 || true
 }
 
+ensure_user_profile_attribute() {
+  # ensure_user_profile_attribute <name> <display name>
+  # Adds an attribute to the realm's user profile that only an administrator
+  # (and so the registry's service account) can see and change: a user must
+  # not be able to point their own account at another record.
+  local name="$1"
+  local display="$2"
+  local profile
+
+  profile="$("${KCADM}" get users/profile -r "${KEYCLOAK_REALM}" 2>/dev/null | tr -d '\n')" || return 0
+  case "${profile}" in
+    *"\"name\" : \"${name}\""*|*"\"name\":\"${name}\""*) return 0 ;;
+  esac
+  printf '%s' "${profile}" \
+    | sed "s/\"attributes\"[[:space:]]*:[[:space:]]*\[/\"attributes\" : [ {\"name\":\"${name}\",\"displayName\":\"${display}\",\"permissions\":{\"view\":[\"admin\"],\"edit\":[\"admin\"]},\"multivalued\":false}, /" \
+    > /tmp/user-profile.json
+  "${KCADM}" update users/profile -r "${KEYCLOAK_REALM}" -f /tmp/user-profile.json >/dev/null 2>&1 || true
+}
+
 ensure_user() {
   # ensure_user <username> <password> <email> <firstName> <lastName>
   local username="$1"
@@ -358,6 +377,15 @@ ensure_client "da-registry-backend" \
   -s serviceAccountsEnabled=true \
   -s standardFlowEnabled=false \
   -s directAccessGrantsEnabled=false
+
+# The celery worker creates a Keycloak account for each person in the DA
+# register with this client (da-extension keycloak_users.py): it may manage
+# users and look up clients for their roles, and the account carries the
+# record's id in an attribute of the user profile.
+for role in manage-users view-users query-users view-clients; do
+  assign_realm_management_role "service-account-da-registry-backend" "${role}"
+done
+ensure_user_profile_attribute "da_record_id" "Development agent record"
 
 ensure_awe_clients
 

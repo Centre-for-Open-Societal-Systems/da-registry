@@ -119,14 +119,16 @@ The response lists `tabs[].sections[]`; each section has a `section_id` and a
 `section_ui_schema` with its widgets (`widget-id` = field name,
 `widget-required`, `widget-readonly`, and for drop-downs
 `widget-data-source.options`). Draw the form from it, so a field added in the
-registry shows up without a Frappe change. Today the DA form has four sections:
+registry shows up without a Frappe change. Today the DA form has six sections, in this order:
 
 | `section_id` | Fields (required in **bold**) |
 |---|---|
-| `da_identity_section_01` | `prefix`, **`first_name`** (Name), **`middle_name`** (Father's name), `last_name` (Grandfather's name), **`foundational_id`** (Fayda FAN, 16 digits), **`gender`**, **`marital_status`**, **`birth_month_ec`** (1–13), **`birth_year_ec`** (EC, not in the future) |
-| `da_contact_section_04` | **`mobile_number`**, `telegram_number`, `alternate_number`, **`email`** |
-| `da_service_section_02` | **`education_level`**, **`specialisation`**, **`position`**, `joined_date` (`YYYY-MM-DD`), `source` (read-only) |
-| `da_location_section_03` | **`da_geo_hierarchy`**: Region / Zone / Woreda / Kebele, saved as `geo_lowest_level_value_id` + `geo_code_hierarchy_json` |
+| `da_identity_section_01` | `prefix`, **`first_name`** (Name), **`middle_name`** (Father's name), `last_name` (Grandfather's name), **`foundational_id`** (Fayda FAN, 16 digits), **`gender`**, `marital_status`, **`birth_month_ec`** (1–13), **`birth_year_ec`** (EC, not in the future) |
+| `da_contact_section_04` | **`mobile_number`**, `telegram_number`, `alternate_number`, **`email`**, `address_line_1` (home address, one line, up to 100 characters) |
+| `da_service_section_02` | Position and reporting: **`position`**, `specialisation`, `joined_date`, `reports_to` (§2.3c) |
+| `da_qualification_section_05` | Education: a **list**; at least one record for a development agent and a senior DA (§2.3b) |
+| `da_dependent_section_06` | Family members / dependents: a list, may be empty (§2.3b) |
+| `da_location_section_03` | **`da_geo_hierarchy`**: Region / Zone / Woreda / Kebele, saved as `geo_lowest_level_value_id` + `geo_code_hierarchy_json`. How far down depends on the position: to the Kebele for `DEVELOPMENT_AGENT` and `SENIOR_DA`, to the Woreda for `SUPERVISOR` (`geo_lowest_level_value_id` is then the Woreda's id), to the Zone for `EXECUTIVE_OFFICER` (then the Zone's id), none for `ADMIN` and `COMMUNICATION_OFFICER`. The rule is the widget's `oan-location-depth`. A deeper value is cut back to the position's level and a location for a position that has none is emptied; a location that stops above the level is refused ("Work location: choose the Kebele") |
 
 Drop-down codes (send the code, not the label):
 
@@ -138,10 +140,11 @@ As seeded today:
 |---|---|---|
 | `prefix` | `PREFIX` | `MR`, `MRS`, `MISS`, `MS`, `DR` |
 | `gender` | `GENDER` | `MALE`, `FEMALE`, `OTHER`, `UNKNOWN` |
-| `marital_status` | `MARITAL_STATUS` | `SINGLE`, `MARRIED`, `WIDOWED`, `DIVORCED`, `SEPARATED`, `UNKNOWN` |
+| `marital_status` | `DA_MARITAL_STATUS` | `SINGLE`, `MARRIED`, `WIDOWED`, `DIVORCED`, `SEPARATED` (optional; there is no `UNKNOWN`: leave it empty) |
 | `education_level` | `DA_EDUCATION_LEVEL` | `CERTIFICATE`, `DIPLOMA`, `DEGREE`, `MASTERS` |
 | `specialisation` | `DA_SPECIALISATION` | `CROP_PRODUCTION`, `LIVESTOCK`, `NATURAL_RESOURCES`, `AGRONOMY`, `HORTICULTURE`, `OTHER` |
-| `position` | `DA_POSITION` | `DEVELOPMENT_AGENT`, `SENIOR_DA` |
+| `position` | `DA_POSITION` | `DEVELOPMENT_AGENT`, `SENIOR_DA`, `SUPERVISOR`, `COMMUNICATION_OFFICER`, `EXECUTIVE_OFFICER`, `ADMIN` |
+| `relationship` (dependents) | `DA_RELATIONSHIP` | `REL_SPOUSE`, `REL_SON`, `REL_DAUGHTER`, `REL_FATHER`, `REL_MOTHER`, `REL_BROTHER`, `REL_SISTER`, `REL_OTHER` |
 
 A value that is not in the list answers `response_status: ERROR` with
 `record 0: position='X' is not a value of DA_POSITION (permitted: ...)`.
@@ -192,7 +195,7 @@ pagination_request: {"current_page": 1, "page_size": 500, "search_text": "", "so
 |---|---|
 | `prefix` | `PREFIX` |
 | `gender` | `GENDER` |
-| `marital_status` | `MARITAL_STATUS` |
+| `marital_status` | `DA_MARITAL_STATUS` |
 | `education_level` (qualification) | `DA_EDUCATION_LEVEL` |
 | `specialisation` | `DA_SPECIALISATION` |
 | `position` | `DA_POSITION` |
@@ -282,6 +285,100 @@ reason in `response_error_message`):
   numbers, email, month 1–13, year not in the future.
 - Coded fields must hold a Master Data value (§2.2b).
 
+### 2.3b Education records and dependents (lists)
+
+These two sections are lists: each record is a row of its own register, linked
+to the person. A development agent and a senior DA have **at least one**
+education record; for the other positions it is optional. Anyone may have any
+number of dependents (none is fine). Save each record with the section's own
+register id as `section_register_id` and the person's `internal_record_id` as
+`link_internal_record_id`:
+
+| `section_id` | `section_register_id` | Fields (required in **bold**) |
+|---|---|---|
+| `da_qualification_section_05` | `6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3fa0` | **`education_level`**, **`passout_year`** (Ethiopian calendar year, 1950 to this year), `certificates` (up to 3 files, 2 MB each) |
+| `da_dependent_section_06` | `6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3fb0` | **`member_name`** (one box, full name), **`relationship`** (`DA_RELATIONSHIP`), `date_of_birth` (`YYYY-MM-DD`, not in the future) |
+
+```json
+{
+  "submission_id": "385e2322-226d-49b4-8c11-e77ca017bcc8",
+  "section_id": "da_qualification_section_05",
+  "section_register_id": "6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3fa0",
+  "form_id": "6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3f91",
+  "register_id": "6f1c2d8e-4a7b-4c3e-9d2f-8b5a1e7c3f90",
+  "section_payload": [{
+    "edit_action": "ADD", "internal_record_id": "",
+    "link_internal_record_id": "0cafd44c-bf23-4d4b-aad2-67d4672f5456",
+    "education_level": "DEGREE", "passout_year": 2008
+  }]
+}
+```
+
+Send one record per item in `section_payload`; `UPDATE` with the record's own
+`internal_record_id` changes one, `DELETE` removes it.
+
+**Certificates** of a record are a list of at most three files. A new file goes
+inline as `{"__type": "File", "name": "degree.pdf", "type": "application/pdf",
+"size": 12345, "lastModified": 0, "data": "<base64>"}`; the registry stores it
+(PDF, JPG, PNG or WebP, up to 2 MB) and keeps `[{"document_id": "...", "name": "degree.pdf"}]`.
+A file uploaded first with `/documents/upload_documents` and sent as
+`{"document_id", "name"}` must exist and passes the same type and size check.
+To keep a saved file send it back as it was read. The registry keeps the file
+only: a certificate's issuer, dates and verification stay in DA Services, so
+send a certificate only once DA Services has verified it, and name the file
+after the certificate.
+
+**Dependents** have no status in the registry; send one once DA Services has
+approved it.
+
+**Photo**: upload the image first (`POST /documents/upload_documents`, bucket
+`documents`; PNG, JPG or WEBP up to 5 MB) and send the returned `document_id`
+as `record_image_document_id` on `da_identity_section_01` (a save or a change
+request). `null` removes the photo. Reads return a short-lived link in
+`record_image_url`.
+
+**The record's one-value fields** `education_level` and `passout_year` still
+exist (search, filters, DA Services reads). The registry fills them from the
+person's main education record: the one with the latest passout year. A file
+import or a push that sends one of each creates the first education record
+from them.
+
+An education record no longer carries `position`, `specialisation` or
+`joined_date`: a person holds one position, so they are fields of the record
+itself (§2.3c). Until 17 Nov 2026 they were sent with each education record.
+
+### 2.3c Position and reporting
+
+One entry per person, saved on `da_service_section_02` with the DA register's
+own id as `section_register_id` (like the contact section):
+
+| Field | Rule |
+|---|---|
+| **`position`** | A `DA_POSITION` code. Required. |
+| `specialisation` | A `DA_SPECIALISATION` code. **Required** when the position is `DEVELOPMENT_AGENT` or `SENIOR_DA`. For any other position the form hides it and the registry empties it. |
+| `joined_date` | `YYYY-MM-DD`, not in the future. Optional. |
+| `reports_to` | The DA-ID of the person this one reports to, for example `DA-4071727521`. **Required** for every position but `ADMIN`, on a form, in a file import and in a push: a file row or a push without it, or with a DA-ID no one has, is refused and stays in the exceptions list (§4 of the push contract); it does not go to approval. For `ADMIN` the registry empties it. |
+
+**Who may give a position.** For now any position may be given and changed
+through the form, a file import or a push. Rules that keep the positions above
+Senior DA to an administrator, and keep a development agent from changing their
+own position, exist and will be switched on later
+(`docs/rbac-registry-roles.md` section 6). In self-service for a development
+agent, do not send `position` or `reports_to` already now.
+
+`reports_to` must be the DA-ID exactly as the register has it, of an **active**
+record, and not the person's own:
+
+- `Reports to: no one in the register has the ID DA-0000000000. Choose the person from the list.`
+- `Reports to: DA-… is no longer active in the register. Choose another person.`
+- `Reports to: a person cannot report to themselves. Choose another person.`
+
+The registry stores the DA-ID only. To show the person's name and position,
+look the DA-ID up (§4): `search_text` = the DA-ID, take the item whose
+`functional_record_id` is that DA-ID; its `record_name` is the name and its
+`display_fields` hold the position code. To list the people someone may
+report to, use the same search with `"filter_by": "{\"position\": {\"eq\": \"SUPERVISOR\"}}"`.
+
 ### 2.4 Submit for approval
 
 ```
@@ -294,8 +391,9 @@ the registry opens an approval request (`awe_request_id`). There is no DA-ID yet
 
 A submission with a section missing, or a required field still empty in any
 section, is refused: `Cannot submit for approval. Required: Phone Number,
-Email, Education Level, Specialisation, Position, Region / Zone / Woreda /
-Kebele` (whatever is missing). Save every section first.
+Email, Region / Zone / Woreda / Kebele` (whatever is missing). A submission
+of a development agent or a senior DA with no education record is refused with
+`Education: add at least one row`. Save every section first.
 
 To read a submission at any time:
 
@@ -457,6 +555,7 @@ codes, not names: 23 Woreda names and 790 Kebele names repeat.
 ```
 "filter_by": "{\"woreda_code\": {\"eq\": \"ET010101\"}}"
 "filter_by": "{\"woreda_code\": {\"in\": [\"ET010101\", \"ET010102\"]}}"
+"filter_by": "{\"kebele_code\": {\"eq\": \"ET010101101001\"}}"
 "filter_by": "{\"geo_lowest_level_value_id\": {\"eq\": \"kebele-ET010101101001\"}}"
 "filter_by": "{\"last_approved_at\": {\"gte\": \"2026-10-27\"}}"
 "filter_by": "{\"woreda_code\": {\"eq\": \"ET010101\"}, \"last_approved_at\": {\"gte\": \"2026-10-27\"}}"
@@ -465,11 +564,17 @@ codes, not names: 23 Woreda names and 790 Kebele names repeat.
 | Field | Operators | Value |
 |---|---|---|
 | `region_code`, `zone_code`, `woreda_code` | `eq`, `in` | Master Data P-code (`ET01`, `ET0101`, `ET010101`) |
+| `kebele_code` | `eq`, `in` | Kebele code: its Master Data id without the `kebele-` prefix (`ET010101101001`); the same place as `geo_lowest_level_value_id` |
 | `geo_lowest_level_value_id` | `eq`, `in` | Kebele id from the Kebele picker (§2.2) |
 | `last_approved_at` | `gt`, `gte`, `lt`, `lte`, `between` | ISO date; **compared by day**, the time part is ignored |
 | `record_status` | `eq`, `in` | `ACTIVE` (default when absent), `INACTIVE`, `ARCHIVED` |
 | `first_name`, `foundational_id`, `mobile_number`, `region_name`, `woreda_name`, `kebele_name` | `eq`, `contains` | text |
 | `education_level`, `specialisation`, `position`, `source` | `eq`, `in` | the dropdown codes |
+
+Every record (`get_subject_record`, the list) carries the four codes
+`region_code`, `zone_code`, `woreda_code` and `kebele_code`. Kebeles have no
+P-code in Master Data, so `kebele_code` is the Kebele's id without its prefix.
+Do not derive a Woreda from a Kebele code.
 
 Two platform behaviours to code for:
 
@@ -511,6 +616,12 @@ fields that change, in the section they belong to (§2.1); a Kebele transfer
 is the location section with a new `geo_lowest_level_value_id` and
 `geo_code_hierarchy_json`. The same field rules apply as on the form, including
 the Fayda ID check.
+
+An education record or a dependent is a change request on its
+list section (§2.3b): `section_id` and `section_register_id` of the list,
+`internal_record_id` of the DA, and in `change_payload` the record with
+`edit_action` `ADD` (with `link_internal_record_id` = the DA),
+`UPDATE` or `DELETE` (with the record's own `internal_record_id`).
 
 Response (trimmed):
 

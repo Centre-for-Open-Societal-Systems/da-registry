@@ -21,10 +21,15 @@ class G2PSchemaDA:
     telegram_number: Optional[str] = None
     alternate_number: Optional[str] = None
     email: Optional[str] = None
+    # Home address, one line. The platform's own column; its register and intake
+    # schemas do not carry it, so it is declared here.
+    address_line_1: Optional[str] = None
 
     specialisation: Optional[str] = None
     position: Optional[str] = None  # a DA_POSITION code from Master Data
     joined_date: Optional[date] = None
+    passout_year: Optional[int] = None
+    reports_to: Optional[str] = None  # DA-ID of the person this one reports to
     source: Optional[str] = None  # a DA_SOURCE code from Master Data
 
     upstream_reference: Optional[str] = None
@@ -38,6 +43,7 @@ class G2PSchemaDA:
     region_code: Optional[str] = None
     zone_code: Optional[str] = None
     woreda_code: Optional[str] = None
+    kebele_code: Optional[str] = None
 
 
 class G2PRegisterSchemaDA(G2PRegisterBaseSchema, G2PPersonSchema, G2PGeoSchema, G2PSchemaDA):

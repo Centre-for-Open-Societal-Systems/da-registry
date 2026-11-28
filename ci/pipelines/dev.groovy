@@ -25,8 +25,8 @@ def call() {
             AWS_ACCOUNT_ID = "379220350808"
             AWS_REGION     = "ap-south-1"
             ECR_REGISTRY   = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
-            // One ECR repository per component: openg2p/da-registry/<component>.
-            ECR_BASE       = "openg2p/da-registry"
+            // Every image: eoan/da-registry/<component>-<RP version>:<version>-<branch>.<build>, named by
+            // ci/image_names.py (version from init.yaml, RP version from helm/openg2p-da-registry/Chart.yaml).
 
             // Must match ARG RP_VERSION in the component Dockerfiles
             // and "platformVersion" in ci/deploy/oan-chart.json (the pinned chart's openg2p-registry).
@@ -56,15 +56,12 @@ def call() {
             }
 
             stage('Check deploy script') {
-                // Rollback behaviour and the pin updater, with stand-in helm/kubectl:
-                // no network, no cluster.
+                // ci/validate.sh, the checks GitHub runs too: every test in test/ (rollback behaviour and the pin
+                // updater with stand-in helm/kubectl, image names and ECR settings, the sample-approver hook, the
+                // reporting views, the sample loader), with no network or cluster. In the pinned Python image the
+                // chart's hook Jobs use, before any image is built.
                 steps {
-                    sh 'python3 -m unittest discover -s test -p "test_deploy_ci.py" -v'
-                    // Sample-approver password hook against a fake Keycloak (stdlib only, no network).
-                    sh 'python3 -m unittest discover -s test -p test_sample_approver_password.py -v'
-                    // Sample loader (sign-in, approvals, retries) against stand-ins, no cluster: pytest in the
-                    // pinned Python image the chart's hook Jobs use, before the db-seed image is built.
-                    sh 'docker run --rm -v "$PWD:/work:ro" -w /work python:3.11.14-slim sh -c "pip install -q --root-user-action=ignore --disable-pip-version-check pytest==8.3.4 && python -B -m pytest -q -p no:cacheprovider test/test_sample_loader.py"'
+                    sh 'docker run --rm -e PYTHONDONTWRITEBYTECODE=1 -v "$PWD:/work:ro" -w /work python:3.11.14-slim sh -c "pip install -q --root-user-action=ignore --disable-pip-version-check pytest==8.4.2 ruff==0.17.2 PyYAML==6.0.2 Jinja2==3.1.6 && bash ci/validate.sh"'
                 }
             }
 
@@ -83,7 +80,8 @@ def call() {
                 environment { DOCKER_CONFIG = "${env.WORKSPACE}/.docker-${env.BUILD_TAG}" }
                 steps {
                     script {
-                        env.IMAGE_TAG = env.GIT_COMMIT.take(12)
+                        env.IMAGE_TAG = sh(returnStdout: true,
+                            script: 'python3 ci/image_names.py tag "$BRANCH_NAME" "$BUILD_NUMBER"').trim()
 
                         // Build the same component Dockerfiles that docker compose
                         // uses, so CI ships what developers run.
@@ -93,35 +91,47 @@ def call() {
                             [name: 'partner-api', dockerfile: 'docker/partner-api/Dockerfile', args: "--build-arg RP_VERSION=${RP_VERSION}"],
                             [name: 'celery',      dockerfile: 'docker/celery/Dockerfile',      args: "--build-arg RP_VERSION=${RP_VERSION}"],
                             [name: 'db-seed',     dockerfile: 'docker/db-seed/Dockerfile',     args: "--build-arg RP_VERSION=${RP_VERSION}"],
+                            [name: 'sanity-tests', dockerfile: 'docker/sanity-tests/Dockerfile', args: "--build-arg RP_VERSION=${RP_VERSION}"],
                         ]
 
                         // The ECR digest of each image, for the stage 'Package chart': read from the
-                        // push output, so no extra AWS permission is needed. component<TAB>sha256:...
+                        // push output, so no extra AWS permission is needed. component<TAB>repository<TAB>sha256:...
                         sh 'mkdir -p .build && rm -f .build/image-digests.tsv'
 
-                        // Each environment branch also moves a tag of its own name.
-                        def movingTag = (env.BRANCH_NAME in ['develop', 'staging', 'main']) ? env.BRANCH_NAME : null
+                        // ECR does not create repositories on push, a new platform version is a new repository name, and
+                        // every eoan repository has immutable tags, scan on push, AES256 and the owner and naming tags:
+                        // ci/ecr_repository.py creates a missing one and corrects an existing one, printing each change.
+                        // Tags are immutable, so a version is pushed once and there is no moving tag (no <branch> tag).
                         components.each { c ->
-                            def image  = "${ECR_REGISTRY}/${ECR_BASE}/${c.name}:${env.IMAGE_TAG}"
-                            def latest = movingTag ? "${ECR_REGISTRY}/${ECR_BASE}/${c.name}:${movingTag}" : null
-                            // On-demand agents start with an empty Docker cache: reuse layers from the branch
-                            // tag in ECR (develop for other branches), which carries inline cache metadata.
-                            def cacheFrom = "${ECR_REGISTRY}/${ECR_BASE}/${c.name}:${movingTag ?: 'develop'}"
+                            def repository = sh(returnStdout: true, script: "python3 ci/image_names.py repository ${c.name}").trim()
+                            def legacy = sh(returnStdout: true, script: "python3 ci/image_names.py legacy ${c.name}").trim()
+                            def image  = "${ECR_REGISTRY}/${repository}:${env.IMAGE_TAG}"
+                            withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-ecr-creds']]) {
+                                sh "python3 ci/ecr_repository.py ensure ${repository} ${legacy}"
+                            }
                             sh """
-                                docker build --build-arg BUILDKIT_INLINE_CACHE=1 --cache-from ${cacheFrom} ${c.args} \
-                                    -f ${c.dockerfile} -t ${image} ${latest ? "-t ${latest}" : ''} .
+                                docker build ${c.args} -f ${c.dockerfile} -t ${image} .
                                 docker push ${image} > .build/push-${c.name}.log 2>&1 || { cat .build/push-${c.name}.log; exit 1; }
                                 cat .build/push-${c.name}.log
                                 d=\$(grep -oE 'digest: sha256:[0-9a-f]{64}' .build/push-${c.name}.log | tail -n 1 | cut -d' ' -f2)
                                 case "\$d" in sha256:*) ;; *) echo "no digest in the push output of ${c.name}" >&2; exit 1 ;; esac
-                                printf '%s\\t%s\\n' "${c.name}" "\$d" >> .build/image-digests.tsv
-                                ${latest ? "docker push ${latest}" : ''}
+                                printf '%s\\t%s\\t%s\\n' "${c.name}" "${repository}" "\$d" >> .build/image-digests.tsv
                             """
                         }
                     }
                 }
             }
 
+            stage('Checks green') {
+                // Nothing reaches New Dev unless every GitHub check of this commit passed (ci/deploy/require-green-checks.sh).
+                // The images were built meanwhile; a red or still-pending commit stops here.
+                when { allOf { branch 'develop'; not { changeRequest() } } }
+                steps {
+                    withCredentials([usernamePassword(credentialsId: "${OAN_HELM_FORK_CRED_ID}", usernameVariable: 'GH_USER', passwordVariable: 'GH_TOKEN')]) {
+                        sh 'bash ci/deploy/require-green-checks.sh Centre-for-Open-Societal-Systems/da-registry "$(git rev-parse --verify HEAD)"'
+                    }
+                }
+            }
             stage('Package chart') {
                 // helm/openg2p-da-registry with this build's images. The deploy installs this archive and
                 // 'Publish chart' publishes the same one, so what runs on New Dev is what oan-helm lists.
@@ -172,6 +182,23 @@ def call() {
         post {
             failure {
                 echo "DA registry ${env.BRANCH_NAME} build/deploy failed. A failed deploy is rolled back automatically; see the archived deploy-failure-${env.BUILD_NUMBER}.txt and 'helm history da-registry -n da-registry'."
+                script {
+                    // Mail the DevOps list and the commit author, as Farmer's pipelines do; a controller without SMTP
+                    // must not hide the failure.
+                    try {
+                        def author = ''
+                        try { author = sh(script: "git log -1 --pretty=format:'%ae'", returnStdout: true).trim() } catch (ignored) { author = '' }
+                        def recipients = ['simretyibeltal@gmail.com', 'pavanns.ns@gmail.com']
+                        if (author && !author.contains('noreply')) { recipients = [author] + recipients }
+                        mail(
+                            to: recipients.unique().join(', '),
+                            subject: "Build FAILED: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+                            body: "DA Registry develop build or deploy failed.\n\nJob:     ${env.JOB_NAME}\nBranch:  ${env.BRANCH_NAME}\nBuild:   #${env.BUILD_NUMBER}\nURL:     ${env.BUILD_URL}\nConsole: ${env.BUILD_URL}console\n\nJenkins"
+                        )
+                    } catch (err) {
+                        echo "notification not sent: ${err.message}"
+                    }
+                }
             }
             always {
                 sh 'docker image prune -f || true'

@@ -49,7 +49,30 @@ Removed 29 Oct 2026: the celery worker NullPool engine (a 12-row import measured
 | R4 | `staff_api/da_ingest_status_controller.py`, `register_domain/services/push_status.py`, `exceptions.py` | ingestion tables `incoming_raw_data`, `incoming_classified_data`, `incoming_enriched_transformed_data`, `g2p_intake_form_submissions` read by SQL; staff API `RequestResponseHelper` and `iam_core` `require_permissions` | staff API `POST /da/get_push_status` and `/da/search_exceptions` for DA Services (permission `incomingMessage:view`) |
 | R5 | `temporary_platform_overrides.py`, `import_approval_workflow.py` | `openg2p_registry_core.config.Settings` prefixes (`REGISTRY_STAFF_PORTAL_API_`, `REGISTRY_PARTNER_API_`, `REGISTRY_CELERY_WORKERS_`) and rc.557 setting names (`..._DCI_ALLOWED_SEARCH_FIELDS`, `..._VALIDATE_ATTRIBUTE_VALUES`, `..._AWE_*`, `..._MASTER_DATA_*`) | configuration; rc.544 → rc.557 already renamed one of them (`DCI_EXPRESSION_ALLOWED_FIELDS`) |
 | R6 | `meta_data/`, `awe_meta_data/` seeds | platform tables and the register-metadata JSON shapes (`widget-data-source` type `api` / service `attributes`, `filter_schema`, `search_result_schema`), AWE tables `approval_policy` / `approval_stage` / `approver_rule` | configuration; every INSERT has `ON CONFLICT` so a re-seed on a new platform is safe |
-| R7 | `ui/staff-ui/` | upstream staff-ui pinned by commit in `deps.json`; `overrides/` is empty | no UI override today. Known platform-UI issue, not fixed here: Next on a section with nothing entered makes no request but shows "Saved"; the server refuses the incomplete save/submit, so no bad data |
+| R7 | `ui/staff-ui/` | upstream staff-ui pinned by commit in `deps.json`; `overrides/` adds OAN's widgets and metadata keys (section 3b) | Known platform-UI issue, not fixed here: Next on a section with nothing entered makes no request but shows "Saved"; the server refuses the submit |
+
+## 3b. Staff UI widgets and metadata keys of OAN's own (deviations to accept)
+
+The upstream staff UI renders a widget by its `widget` type from its registry
+and reads the standard `widget-*` keys. Where the DA form needs something the
+platform has no widget or key for, `ui/staff-ui/overrides/src/oan/widgets/`
+registers one of OAN's own (`register.ts`), and the metadata carries a key of
+OAN's own. The API reads the same keys, so a rule holds whatever client sends
+the data. Each row is a deviation from the stock platform, listed here so it
+can be accepted or replaced.
+
+| # | Widget / key | Where | What it does | Why the stock platform is not enough | Upstream candidate |
+|---|---|---|---|---|---|
+| U1 | widget `oan-reports-to`, key `oan-lookup` | `ReportsToWidget.tsx`, `85_position_and_reporting.sql`; API `_validate_reports_to` | "Reports to": pick a person from a paged, searchable list of the register (10 a page, filter by position), with their name and position shown | `register-lookup` / `parent-lookup` link a child register to its parent and show no position filter or person details | a register-lookup with search, a filter and display fields |
+| U2 | widget `oan-select-by-right`, keys `oan-value-rights`, `oan-change-roles` | `SelectByRightWidget.tsx`, `position_rights.py` | a select offering some values only to users with a permission | the stock select has no per-value permission | permissions on select options. Both keys are off in the metadata today (85 header) |
+| U3 | widget type `geo-hierarchy` registered over upstream's, key `oan-location-depth` | `GeoByPositionWidget.tsx`, `95_work_location.sql`; API `location_depth.py`, `required_fields.py` | Work location down to the level the position needs (Kebele / Woreda / none), clearing what a new position does not take | the stock geo widget has no "down to level" option, and its show / hide / require rules keep only the last of several, so a rule over more than one value cannot be written | a "lowest level" option on the geo widget, and rules that combine |
+| U4 | U3's way of hiding the levels | `GeoByPositionWidget.tsx` | the boxes below the position's level are hidden with CSS (`nth-child` under `.GeoHierarchyWidget`) and the required star is added with CSS | the stock widget renders every level and is either required to the last level or not required at all | goes with U3; breaks if upstream changes the widget's markup (re-check on upgrade) |
+| U5 | widget `oan-file-list-cell`, key `oan-file-rules`; `dialog-table` registered over upstream's | `FileListCellWidget.tsx`, `RecordFilesTableWidget.tsx`, `80_qualification_list.sql`; API `g2p_register_domain_service_qualification.py` | several certificates in one table cell, with type and size limits, listed with a View button | the table's popup drops `widget-data-options` for its cells, and a cell holds one file | file limits on table cells |
+| U6 | `header-section` registered over upstream's, `widget-variant: oan-profile-photo` | `ProfilePhotoWidget.tsx`, `60_profile_photo.sql` | the profile photo with its upload rules | upstream uploads a section's photo only for `header-section` | a photo widget |
+| U7 | key `oan-optional-on-import` | `required_fields.py` | a field required on the form, optional in a file import or a push | the metadata has one required flag for every channel | not used by DA today |
+
+On every platform version bump, open the DA form and check U1 to U6 (the
+re-check list in section 4, step 4).
 
 ## 4. Re-check on upgrade
 

@@ -23,6 +23,8 @@ COPY da-extension/src/openg2p_registry_da_extension/meta_data/ /seed/meta_data/
 COPY da-extension/src/openg2p_registry_da_extension/awe_meta_data/ /seed/awe_meta_data/
 COPY da-extension/src/openg2p_registry_da_extension/templates/ /seed/templates/
 COPY docker/db-seed/load_sample_data.py /seed/load_sample_data.py
+# The da_rpt_* reporting views, applied by the chart's reporting-views hook.
+COPY docker/db-seed/reporting_views.sql /seed/reporting_views.sql
 # OAN theme: the staff-portal theme (palette and background image) is data in
 # openg2p-data (themes/oan_theme), rendered from the same pinned checkout into
 # the seed tree; it runs after the registry configuration and points it at oan_theme.
